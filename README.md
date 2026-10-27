@@ -1,4 +1,4 @@
-# ZFO na Macu
+# Blanketa
 
 Aplikace pro macOS na vyplňování a elektronické podepisování:
 - **formulářů 602XML (`.zfo`)**, které jinak otevře jen Software602 Form Filler pro Windows (např. ČÚZK návrh na vklad, formuláře ČSSZ a krajů);
@@ -40,8 +40,8 @@ Technický popis formátu ZFO: [docs/zfo-format.md](docs/zfo-format.md).
 ## Architektura
 
 ```
-build/ZFO na Macu.app
-├─ MacOS/ZFO na Macu      Swift (macapp/main.swift): okna s WKWebView, menu, tisk, dialogy
+build/Blanketa.app
+├─ MacOS/Blanketa      Swift (macapp/main.swift): okna s WKWebView, menu, tisk, dialogy
 └─ Resources/
    ├─ zfo-server/         Python (app.py) zabalený PyInstallerem; jeden proces na okno, lokální HTTP
    └─ macsign             Swift (macsign/macsign.swift): seznam identit, podpis a důvěra přes Security.framework
@@ -70,7 +70,7 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 ./build.sh
 ```
 
-Výsledek je `build/ZFO na Macu.app`, podepsaná ad hoc (bez notarizace). Na jiném Macu je ji proto poprvé potřeba otevřít přes pravé tlačítko → Otevřít.
+Výsledek je `build/Blanketa.app`, podepsaná ad hoc (bez notarizace). Na jiném Macu je ji proto poprvé potřeba otevřít přes pravé tlačítko → Otevřít.
 
 ## Vývoj
 
@@ -98,7 +98,7 @@ Testy enginu:
 tools/make-test-pki.sh
 ```
 
-Skript vytvoří v `pki/` nedůvěryhodnou testovací CA, podpisový certifikát a klíčenku `pki/test.keychain-db` s heslem `test`. Aplikace tuto identitu nabízí s označením „(TEST)“. Sestavená aplikace ji hledá v `~/Library/Application Support/ZFO na Macu/test.keychain-db`. Pro skutečné podání je potřeba kvalifikovaný certifikát v klíčence nebo na tokenu.
+Skript vytvoří v `pki/` nedůvěryhodnou testovací CA, podpisový certifikát a klíčenku `pki/test.keychain-db` s heslem `test`. Aplikace tuto identitu nabízí s označením „(TEST)“. Sestavená aplikace ji hledá v `~/Library/Application Support/Blanketa/test.keychain-db`. Pro skutečné podání je potřeba kvalifikovaný certifikát v klíčence nebo na tokenu.
 
 ## Omezení
 

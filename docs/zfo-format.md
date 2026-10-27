@@ -1,6 +1,6 @@
 # Formát ZFO (Software602 602XML Form)
 
-Technický popis formátu tak, jak jsme ho poznali při stavbě aplikace „ZFO na Macu“.
+Technický popis formátu tak, jak jsme ho poznali při stavbě aplikace „Blanketa“.
 
 Software602 formát veřejně nepopisuje. Vše níže vychází z rozboru skutečných formulářů a z vyplnění a podpisu ve Form Filleru na Windows. Ověřeno bylo i opačným směrem: soubory vytvořené touto aplikací Form Filler otevřel a podpis uznal. Kde jde o odhad, je to výslovně uvedeno.
 

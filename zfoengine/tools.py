@@ -15,7 +15,7 @@
 #*    License along with this library; if not, write to the Free
 #*    Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301  USA
 #*
-#*    Modified in October 2026 by Richard Winkler Bejr for "ZFO na Macu": ported to Python 3,
+#*    Modified in October 2026 by Richard Winkler Bejr for "Blanketa": ported to Python 3,
 #*    separated from the GTK user interface and extended (recalculation, form check, default
 #*    values); the git history of the project records each change.
 

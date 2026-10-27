@@ -1,4 +1,4 @@
-// "ZFO na Macu": opens .zfo forms in a window. Each window runs the bundled zfo-server
+// "Blanketa": opens .zfo (602XML) and PDF forms in a window. Each window runs the bundled zfo-server
 // (Python, see app.py) for its file and shows it in a WKWebView.
 import AppKit
 import PDFKit
@@ -25,7 +25,7 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
         webView.uiDelegate = self
         // Swift owns the window; AppKit's own release on close would free it a second time.
         window.isReleasedWhenClosed = false
-        window.title = file?.lastPathComponent ?? "ZFO na Macu"
+        window.title = file?.lastPathComponent ?? "Blanketa"
         window.representedURL = file
         window.contentView = webView
         window.delegate = self
@@ -257,7 +257,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let main = NSMenu()
         let appItem = NSMenuItem()
         appItem.submenu = NSMenu()
-        appItem.submenu!.addItem(withTitle: "Ukončit ZFO na Macu", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appItem.submenu!.addItem(withTitle: "Ukončit Blanketu", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         let fileItem = NSMenuItem()
         fileItem.submenu = NSMenu(title: "Soubor")
         fileItem.submenu!.addItem(withTitle: "Otevřít…", action: #selector(openDocument(_:)), keyEquivalent: "o")

@@ -1,9 +1,9 @@
 #!/bin/bash
-# Builds "ZFO na Macu.app" into build/: Swift shell + bundled Python server + macsign.
+# Builds "Blanketa.app" into build/: Swift shell + bundled Python server + macsign.
 set -euo pipefail
 cd "$(dirname "$0")"
 V=vendor/zfo-editor-src/zfo-editor-0.3.2
-APP="build/ZFO na Macu.app"
+APP="build/Blanketa.app"
 
 .venv/bin/pyinstaller --noconfirm --clean --log-level WARN --onedir --name zfo-server \
   --distpath build/dist --workpath build/work --specpath build \
@@ -13,12 +13,12 @@ APP="build/ZFO na Macu.app"
   --collect-submodules zfoengine --hidden-import lxml._elementpath app.py
 
 swiftc -O -suppress-warnings macsign/macsign.swift -o macsign/macsign
-swiftc -O -suppress-warnings macapp/main.swift -o build/zfo-na-macu
+swiftc -O -suppress-warnings macapp/main.swift -o build/blanketa
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp macapp/Info.plist "$APP/Contents/Info.plist"
-cp build/zfo-na-macu "$APP/Contents/MacOS/ZFO na Macu"
+cp build/blanketa "$APP/Contents/MacOS/Blanketa"
 cp macsign/macsign "$APP/Contents/Resources/macsign"
 cp -R build/dist/zfo-server "$APP/Contents/Resources/zfo-server"
 # LGPL: licence texts and the source of the modified library travel with the app.

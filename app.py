@@ -26,7 +26,7 @@ EDITOR = RESOURCES / "vendor/zfo-editor-src/zfo-editor-0.3.2"
 PDFJS = RESOURCES / "vendor/pdfjs"
 DS = "http://www.w3.org/2000/09/xmldsig#"
 XSLT = etree.XSLT(etree.parse(str(RESOURCES / "ui/fo2html.xsl")))
-APP_SUPPORT = Path.home() / "Library/Application Support/ZFO na Macu"
+APP_SUPPORT = Path.home() / "Library/Application Support/Blanketa"
 TEST_KEYCHAIN = Path(os.environ.get("ZFO_TEST_KEYCHAIN",
                                     APP_SUPPORT / "test.keychain-db" if hasattr(sys, "_MEIPASS")
                                     else ROOT / "pki/test.keychain-db"))

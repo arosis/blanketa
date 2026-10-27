@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>ZFO na Macu</string>
+	<string>Blanketa</string>
 	<key>CFBundleDisplayName</key>
-	<string>ZFO na Macu</string>
+	<string>Blanketa</string>
 	<key>CFBundleIdentifier</key>
 	<string>io.github.arosis.blanketa</string>
 	<key>CFBundleExecutable</key>
-	<string>ZFO na Macu</string>
+	<string>Blanketa</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
