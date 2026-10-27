@@ -1,0 +1,49 @@
+----------------------
+Instalace ZFO editoru
+----------------------
+
+Tento dokument popisuje instalaci ZFO editoru přímo ze zdrojových kódů.
+
+
+Instalace programu
+-------------------
+
+ZFO editor používá pro instalaci standardní modul setuptools. Samotná instalace
+programu tedy sestává z jediného příkazu:
+
+>> python setup.py install
+
+Tento příkaz provede instalaci do systémových adresářů a je tedy třeba ho spouštět
+jako root. V případě, že chcete program nainstalovat do uživatelského adresáře,
+doplňte příkaz o přepínač --user, tedy:
+
+>> python setup.py install --user
+
+Program se pak nainstaluje do adresářů v rámci ~/.local/
+
+
+Doplňkové kroky
+-----------------
+
+Pokud chcete po instalaci programu provést také asociaci zfo souborů s editorem,
+je třeba ručně provést následující kroky jako root:
+
+1/ Zaregistrovat mime-type pro zfo soubory:
+   >> xdg-mime install software602-zfo.xml
+   
+2/ Nahrát odpovídající desktop soubor do adresáře /usr/share/applications
+   >> cp zfo-editor.desktop /usr/share/application
+   >> update-desktop-database
+ 
+
+Instalace na Mac OS X
+----------------------
+
+V Mac OS X je třeba nainstalovat závislosti programu pomocí ports
+(port install ...). Závislosti jsou následující:
+
+ * py26-webkitgtk
+ * py26-lxml
+
+Všechny ostatní závislosti by se měly nainstalovat automaticky jako závislosti
+předchozích balíčků.

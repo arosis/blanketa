@@ -1,0 +1,7 @@
+ZFO editor/GTK
+--------------
+
+ZFO editor/GTK je ZFO editor bezici v prostredi GTK.
+K jeho spusteni je potrebne nainstalovat python-webkit a python-lxml.
+
+Instalace je popsana v souboru INSTALL.

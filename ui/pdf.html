@@ -1,0 +1,373 @@
+<!doctype html>
+<!-- PDF forms: PDF.js shows and fills the document inside the same application chrome as the ZFO forms.
+     Placeholders: __SHELL_STYLE__ __SESSION__ __FILE__ __SIGNATURES__ __INFO__ -->
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title></title>
+__SHELL_STYLE__
+<link rel="stylesheet" href="/pdfjs/web/pdf_viewer.css">
+<style>
+  .zfo-stage { overflow: hidden; }
+  #viewerContainer { position: absolute; inset: 0; overflow: auto; }
+  .pdfViewer { --page-margin: 24px auto; --page-border: 0; padding-bottom: 24px; }
+  .pdfViewer .page { box-shadow: 0 1px 3px rgba(0, 0, 0, .12), 0 8px 28px rgba(0, 0, 0, .10); }
+  .annotationLayer .textWidgetAnnotation :is(input, textarea), .annotationLayer .choiceWidgetAnnotation select,
+  .annotationLayer .buttonWidgetAnnotation:is(.checkBox, .radioButton) input { background-color: rgba(10, 100, 214, .08); }
+  .annotationLayer .textWidgetAnnotation :is(input, textarea):focus { background-color: rgba(10, 100, 214, .14); }
+  .zfo-sign-mode { border: 0; padding: 0; margin: 0 0 16px; display: grid; gap: 8px; }
+  .zfo-dialog .zfo-sign-mode label { display: flex; align-items: center; gap: 8px; font-weight: 400; }
+  body.zfo-placing .pdfViewer .page { cursor: crosshair; }
+  body.zfo-placing :is(.annotationLayer, .textLayer) { pointer-events: none; }
+  .zfo-place-box { position: absolute; z-index: 10; border: 2px dashed var(--accent); background: rgba(10, 100, 214, .1);
+    border-radius: 3px; pointer-events: none; }
+</style>
+</head>
+<body class="zfo-app help-hidden">
+
+<header class="zfo-bar">
+  <div class="zfo-group">
+    <button class="zfo-btn icon" data-action="open" data-native hidden title="Otevřít dokument (⌘O)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1H3z"/><path d="M3 10h18l-2 9H5z"/></svg>
+    </button>
+    <span class="zfo-menu-anchor">
+      <button class="zfo-btn primary" data-menu="save" title="Uložit dokument bez podpisu nebo s podpisem">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 3h11l3 3v15H5z"/><path d="M8 3v5h7V3M8 21v-7h8v7"/></svg>Uložit
+        <svg class="zfo-caret" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m3 4.5 3 3 3-3"/></svg>
+      </button>
+      <div class="zfo-menu" data-menu-list="save" hidden>
+        <button data-action="save-plain">Uložit bez podpisu<kbd>⌘S</kbd></button>
+        <button data-action="save">Podepsat a uložit…<kbd>⇧⌘S</kbd></button>
+      </div>
+    </span>
+    <button class="zfo-btn icon" data-action="print" title="Tisk nebo uložení do PDF (⌘P)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="1.5"/><path d="M7 14h10v7H7z"/></svg>
+    </button>
+  </div>
+  <div class="zfo-group">
+    <button class="zfo-btn icon" data-action="reset" title="Obnovit hodnoty z uloženého souboru">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4h4"/></svg>
+    </button>
+  </div>
+  <div class="zfo-group">
+    <button class="zfo-btn icon" data-action="zoom-out" title="Zmenšit (⌘−)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M8 11h6M16.5 16.5 21 21"/></svg></button>
+    <span class="zfo-zoom">100 %</span>
+    <button class="zfo-btn icon" data-action="zoom-in" title="Zvětšit (⌘+)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M8 11h6M11 8v6M16.5 16.5 21 21"/></svg></button>
+    <button class="zfo-btn icon" data-action="zoom-fit" title="Přizpůsobit šířce okna">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="5" y="3" width="14" height="18" rx="1.5"/><path d="M2 12h4M18 12h4M4 10l-2 2 2 2M20 10l2 2-2 2"/></svg>
+    </button>
+  </div>
+  <div class="zfo-spacer"></div>
+  <div class="zfo-group">
+    <button class="zfo-btn icon active" data-action="panel" title="Informace o dokumentu a podpisech (⌥⌘2)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 3h9l4 4v14H6z"/><circle cx="12" cy="13" r="3"/><path d="M10.5 15.5 10 20l2-1 2 1-.5-4.5"/></svg>
+    </button>
+  </div>
+</header>
+
+<main class="zfo-stage">
+  <div id="viewerContainer"><div id="viewer" class="pdfViewer"></div></div>
+</main>
+
+<aside class="zfo-panel">
+  <h2>Informace <button class="zfo-close" data-action="panel" title="Skrýt panel">✕</button></h2>
+  <h2>Dokument</h2>
+  <div class="zfo-info" data-info></div>
+  <h2>Elektronické podpisy</h2>
+  <div data-signatures></div>
+</aside>
+
+<footer class="zfo-status">
+  <span class="file">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4"/></svg>
+    <span data-file></span>
+  </span>
+  <span>·</span>
+  <span class="msg" data-status>Otevírám dokument…</span>
+</footer>
+
+<dialog class="zfo-dialog" data-sign-dialog>
+  <form method="dialog">
+    <h2>Podepsat a uložit</h2>
+    <p data-sign-text></p>
+    <fieldset class="zfo-sign-mode" data-sign-mode>
+      <label><input type="radio" name="mode" value="place" checked>Viditelný podpis – umístím ho na stránku</label>
+      <label><input type="radio" name="mode" value="invisible">Neviditelný podpis</label>
+    </fieldset>
+    <label>Certifikát<select class="zfo-cert" data-cert title="Certifikát pro podpis"></select></label>
+    <div class="zfo-dialog-buttons">
+      <button class="zfo-btn" value="cancel">Zrušit</button>
+      <button class="zfo-btn primary" value="sign">Podepsat a uložit</button>
+    </div>
+  </form>
+</dialog>
+
+<script type="module">
+  const SESSION = '__SESSION__';
+  const native = window.webkit?.messageHandlers?.app;
+  const $q = s => document.querySelector(s);
+  const status = $q('[data-status]');
+  const setStatus = (text, html) => { html ? (status.innerHTML = text) : (status.textContent = text); };
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+  $q('[data-file]').textContent = __FILE__;
+  if (native) $q('[data-native]').hidden = false;
+
+  // pdf_viewer.mjs picks up the library from the global it expects.
+  const pdfjsLib = await import('/pdfjs/build/pdf.min.mjs');
+  globalThis.pdfjsLib = pdfjsLib;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdfjs/build/pdf.worker.min.mjs';
+  const {PDFViewer, EventBus, PDFLinkService} = await import('/pdfjs/web/pdf_viewer.mjs');
+
+  const eventBus = new EventBus();
+  const linkService = new PDFLinkService({eventBus});
+  const viewer = new PDFViewer({
+    container: $q('#viewerContainer'), viewer: $q('#viewer'), eventBus, linkService,
+    annotationMode: pdfjsLib.AnnotationMode.ENABLE_FORMS, textLayerMode: 1,
+  });
+  linkService.setViewer(viewer);
+  let pdf, fieldObjects = {}, changed = false, autoFit = true;
+
+  const load = async () => {
+    pdf = await pdfjsLib.getDocument({
+      url: '/pdf?s=' + SESSION + '&t=' + Date.now(), standardFontDataUrl: '/pdfjs/standard_fonts/',
+      cMapUrl: '/pdfjs/cmaps/', cMapPacked: true,
+    }).promise;
+    viewer.setDocument(pdf);
+    linkService.setDocument(pdf);
+    fieldObjects = (await pdf.getFieldObjects()) ?? {};
+    changed = false;
+    pdf.annotationStorage.onSetModified = () => { changed = true; renderSignatures(); };
+    renderSignatures();
+  };
+  eventBus.on('pagesinit', () => { if (autoFit) viewer.currentScaleValue = 'page-width'; setStatus('Připraveno'); });
+  eventBus.on('scalechanging', e => { $q('.zfo-zoom').textContent = Math.round(e.scale * 100) + ' %'; });
+  new ResizeObserver(() => { if (autoFit && pdf) viewer.currentScaleValue = 'page-width'; }).observe($q('#viewerContainer'));
+
+  // Changed fields by full name, in the shape pdf_sign.fill takes: text, true/false for a checkbox,
+  // the chosen export value for a radio group, the selected option for a list.
+  const values = () => {
+    const result = {};
+    for (const [name, widgets] of Object.entries(fieldObjects)) {
+      for (const widget of widgets) {
+        const stored = widget.id && pdf.annotationStorage.getRawValue(widget.id);
+        if (!stored || !('value' in stored)) continue;
+        if (widget.type === 'radiobutton') {
+          if (stored.value) result[name] = widget.exportValues ?? widget.buttonValue;
+        } else if (widget.type === 'checkbox') {
+          result[name] = Boolean(stored.value);
+        } else if (['combobox', 'listbox'].includes(widget.type)) {
+          result[name] = Array.isArray(stored.value) ? stored.value[0] ?? '' : stored.value;
+        } else if (widget.type === 'text') {
+          result[name] = stored.value;
+        }
+      }
+    }
+    return result;
+  };
+
+  // Information panel.
+  const info = __INFO__;
+  $q('[data-info]').innerHTML = [
+    info.title && `<b>${esc(info.title)}</b>`,
+    info.author && `Autor: ${esc(info.author)}`,
+    `Stran: ${info.pages}`,
+    info.fields ? `Vyplnitelných polí: ${info.fields}` : 'Dokument nemá vyplnitelná pole.',
+  ].filter(Boolean).join('<br>');
+
+  const icons = {
+    ok: '<svg viewBox="0 0 24 24" fill="none" stroke="#1e8e3e" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>',
+    warn: '<svg viewBox="0 0 24 24" fill="none" stroke="#b26a00" stroke-width="2"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17v.5"/></svg>',
+    bad: '<svg viewBox="0 0 24 24" fill="none" stroke="#c5221f" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/></svg>',
+  };
+  const fmt = iso => iso ? new Date(iso).toLocaleString('cs-CZ', {dateStyle: 'medium', timeStyle: 'short'}) : '–';
+  const card = sig => {
+    const expired = new Date(sig.not_after) < new Date();
+    const level = !sig.intact ? 'bad' : (sig.trusted && !expired && !sig.modified) ? 'ok' : 'warn';
+    const state = !sig.intact ? 'Podpis je porušen – podepsaný obsah byl změněn'
+      : sig.modified ? 'Podepsaná verze je neporušená, ale po podpisu se změnilo víc než vyplněná pole'
+      : sig.trusted ? 'Podpis je platný, certifikát je důvěryhodný'
+      : 'Obsah je neporušený, certifikát není hodnocen jako důvěryhodný';
+    return `<div class="zfo-card ${level}" title="${esc(sig.reason || '')}">
+      <div class="who">${icons[level]}${esc(sig.subject)}</div>
+      <div class="state">${state}</div>
+      <div class="meta">Podepsáno: ${fmt(sig.signed_at)}<br>Vystavil: ${esc(sig.issuer)}<br>
+        ${expired ? 'Platnost certifikátu skončila' : 'Certifikát platí do'} ${new Date(sig.not_after).toLocaleDateString('cs-CZ')}
+        ${sig.intact && !sig.covers_whole ? '<br>Po podpisu byla doplněna pole nebo další podpisy.' : ''}</div>
+    </div>`;
+  };
+  let signatures = __SIGNATURES__;
+  const renderSignatures = () => {
+    $q('[data-signatures]').innerHTML =
+      (changed && signatures.length ? '<div class="zfo-note">Vyplněné hodnoty se uloží jako dodatek; stávající podpisy zůstanou platné, pokud je dokument nezamyká.</div>' : '') +
+      (signatures.length ? signatures.map(card).join('') : '<div class="zfo-empty">Dokument zatím není podepsaný.</div>');
+  };
+
+  const certSelect = $q('[data-cert]');
+  fetch('/identities').then(r => r.json()).then(list => {
+    certSelect.innerHTML = list.length ? '<option value="">Vyber certifikát pro podpis…</option>'
+                                       : '<option value="">Žádný podpisový certifikát</option>';
+    for (const c of list) {
+      const o = document.createElement('option');
+      o.value = c.id;
+      o.textContent = (c.token ? '🔑 ' : '') + c.subject + (c.source === 'test' ? ' (TEST)' : '') + ' – do ' + c.not_after;
+      certSelect.append(o);
+    }
+    try { const last = localStorage.getItem('zfo-cert'); if (list.some(c => c.id === last)) certSelect.value = last; } catch {}
+  });
+
+  const savedStatus = (verb, path) => {
+    const reveal = native ? ' <a data-reveal>Zobrazit ve Finderu</a>' : '';
+    setStatus(`${verb} <b title="${esc(path)}">${esc(path.split('/').pop())}</b>${reveal}`, true);
+    $q('[data-reveal]')?.addEventListener('click', () => native.postMessage({action: 'reveal', path}));
+  };
+  const post = async (path, extra = '', more = {}) => {
+    // Leaving a text field commits its value to the annotation storage.
+    document.activeElement?.blur();
+    const res = await fetch(`${path}?s=${SESSION}${extra}`, {method: 'POST', body: JSON.stringify({values: values(), ...more})});
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  };
+  const saved = async (result, verb) => {
+    signatures = result.signatures;
+    signatureField = result.signature_field;
+    savedStatus(verb, result.saved);
+    $q('[data-file]').textContent = result.saved.split('/').pop();
+    await load();
+  };
+
+  // A form without an empty signature field gets a new one: drawn on the page by the user, or invisible.
+  let signatureField = info.signature_field;
+  const signMode = () => $q('[data-sign-mode] input:checked').value;
+  try { const mode = localStorage.getItem('zfo-sign-mode'); if (mode) $q(`[data-sign-mode] input[value="${mode}"]`).checked = true; } catch {}
+  const signWith = async placement => {
+    setStatus('Podepisuji… (token si může vyžádat PIN)');
+    try {
+      await saved(await post('/pdf-save', '&cert=' + encodeURIComponent(certSelect.value), {placement}), 'Podepsáno a uloženo jako');
+    } catch (e) { setStatus('Chyba: ' + e.message); }
+  };
+  let placing = null;
+  const stopPlacing = () => {
+    placing?.box?.remove();
+    placing = null;
+    document.body.classList.remove('zfo-placing');
+  };
+  const startPlacing = () => {
+    document.body.classList.add('zfo-placing');
+    placing = {};
+    setStatus('Tažením myši vyznačte na stránce místo pro podpis, klepnutím vložíte podpis běžné velikosti. Esc zruší.');
+  };
+  const pointIn = (page, e) => {
+    const rect = page.getBoundingClientRect();
+    return [Math.min(Math.max(e.clientX - rect.left, 0), rect.width), Math.min(Math.max(e.clientY - rect.top, 0), rect.height)];
+  };
+  $q('#viewer').addEventListener('pointerdown', e => {
+    const page = placing && e.target.closest('.page');
+    if (!page) return;
+    e.preventDefault();
+    const box = document.createElement('div');
+    box.className = 'zfo-place-box';
+    page.append(box);
+    Object.assign(placing, {page, box, start: pointIn(page, e)});
+    try { page.setPointerCapture(e.pointerId); } catch {}
+  });
+  $q('#viewer').addEventListener('pointermove', e => {
+    if (!placing?.box) return;
+    const [x, y] = pointIn(placing.page, e), [sx, sy] = placing.start;
+    Object.assign(placing.box.style, {left: Math.min(x, sx) + 'px', top: Math.min(y, sy) + 'px',
+                                      width: Math.abs(x - sx) + 'px', height: Math.abs(y - sy) + 'px'});
+  });
+  $q('#viewer').addEventListener('pointerup', e => {
+    if (!placing?.box) return;
+    const index = Number(placing.page.dataset.pageNumber) - 1;
+    const {viewport} = viewer.getPageView(index);
+    const end = pointIn(placing.page, e), start = placing.start;
+    stopPlacing();
+    let corners;
+    if (Math.abs(end[0] - start[0]) < 12 || Math.abs(end[1] - start[1]) < 12) {
+      // A click places a signature of the usual size (180 × 60 pt) centred on it.
+      const [x, y] = viewport.convertToPdfPoint(...end);
+      corners = [[x - 90, y - 30], [x + 90, y + 30]];
+    } else {
+      corners = [viewport.convertToPdfPoint(...start), viewport.convertToPdfPoint(...end)];
+    }
+    const xs = corners.map(c => c[0]), ys = corners.map(c => c[1]);
+    signWith({page: index, box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]});
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && placing) { stopPlacing(); setStatus('Podepisování zrušeno'); }
+  });
+
+  const signDialog = $q('[data-sign-dialog]');
+  signDialog.addEventListener('close', () => { if (signDialog.returnValue === 'sign') actions.sign(); });
+  const closeMenus = () => document.querySelectorAll('[data-menu-list]').forEach(m => { m.hidden = true; });
+  for (const button of document.querySelectorAll('[data-menu]')) {
+    button.addEventListener('click', e => {
+      e.stopPropagation();
+      const list = $q(`[data-menu-list="${button.dataset.menu}"]`);
+      const open = list.hidden;
+      closeMenus();
+      list.hidden = !open;
+    });
+  }
+  document.addEventListener('click', closeMenus);
+
+  const zoomTo = scale => { autoFit = false; viewer.currentScale = Math.min(4, Math.max(.25, scale)); };
+  const actions = {
+    open: () => native?.postMessage({action: 'open'}),
+    'save-plain': async () => {
+      closeMenus();
+      try { await saved(await post('/pdf-save'), 'Uloženo do'); } catch (e) { setStatus('Chyba: ' + e.message); }
+    },
+    save: () => {
+      closeMenus();
+      $q('[data-sign-text]').textContent = 'Dokument se podepíše vybraným certifikátem a uloží jako nový soubor vedle původního. '
+        + (signatureField ? `Podpis se vloží do připraveného podpisového pole „${signatureField}“.`
+                          : 'Dokument nemá připravené podpisové pole.');
+      $q('[data-sign-mode]').hidden = Boolean(signatureField);
+      signDialog.returnValue = '';
+      signDialog.showModal();
+      certSelect.focus();
+    },
+    sign: async () => {
+      if (!certSelect.value) { setStatus('Vyber certifikát pro podpis.'); actions.save(); return; }
+      try { localStorage.setItem('zfo-cert', certSelect.value); localStorage.setItem('zfo-sign-mode', signMode()); } catch {}
+      if (!signatureField && signMode() === 'place') startPlacing();
+      else signWith(null);
+    },
+    print: async () => {
+      try {
+        const {path} = await post('/pdf-print');
+        if (native) native.postMessage({action: 'printPdf', path});
+        else window.print();
+      } catch (e) { setStatus('Chyba: ' + e.message); }
+    },
+    reset: async () => {
+      if (changed && !confirm('Zahodit neuložené změny a načíst hodnoty z uloženého souboru?')) return;
+      await load();
+      setStatus('Načteny hodnoty z uloženého souboru');
+    },
+    'zoom-in': () => zoomTo(viewer.currentScale + .1),
+    'zoom-out': () => zoomTo(viewer.currentScale - .1),
+    'zoom-fit': () => { autoFit = true; viewer.currentScaleValue = 'page-width'; },
+    panel: () => {
+      const hidden = document.body.classList.toggle('panel-hidden');
+      $q('.zfo-bar [data-action="panel"]').classList.toggle('active', !hidden);
+    },
+  };
+  for (const button of document.querySelectorAll('.zfo-bar [data-action], .zfo-close[data-action]')) {
+    button.addEventListener('click', () => actions[button.dataset.action]());
+  }
+  window.zfoAction = name => actions[name]?.();
+  document.addEventListener('keydown', e => {
+    if (!e.metaKey) return;
+    const shortcut = e.key === '+' || e.key === '=' ? 'zoom-in' : e.key === '-' ? 'zoom-out'
+      : e.key.toLowerCase() === 's' ? (e.shiftKey ? 'save' : 'save-plain') : e.key === 'p' ? 'print' : null;
+    if (!shortcut || native) return;
+    e.preventDefault();
+    actions[shortcut]();
+  });
+
+  await load();
+</script>
+</body>
+</html>

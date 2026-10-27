@@ -1,0 +1,15 @@
+# Runtime (app.py, zfoengine, signing)
+lxml==6.1.3
+cryptography==50.0.2
+asn1crypto==1.5.1
+pypdf==6.21.3
+pyHanko[opentype]==0.38.0
+pyhanko-certvalidator==0.33.0
+uharfbuzz==0.55.0
+fonttools==4.68.0
+
+# Build (build.sh)
+pyinstaller==6.22.3
+
+# Tools (tools/make-test-pdf.py)
+reportlab==5.1.0

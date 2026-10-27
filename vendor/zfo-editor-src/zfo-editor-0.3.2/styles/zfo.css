@@ -1,0 +1,9 @@
+
+.selectedInput {
+	border: 5px solid blue;
+}
+
+div.ui-datepicker {
+    font-size: 70%; 
+}
+

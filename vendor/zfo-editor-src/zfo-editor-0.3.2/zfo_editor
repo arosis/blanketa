@@ -1,0 +1,4 @@
+#!/usr/bin/env python
+import zfoeditor.zfo_gui as zg
+
+zg.start_app()

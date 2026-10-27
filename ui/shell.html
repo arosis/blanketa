@@ -1,0 +1,926 @@
+<!-- Application chrome injected into the form page.
+     Placeholders: __SESSION__ __FILE__ __SIGNATURES__ __PAGE__ __COLORS__ __INFO__ __BLANK__ __FONTS__ __BUTTONS__ __EMPTY__ -->
+<style>
+  __FONTS__
+  :root {
+    --bar: rgba(246, 246, 248, .94);
+    --line: #d8d8dd;
+    --text: #1d1d1f;
+    --muted: #6e6e73;
+    --accent: #0a64d6;
+    --stage: #e6e6ea;
+    --ok: #1e8e3e;
+    --warn: #b26a00;
+    --bad: #c5221f;
+  }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0 !important; padding: 0 !important; overflow: hidden !important; }
+  body.zfo-app {
+    display: grid; grid-template-rows: 52px 1fr 28px; grid-template-columns: 280px 1fr 312px;
+    font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--text); background: var(--stage);
+  }
+  body.zfo-app.help-hidden { grid-template-columns: 0 1fr 312px; }
+  body.zfo-app.panel-hidden { grid-template-columns: 280px 1fr 0; }
+  body.zfo-app.help-hidden.panel-hidden { grid-template-columns: 0 1fr 0; }
+  .zfo-bar {
+    grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; padding: 0 12px;
+    background: var(--bar); backdrop-filter: blur(20px); border-bottom: 1px solid var(--line); z-index: 10;
+  }
+  .zfo-group { display: flex; align-items: center; gap: 4px; padding: 0 6px; }
+  .zfo-group + .zfo-group { border-left: 1px solid var(--line); }
+  .zfo-user-buttons { margin: 0 6px; padding: 2px 4px 2px 8px; border: 1px dashed #b9b9c0; border-radius: 9px;
+    background: rgba(10, 100, 214, .05); }
+  .zfo-group + .zfo-user-buttons, .zfo-user-buttons + .zfo-group { border-left-color: transparent; }
+  .zfo-user-buttons-label { font-size: 10px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+    color: var(--muted); margin-right: 2px; }
+  .zfo-spacer { flex: 1; }
+  .zfo-btn {
+    display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 1px solid transparent;
+    border-radius: 7px; background: transparent; color: var(--text); font: inherit; cursor: pointer; white-space: nowrap;
+  }
+  .zfo-btn:hover { background: rgba(0, 0, 0, .06); }
+  .zfo-btn:active { background: rgba(0, 0, 0, .1); }
+  .zfo-btn.active { background: rgba(10, 100, 214, .12); color: var(--accent); }
+  .zfo-btn.primary { background: var(--accent); color: #fff; padding: 0 14px; font-weight: 500; }
+  .zfo-btn .zfo-caret { width: 12px; height: 12px; margin-left: -2px; }
+  .zfo-menu-anchor { position: relative; display: inline-flex; }
+  .zfo-menu {
+    position: absolute; top: calc(100% + 4px); left: 0; z-index: 50; min-width: 260px; padding: 5px;
+    background: #fff; border: 1px solid var(--line); border-radius: 9px; box-shadow: 0 8px 28px rgba(0, 0, 0, .16);
+  }
+  .zfo-menu button {
+    display: flex; width: 100%; align-items: center; justify-content: space-between; gap: 16px; padding: 7px 10px;
+    border: none; border-radius: 6px; background: none; font: inherit; color: var(--text); text-align: left; cursor: pointer;
+  }
+  .zfo-menu button:hover { background: var(--accent); color: #fff; }
+  .zfo-menu kbd { font: inherit; color: var(--muted); }
+  .zfo-menu button:hover kbd { color: rgba(255, 255, 255, .8); }
+  .zfo-find {
+    position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 6px; padding: 6px 12px;
+    background: var(--bar); backdrop-filter: blur(20px); border-bottom: 1px solid var(--line);
+  }
+  .zfo-find > svg { width: 16px; height: 16px; color: var(--muted); }
+  .zfo-find input { flex: 0 1 320px; height: 28px; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; font: inherit; }
+  .zfo-find-count { min-width: 70px; color: var(--muted); font-size: 12px; }
+  ::highlight(zfo-find) { background-color: #ffe066; color: #000; }
+  ::highlight(zfo-find-current) { background-color: #ff9632; color: #000; }
+  .zfo-page .zfo-find-hit { box-shadow: inset 0 0 0 2px #ffcc00 !important; }
+  .zfo-page .zfo-find-current { box-shadow: inset 0 0 0 2px #ff9632 !important; }
+  .zfo-dialog { border: none; border-radius: 14px; padding: 22px 24px; width: 440px; box-shadow: 0 20px 60px rgba(0, 0, 0, .3); }
+  .zfo-dialog::backdrop { background: rgba(0, 0, 0, .25); }
+  .zfo-dialog h2 { margin: 0 0 8px; font-size: 15px; }
+  .zfo-dialog p { margin: 0 0 14px; color: var(--muted); }
+  .zfo-dialog label { display: grid; gap: 6px; font-weight: 500; }
+  .zfo-dialog .zfo-cert { max-width: none; width: 100%; }
+  .zfo-dialog-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+  .zfo-btn.primary:hover { background: #0857bd; }
+  .zfo-btn svg { width: 18px; height: 18px; flex: none; }
+  .zfo-btn.icon { width: 30px; padding: 0; justify-content: center; }
+  .zfo-zoom { min-width: 46px; text-align: center; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .zfo-cert {
+    height: 30px; max-width: 230px; border: 1px solid var(--line); border-radius: 7px; background: #fff;
+    font: inherit; padding: 0 8px; color: var(--text);
+  }
+  .zfo-stage { grid-column: 2; grid-row: 2; overflow: auto; position: relative; }
+  .zfo-page {
+    position: relative; margin: 28px auto 40px; box-sizing: border-box; width: 21cm; background: #fff; padding: 36px 40px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .12), 0 8px 28px rgba(0, 0, 0, .10); border-radius: 2px;
+  }
+  .zfo-panel {
+    grid-column: 3; grid-row: 2; overflow: auto; background: #f7f7f9; border-left: 1px solid var(--line);
+  }
+  body.panel-hidden .zfo-panel { display: none; }
+  .zfo-help-panel { grid-column: 1; grid-row: 2; overflow: auto; background: #f7f7f9; border-right: 1px solid var(--line); }
+  body.help-hidden .zfo-help-panel { display: none; }
+  .zfo-btn:disabled { opacity: .35; pointer-events: none; }
+  body.zfo-empty .zfo-page { display: none; }
+  .zfo-empty-state { margin: 18vh auto 0; text-align: center; color: var(--muted); font-size: 14px; }
+  .zfo-empty-state svg { width: 56px; height: 56px; color: var(--accent); margin-bottom: 14px; }
+  .zfo-empty-state h1 { font-size: 20px; font-weight: 600; color: var(--text); margin: 0 0 6px; }
+  .zfo-empty-state .zfo-btn { margin: 22px auto 0; display: inline-flex; }
+  .zfo-recent { margin: 36px auto 0; width: 440px; text-align: left; }
+  .zfo-recent h2 { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px 10px; }
+  .zfo-recent button { display: flex; flex-direction: column; gap: 1px; width: 100%; padding: 7px 10px; border: 0; border-radius: 8px;
+    background: none; text-align: left; font: inherit; cursor: pointer; }
+  .zfo-recent button:hover { background: rgba(10, 100, 214, .08); }
+  .zfo-recent b { font-weight: 500; color: var(--text); }
+  .zfo-recent span { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .zfo-help-panel h2, .zfo-panel h2 { display: flex; align-items: center; justify-content: space-between; }
+  .zfo-close { border: none; background: none; color: var(--muted); font-size: 16px; line-height: 1; cursor: pointer; padding: 0 2px; }
+  .zfo-close:hover { color: var(--text); }
+  .zfo-panel h2, .zfo-help-panel h2 { margin: 16px 16px 4px; font-size: 13px; font-weight: 600; }
+  .zfo-panel h3 {
+    margin: 18px 16px 8px; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted);
+  }
+  .zfo-card { margin: 0 12px 8px; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 10px; }
+  .zfo-card .who { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+  .zfo-card .who svg { width: 18px; height: 18px; flex: none; }
+  .zfo-card .state { margin: 6px 0 2px 26px; }
+  .zfo-card .meta { margin-left: 26px; color: var(--muted); font-size: 12px; line-height: 1.5; }
+  .zfo-card.ok .state { color: var(--ok); } .zfo-card.warn .state { color: var(--warn); } .zfo-card.bad .state { color: var(--bad); }
+  .zfo-note { margin: 0 12px 8px; padding: 8px 12px; border-radius: 10px; background: #fff4e0; color: #7a4a00; font-size: 12px; }
+  .zfo-empty { margin: 0 16px 8px; color: var(--muted); }
+  .zfo-info { margin: 0 12px 4px; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 10px; font-size: 12px; line-height: 1.6; color: var(--muted); }
+  .zfo-info b { color: var(--text); font-size: 13px; }
+  .zfo-help { margin: 0 12px 4px; padding: 10px 12px; background: #eef4fd; border: 1px solid #c9dbf5; border-radius: 10px; line-height: 1.5; white-space: pre-line; }
+  .zfo-help b { display: block; margin-bottom: 4px; white-space: normal; }
+  .zfo-muted { color: var(--muted); }
+  .zfo-check-ok { margin: 0 12px 8px; padding: 10px 12px; border-radius: 10px; background: #e7f5ea; color: var(--ok); }
+  .zfo-check-item {
+    display: block; width: calc(100% - 24px); margin: 0 12px 6px; padding: 8px 10px; text-align: left; cursor: pointer;
+    background: #fff; border: 1px solid #f0c4c2; border-left: 3px solid var(--bad); border-radius: 8px; font: inherit; color: var(--text);
+  }
+  .zfo-check-item:hover { background: #fdf3f2; }
+  .zfo-check-item small { display: block; color: var(--muted); margin-top: 2px; }
+  .zfo-page .zfo-invalid { box-shadow: inset 0 0 0 2px var(--bad) !important; }
+  .zfo-page input[type=checkbox].zfo-invalid, .zfo-page input[type=radio].zfo-invalid { box-shadow: 0 0 0 2px var(--bad) !important; }
+  @media print {
+    @page { size: A4; margin: 0; }
+    :root { --field: transparent !important; --field-readonly: transparent !important; }
+    html, body { height: auto !important; overflow: visible !important; background: #fff !important; }
+    body.zfo-app { display: block; }
+    .zfo-bar, .zfo-help-panel, .zfo-panel, .zfo-status, #pending_request { display: none !important; }
+    .zfo-stage { overflow: visible; }
+    .zfo-page { margin: 0 auto; box-shadow: none; border-radius: 0; zoom: 1 !important; }
+    .zfo-page button[zfo-app-event] { visibility: hidden; }
+    .zfo-page .zfo-invalid { box-shadow: none !important; }
+    .zfo-page, .zfo-page * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .zfo-page input[type=text], .zfo-page select, .zfo-page textarea { background-color: transparent !important; }
+    .zfo-page input[type=checkbox], .zfo-page input[type=radio] { background-color: #fff !important; }
+    /* Form Filler's "Tisk pouze formulářových polí": values only, for a pre-printed blank form. */
+    body.zfo-print-fields .zfo-page * { visibility: hidden; border-color: transparent !important; background: none !important; }
+    body.zfo-print-fields .zfo-page input, body.zfo-print-fields .zfo-page select { visibility: visible; }
+  }
+  .zfo-status {
+    grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; padding: 0 12px;
+    background: var(--bar); border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; z-index: 10;
+  }
+  .zfo-status .file { color: var(--text); display: inline-flex; align-items: center; gap: 6px; }
+  .zfo-status .msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .zfo-status a { color: var(--accent); cursor: pointer; }
+  .zfo-page #main_area { height: auto !important; }
+  /* Form look close to Software602 Form Filler: Tahoma, flat fields filling their cells, thin collapsed borders. */
+  .zfo-page { font-family: Tahoma, Verdana, Arial, sans-serif; font-size: 10pt; color: #000; }
+  /* Each cell paints its own borders, as Form Filler does; collapsed borders would stretch the widest
+     border along a whole spanning cell. */
+  .zfo-page table { border-collapse: separate; border-spacing: 0; font-size: inherit; font-weight: inherit; font-style: inherit; }
+  /* XSL-FO fixed-layout tables without a width fill their container; unsized columns take the rest. */
+  /* "fill-available" rather than 100%, so that the table's own side margins are taken off its width as in XSL-FO. */
+  .zfo-page table { width: 100%; width: -webkit-fill-available; width: stretch; table-layout: fixed; }
+  /* XSL-FO borders without a colour are black, not the text colour. */
+  .zfo-page table, .zfo-page td, .zfo-page th { border-color: #000; }
+  /* XSL-FO cells have no padding unless the form sets one (it comes inline); nested tables then line up. */
+  .zfo-page td { padding: 0; }
+  .zfo-page input[type=text], .zfo-page select, .zfo-page textarea {
+    box-sizing: border-box; width: 100% !important; min-height: 22px; margin: 0; padding: 2px 4px;
+    border: none !important; border-radius: 0; outline: none; box-shadow: none;
+    font: bold 11pt Tahoma, Verdana, sans-serif; color: #000; background-color: var(--field) !important;
+  }
+  /* A field whose cell names its own font (e.g. an embedded barcode font) keeps it. */
+  .zfo-page td[style*="font-family"] > input[type=text], .zfo-page td[style*="font-family"] > select { font: inherit; }
+  .zfo-page input[type=text][readonly], .zfo-page select:disabled { background-color: var(--field-readonly) !important; }
+  .zfo-page select { -webkit-appearance: none; appearance: none; cursor: pointer; }
+  .zfo-page input[type=text]:focus, .zfo-page select:focus, .zfo-page textarea:focus {
+    box-shadow: inset 0 0 0 2px var(--accent); background-color: #fff !important;
+  }
+  .zfo-page input[type=checkbox], .zfo-page input[type=radio] {
+    -webkit-appearance: none; appearance: none; flex: none; width: 12px; height: 12px; margin: 2px 4px; padding: 0;
+    border: 1px solid #000; background: var(--field) center / 100% 100% no-repeat; vertical-align: middle; cursor: pointer;
+  }
+  .zfo-page input[type=radio] { border-radius: 50%; }
+  .zfo-page input[type=radio]:checked { background-image: radial-gradient(circle, #000 0 3px, transparent 3.5px); }
+  .zfo-page input[type=checkbox]:checked {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 2.5l7 7M9.5 2.5l-7 7' stroke='%23000' stroke-width='1.4'/%3E%3C/svg%3E");
+  }
+  .zfo-page input[type=checkbox]:disabled, .zfo-page input[type=radio]:disabled { background-color: var(--field-readonly); cursor: default; }
+  .zfo-page td:has(> input[type=text]), .zfo-page td:has(> select) { padding: 0 !important; }
+  .zfo-page td > input[type=text], .zfo-page td > select { height: 100%; }
+  /* Repeating sections use the form's own +/- buttons, as in Form Filler; zfo-editor's extra controls stay hidden. */
+  .zfo-page td:has(> button[onclick^="clone_row"]), .zfo-page td:has(> button[onclick^="del_row"]),
+  .zfo-page [class~="602-repetition-table"] > tbody > tr:has(> td > button[onclick^="clone_table"]) { display: none !important; }
+  .zfo-page button[zfo-app-event*="addsect"], .zfo-page button[zfo-app-event*="delsect"] {
+    display: inline-block !important; width: 18px; height: 18px; margin: 2px 0 0 3px; padding: 0;
+    border: 1px solid #adadad; border-radius: 2px; background: linear-gradient(#fff, #e6e6e6);
+    font: 13px/16px Tahoma, sans-serif; color: #000; cursor: pointer;
+  }
+  .zfo-page button[zfo-app-event*="addsect"]:hover, .zfo-page button[zfo-app-event*="delsect"]:hover { background: linear-gradient(#f4f8fd, #d6e4f5); border-color: #6e9bd1; }
+  /* The buttons sit beside the table, outside its borders; the field before them keeps its right edge. */
+  .zfo-page td:has(> button[zfo-app-event*="addsect"]), .zfo-page td:has(> button[zfo-app-event*="delsect"]) {
+    padding: 0 !important; border-style: none !important; vertical-align: top;
+  }
+  .zfo-page td:has(*):has(+ td > button[zfo-app-event*="addsect"]) { border-right: 0.75pt solid #000 !important; }
+  #pending_request { position: fixed !important; inset: 52px 0 28px 0 !important; width: auto !important; height: auto !important; }
+</style>
+
+<header class="zfo-bar">
+  <div class="zfo-group">
+    <button class="zfo-btn icon" data-action="open" data-native hidden title="Otevřít formulář (⌘O)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1H3z"/><path d="M3 10h18l-2 9H5z"/></svg>
+    </button>
+    <span class="zfo-menu-anchor">
+      <button class="zfo-btn primary" data-menu="save" title="Uložit formulář bez podpisu nebo s podpisem">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 3h11l3 3v15H5z"/><path d="M8 3v5h7V3M8 21v-7h8v7"/></svg>Uložit
+        <svg class="zfo-caret" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.6"><path d="m3 4.5 3 3 3-3"/></svg>
+      </button>
+      <div class="zfo-menu" data-menu-list="save" hidden>
+        <button data-action="save-plain">Uložit bez podpisu<kbd>⌘S</kbd></button>
+        <button data-action="save">Podepsat a uložit…<kbd>⇧⌘S</kbd></button>
+      </div>
+    </span>
+    <button class="zfo-btn icon" data-action="print" title="Tisk nebo uložení do PDF (⌘P)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="1.5"/><path d="M7 14h10v7H7z"/></svg>
+    </button>
+  </div>
+  <div class="zfo-group">
+    <button class="zfo-btn icon" data-action="find" title="Najít (⌘F)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg>
+    </button>
+  </div>
+  <div class="zfo-group">
+    <span class="zfo-menu-anchor">
+      <button class="zfo-btn icon" data-menu="reset" title="Obnovit výchozí hodnoty">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4h4"/></svg>
+      </button>
+      <div class="zfo-menu" data-menu-list="reset" hidden>
+        <button data-action="reset-field">Obnovit výchozí hodnotu pole<kbd>⇧⌘⌫</kbd></button>
+        <button data-action="reset">Obnovit výchozí hodnoty v celém formuláři…</button>
+      </div>
+    </span>
+    <button class="zfo-btn icon" data-action="import-data" title="Import dat do formuláře (XML)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="10" cy="5" rx="6" ry="2.2"/><path d="M4 5v11c0 1.2 2.7 2.2 6 2.2M16 5v5M4 10.5c0 1.2 2.7 2.2 6 2.2s6-1 6-2.2"/><path d="M12.5 21.5v-7h3.2l1.3 1.3h4.5v5.7z"/></svg>
+    </button>
+    <button class="zfo-btn icon" data-action="export-data" title="Uložit data do souboru (XML)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="10" cy="5" rx="6" ry="2.2"/><path d="M4 5v11c0 1.2 2.7 2.2 6 2.2M16 5v5M4 10.5c0 1.2 2.7 2.2 6 2.2s6-1 6-2.2"/><path d="M13 13.5h6.5l2 2v6H13z"/><path d="M15 13.5v2.8h4v-2.8M15 21.5v-3h4.5v3"/></svg>
+    </button>
+  </div>
+  <div class="zfo-group">
+    <button class="zfo-btn icon" data-action="recalc" title="Přepočítat hodnoty (F9)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="5" y="3" width="14" height="18" rx="1.5"/><path d="M8 7h8M8 11h2M12 11h2M8 15h2M12 15h2M8 18h2M12 18h2M16 11v7"/></svg>
+    </button>
+    <button class="zfo-btn icon" data-action="check" title="Zkontrolovat vyplnění formuláře (⇧F9)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 3h9l4 4v14H6z"/><path d="m9 13 2.5 2.5L16 10"/></svg>
+    </button>
+  </div>
+  <div class="zfo-group">
+    <button class="zfo-btn icon" data-action="zoom-out" title="Zmenšit (⌘−)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M8 11h6M16.5 16.5 21 21"/></svg></button>
+    <span class="zfo-zoom">100 %</span>
+    <button class="zfo-btn icon" data-action="zoom-in" title="Zvětšit (⌘+)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M8 11h6M11 8v6M16.5 16.5 21 21"/></svg></button>
+    <button class="zfo-btn icon" data-action="zoom-fit" title="Přizpůsobit šířce okna">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="5" y="3" width="14" height="18" rx="1.5"/><path d="M2 12h4M18 12h4M4 10l-2 2 2 2M20 10l2 2-2 2"/></svg>
+    </button>
+  </div>
+  <div class="zfo-group zfo-user-buttons" data-user-buttons hidden title="Tlačítka definovaná formulářem"><span class="zfo-user-buttons-label">Formulář</span></div>
+  <div class="zfo-spacer"></div>
+  <div class="zfo-group">
+    <button class="zfo-btn icon active" data-action="help" title="Nápověda k poli (⌥⌘1)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .8-1 1.5v.7M12 17v.5"/></svg>
+    </button>
+    <button class="zfo-btn icon active" data-action="panel" title="Informace o formuláři a certifikátech (⌥⌘2)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 3h9l4 4v14H6z"/><circle cx="12" cy="13" r="3"/><path d="M10.5 15.5 10 20l2-1 2 1-.5-4.5"/></svg>
+    </button>
+  </div>
+</header>
+
+<aside class="zfo-help-panel">
+  <h2>Nápověda k poli <button class="zfo-close" data-action="help" title="Skrýt nápovědu">✕</button></h2>
+  <div class="zfo-help" data-help-text></div>
+</aside>
+
+<main class="zfo-stage">
+  <div class="zfo-find" hidden>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg>
+    <span data-find-slot></span>
+    <span class="zfo-find-count" data-find-count></span>
+    <button class="zfo-btn icon" data-find-step="-1" title="Předchozí (⇧⌘G)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 15 6-6 6 6"/></svg></button>
+    <button class="zfo-btn icon" data-find-step="1" title="Další (⌘G)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m6 9 6 6 6-6"/></svg></button>
+    <button class="zfo-close" data-find-close title="Zavřít (Esc)">✕</button>
+  </div>
+  <div class="zfo-page"></div>
+</main>
+
+<dialog class="zfo-dialog" data-sign-dialog>
+  <form method="dialog">
+    <h2>Podepsat a uložit</h2>
+    <p>Formulář se podepíše vybraným certifikátem a uloží jako nový soubor vedle původního.</p>
+    <label>Certifikát<span data-cert-slot></span></label>
+    <div class="zfo-dialog-buttons">
+      <button class="zfo-btn" value="cancel">Zrušit</button>
+      <button class="zfo-btn primary" value="sign">Podepsat a uložit</button>
+    </div>
+  </form>
+</dialog>
+
+<aside class="zfo-panel">
+  <h2>Informace <button class="zfo-close" data-action="panel" title="Skrýt panel">✕</button></h2>
+  <section data-check hidden>
+    <h2>Kontrola formuláře</h2>
+    <div data-check-list></div>
+  </section>
+  <h2>Formulář</h2>
+  <div class="zfo-info" data-info></div>
+  <h2>Informace o podpisech</h2>
+  <h3>Elektronický podpis dat</h3>
+  <div data-signatures="data"></div>
+  <h3>Vydavatel formuláře</h3>
+  <div data-signatures="publisher"></div>
+</aside>
+
+<footer class="zfo-status">
+  <span class="file">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4"/></svg>
+    <span data-file></span>
+  </span>
+  <span>·</span>
+  <span class="msg" data-status>Otevírám formulář…</span>
+</footer>
+
+<script>
+(() => {
+  const SESSION = '__SESSION__';
+  const FILE = __FILE__;
+  const native = window.webkit?.messageHandlers?.app;
+  const $q = s => document.querySelector(s);
+  const status = $q('[data-status]');
+  const setStatus = (text, html) => { html ? (status.innerHTML = text) : (status.textContent = text); };
+
+  // Move the generated form into the paper page, then show the application chrome around it.
+  const chrome = [...document.querySelectorAll('.zfo-bar, .zfo-help-panel, .zfo-stage, .zfo-panel, .zfo-status, .zfo-dialog')];
+  const page = $q('.zfo-page');
+  for (const node of [...document.body.childNodes]) {
+    if (!chrome.includes(node) && node.nodeName !== 'STYLE' && !(node.nodeName === 'SCRIPT' && node.textContent.includes('__zfo_shell__'))) {
+      page.append(node);
+    }
+  }
+  document.body.classList.add('zfo-app');
+  document.title = '';
+  $q('[data-file]').textContent = FILE;
+  if (native) $q('[data-native]').hidden = false;
+
+  // Started without a file: the full window with only "Otevřít" available until a form is opened.
+  if (__EMPTY__) {
+    document.body.classList.add('zfo-empty', 'help-hidden', 'panel-hidden');
+    for (const button of document.querySelectorAll('.zfo-bar button:not([data-action="open"])')) button.disabled = true;
+    $q('.zfo-stage').insertAdjacentHTML('beforeend', `<div class="zfo-empty-state">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4M9 10h6M9 13h6M9 16h4"/></svg>
+      <h1>Žádný formulář není otevřený</h1>
+      <div>Otevřete formulář 602XML (.zfo) nebo dokument PDF k vyplnění a podpisu.</div>
+      <button class="zfo-btn primary" data-action="open">Otevřít formulář…</button>
+      <div class="zfo-recent" data-recent hidden><h2>Naposledy otevřené</h2></div></div>`);
+    const escHtml = s => s.replace(/[&<>]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;'}[c]));
+    window.zfoRecent = paths => {
+      const list = $q('[data-recent]');
+      for (const path of paths) {
+        const item = document.createElement('button');
+        item.dataset.path = path;
+        item.title = path;
+        item.innerHTML = `<b>${escHtml(path.split('/').pop())}</b><span>${escHtml(path.split('/').slice(0, -1).join('/').replace(/^\/Users\/[^/]+/, '~'))}</span>`;
+        list.append(item);
+      }
+      list.hidden = !paths.length;
+    };
+    native?.postMessage({action: 'recent'});
+    $q('[data-file]').textContent = 'Bez formuláře';
+    setStatus('Připraveno');
+    const open = () => native?.postMessage({action: 'open'});
+    document.addEventListener('click', e => {
+      if (e.target.closest('[data-action="open"]')) open();
+      const recent = e.target.closest('[data-path]');
+      if (recent) native?.postMessage({action: 'openFile', path: recent.dataset.path});
+    });
+    window.zfoAction = name => { if (name === 'open') open(); };
+    return;
+  }
+
+  // Bridge for zfo-editor's page scripts: messages go to the Python engine, its answers run here.
+  let queue = Promise.resolve();
+  let changed = false;
+  let ready = false;
+  const paper = __PAGE__;
+  Object.assign(page.style, paper);
+  // The form's own field colours replace zfo-editor's bright yellow.
+  const colors = __COLORS__;
+  document.documentElement.style.setProperty('--field', colors.field);
+  document.documentElement.style.setProperty('--field-readonly', colors.readonly);
+  Object.assign(FIELD_COLORS, {editable: colors.field, readonly: colors.readonly});
+  // Paper keeps the form's page size unless a visible table is wider; then it grows to fit it.
+  // A repeating section's trailing column that stays empty in every row is not shown by Form Filler.
+  const trimRepeatingSections = () => {
+    for (const table of page.querySelectorAll('[class~="602-repetition-table"]')) {
+      const col = table.querySelector(':scope > colgroup > col:last-child');
+      const cells = [...table.querySelectorAll(':scope > tbody > tr')]
+        .filter(row => !row.querySelector(':scope > td > button[onclick^="clone_table"]'))
+        .map(row => row.lastElementChild);
+      if (!col || col.parentElement.children.length < 2 || !cells.length
+          || cells.some(cell => cell.childElementCount || cell.textContent.trim() || cell.parentElement.cells.length < 2)) continue;
+      // Removed rather than narrowed: WebKit treats a zero-width column as unsized and splits the width with it.
+      col.remove();
+      cells.forEach(cell => cell.remove());
+    }
+  };
+  const fitPage = () => {
+    trimRepeatingSections();
+    page.style.width = paper.width;
+    const style = getComputedStyle(page);
+    const contentRight = page.getBoundingClientRect().right - parseFloat(style.paddingRight) * zoom;
+    const overflow = Math.max(0, ...[...page.querySelectorAll('table')]
+      .filter(t => t.offsetParent)
+      .map(t => t.getBoundingClientRect().right - contentRight)) / zoom;
+    if (overflow > 1) page.style.width = `calc(${paper.width} + ${Math.ceil(overflow)}px)`;
+  };
+  new ResizeObserver(() => ready && fitPage()).observe(page);
+
+  // The form's +/- buttons (602 app events addsect/delsect) drive zfo-editor's working
+  // row or table cloning for the repeating section they sit in.
+  page.addEventListener('click', e => {
+    const button = e.target.closest('button[zfo-app-event]');
+    const event = button?.getAttribute('zfo-app-event') ?? '';
+    const add = event.includes('addsect');
+    if (!add && !event.includes('delsect')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const starts = prefix => b => (b.getAttribute('onclick') ?? '').startsWith(prefix);
+    let target = [...button.closest('tr').querySelectorAll('button')].find(starts(add ? 'clone_row' : 'del_row'));
+    if (!target) {
+      const section = button.closest('[class~="602-repetition-table"]');
+      target = section && [...section.querySelectorAll(':scope > tbody > tr > td > button')].find(starts(add ? 'clone_table' : 'del_table'));
+    }
+    if (!target) {
+      // Buttons placed after their section belong to the nearest repeating section above them.
+      const before = [...page.querySelectorAll(`button[onclick^="${add ? 'clone_' : 'del_'}"]`)]
+        .filter(b => b.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING);
+      target = before.at(-1);
+    }
+    target?.click();
+  }, true);
+  const enqueue = task => { queue = queue.then(task).catch(e => console.error('zfo', e)); };
+  window.send = msg => {
+    enqueue(async () => {
+      const type = JSON.parse(msg).type;
+      const res = await fetch('/ipc?s=' + SESSION, {method: 'POST', body: msg});
+      if (!res.ok) { setStatus('Chyba: ' + await res.text()); return; }
+      for (const r of await res.json()) {
+        if (r.type === 'check') {
+          showCheck(r.data);
+        } else if (r.type === 'default') {
+          applyDefault(r.data);
+        } else if (r.type === 'javascript') {
+          try { (0, eval)(r.data); } catch (e) { console.error(e, r.data.slice(0, 200)); }
+        } else if (r.type === 'gtk' && r.info_area === 'message_area') {
+          const div = document.createElement('div');
+          div.innerHTML = String(r.data?.to_display ?? '');
+          setStatus(div.textContent);
+        }
+      }
+      if (GlobalVars.handlers_active < 0) GlobalVars.handlers_active = 0;
+      if (ready) fitPage();
+      if (type === 'store_val' && !changed && ready) { changed = true; renderSignatures(); }
+      if (type === 'get_multiswitch_list' && !window.selectsSynced) {
+        window.selectsSynced = true;
+        $('select[name]:visible').each(function () { if (this.value) $(this).trigger('change'); });
+        $q('[data-cert-slot]').replaceWith(certSelect);
+        $q('[data-find-slot]').replaceWith(findInput);
+        enqueue(() => { ready = true; fitPage(); autoZoom(); });
+      }
+    });
+  };
+
+  // Signatures panel.
+  const icons = {
+    ok: '<svg viewBox="0 0 24 24" fill="none" stroke="#1e8e3e" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>',
+    warn: '<svg viewBox="0 0 24 24" fill="none" stroke="#b26a00" stroke-width="2"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17v.5"/></svg>',
+    bad: '<svg viewBox="0 0 24 24" fill="none" stroke="#c5221f" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/></svg>',
+  };
+  const fmt = iso => iso ? new Date(iso).toLocaleString('cs-CZ', {dateStyle: 'medium', timeStyle: 'short'}) : '–';
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+  function card(sig) {
+    const expired = new Date(sig.not_after) < new Date();
+    const level = !sig.intact ? 'bad' : (sig.trusted && !expired) ? 'ok' : 'warn';
+    const state = !sig.intact ? 'Podpis je porušen – obsah byl po podpisu změněn'
+      : sig.trusted ? 'Podpis je platný, certifikát je důvěryhodný'
+      : 'Obsah je neporušený, certifikát není hodnocen jako důvěryhodný';
+    return `<div class="zfo-card ${level}" title="${esc(sig.reason || '')}">
+      <div class="who">${icons[level]}${esc(sig.subject)}</div>
+      <div class="state">${state}</div>
+      <div class="meta">Podepsáno: ${fmt(sig.signed_at)}<br>Vystavil: ${esc(sig.issuer)}<br>
+        ${expired ? 'Platnost certifikátu skončila' : 'Certifikát platí do'} ${new Date(sig.not_after).toLocaleDateString('cs-CZ')}</div>
+    </div>`;
+  }
+  let signatures = __SIGNATURES__;
+  function renderSignatures() {
+    const data = signatures.filter(s => !s.publisher);
+    const publisher = signatures.find(s => s.publisher);
+    $q('[data-signatures="data"]').innerHTML =
+      (changed && data.length ? '<div class="zfo-note">Formulář byl změněn. Stávající podpis se při uložení nahradí novým.</div>' : '') +
+      (data.length ? data.map(card).join('') : '<div class="zfo-empty">Data formuláře zatím nejsou podepsaná.</div>');
+    $q('[data-signatures="publisher"]').innerHTML = publisher ? card(publisher) : '<div class="zfo-empty">Formulář nemá podpis vydavatele.</div>';
+  }
+  renderSignatures();
+
+  // Certificates for signing. The select joins the toolbar only after the form scripts have
+  // wired up their own selects, so they do not treat it as a form field.
+  const certSelect = document.createElement('select');
+  certSelect.className = 'zfo-cert';
+  certSelect.title = 'Certifikát pro podpis';
+  fetch('/identities').then(r => r.json()).then(list => {
+    certSelect.innerHTML = list.length ? '<option value="">Vyber certifikát pro podpis…</option>'
+                                       : '<option value="">Žádný podpisový certifikát</option>';
+    for (const c of list) {
+      const o = document.createElement('option');
+      o.value = c.id;
+      o.textContent = (c.token ? '🔑 ' : '') + c.subject + (c.source === 'test' ? ' (TEST)' : '') + ' – do ' + c.not_after;
+      certSelect.append(o);
+    }
+    try { const last = localStorage.getItem('zfo-cert'); if (list.some(c => c.id === last)) certSelect.value = last; } catch {}
+  });
+
+  // Form description (Form Filler: Vlastnosti → Popis formuláře).
+  const info = __INFO__;
+  $q('[data-info]').innerHTML = [
+    info.title && `<b>${esc(info.title)}</b>`,
+    info.author && `Vydavatel: ${esc(info.author)}`,
+    info.form_id && `ID formuláře: ${esc(info.form_id)}`,
+    info.created && `Vytvořen: ${new Date(info.created).toLocaleDateString('cs-CZ')}`,
+    __BLANK__ && 'Zobrazeny výchozí hodnoty – vyplněná data nejsou načtena.',
+  ].filter(Boolean).join('<br>');
+
+  // Form check (Form Filler: Zkontrolovat, Shift+F9): required fields and constraints.
+  const labelFor = el => {
+    const td = el.closest('td');
+    for (let cell = td?.previousElementSibling; cell; cell = cell.previousElementSibling) {
+      if (cell.textContent.trim()) return cell.textContent;
+    }
+    const above = td?.parentElement.previousElementSibling?.cells[[...td.parentElement.cells].indexOf(td)];
+    return above?.textContent.trim() ? above.textContent : el.name;
+  };
+  const clean = text => text.replace(/\s+/g, ' ').trim().slice(0, 90);
+  let checkWaiter = null;
+  function showCheck(problems) {
+    page.querySelectorAll('.zfo-invalid').forEach(el => el.classList.remove('zfo-invalid'));
+    const found = problems
+      .map(p => ({...p, el: document.getElementsByName(p.field)[p.index] ?? document.getElementsByName(p.field)[0]}))
+      .filter(p => p.el?.offsetParent);
+    found.forEach(p => p.el.classList.add('zfo-invalid'));
+    const list = $q('[data-check-list]');
+    list.innerHTML = found.length ? '' : '<div class="zfo-check-ok">Formulář je vyplněn správně.</div>';
+    for (const p of found) {
+      const item = document.createElement('button');
+      item.className = 'zfo-check-item';
+      item.innerHTML = `${esc(clean(labelFor(p.el)))}<small>${p.kind === 'required' ? 'Povinná položka není vyplněna'
+        : esc(p.message || 'Hodnota nesplňuje podmínku formuláře')}</small>`;
+      item.addEventListener('click', () => { p.el.scrollIntoView({block: 'center'}); p.el.focus(); });
+      list.append(item);
+    }
+    $q('[data-check]').hidden = false;
+    togglePanel('panel', true);
+    setStatus(found.length ? `Kontrola: ${found.length} ${found.length === 1 ? 'problém' : found.length < 5 ? 'problémy' : 'problémů'}` : 'Kontrola: formulář je vyplněn správně');
+    checkWaiter?.(found.length);
+    checkWaiter = null;
+  }
+  const runCheck = () => new Promise(resolve => { checkWaiter = resolve; send(JSON.stringify({type: 'check_form', data: ''})); });
+  page.addEventListener('input', e => e.target.classList?.remove('zfo-invalid'), true);
+  page.addEventListener('change', e => e.target.classList?.remove('zfo-invalid'), true);
+
+  // Field help (Form Filler: panel "Nápověda k poli"): the designer's tooltip of the focused field.
+  const helpText = $q('[data-help-text]');
+  const helpPlaceholder = page.querySelector('[title]:not([title=""])')
+    ? 'Klikněte do pole formuláře a zobrazí se jeho nápověda.'
+    : 'Tento formulář nápovědu k polím neobsahuje.';
+  helpText.innerHTML = `<span class="zfo-muted">${helpPlaceholder}</span>`;
+  page.addEventListener('focusin', e => {
+    const field = e.target.closest('input, select, textarea');
+    if (!field) return;
+    const text = field.title.trim();
+    helpText.innerHTML = `<b>${esc(clean(labelFor(field)))}</b>`
+      + (text ? esc(text) : '<span class="zfo-muted">Pole nemá nápovědu.</span>');
+  });
+
+  const print = async (fieldsOnly = false) => {
+    await queue;
+    document.body.classList.toggle('zfo-print-fields', fieldsOnly === true);
+    if (native) {
+      native.postMessage({action: 'print'});
+    } else {
+      window.print();
+      document.body.classList.remove('zfo-print-fields');
+    }
+  };
+  window.zfoPrinted = () => document.body.classList.remove('zfo-print-fields');
+
+  const savedStatus = (verb, path) => {
+    const reveal = native ? ' <a data-reveal>Zobrazit ve Finderu</a>' : '';
+    setStatus(`${verb} <b title="${esc(path)}">${esc(path.split('/').pop())}</b>${reveal}`, true);
+    $q('[data-reveal]')?.addEventListener('click', () => native.postMessage({action: 'reveal', path}));
+  };
+  // Form Filler's "Uložit data do souboru" and "Import dat do formuláře" (XML of the form's data model).
+  const exportData = async () => {
+    await queue;
+    const res = await fetch('/export-data?s=' + SESSION, {method: 'POST'});
+    if (!res.ok) { setStatus('Chyba: ' + await res.text()); return; }
+    const data = await res.json();
+    if (native) {
+      native.postMessage({action: 'saveFile', name: data.name, folder: data.folder, content: data.xml});
+      return;
+    }
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(new Blob([data.xml], {type: 'application/xml'}));
+    link.download = data.name;
+    link.click();
+    URL.revokeObjectURL(link.href);
+    setStatus(`Data stažena jako <b>${esc(data.name)}</b>`, true);
+  };
+  window.zfoDataSaved = path => savedStatus('Data uložena do', path);
+  const importData = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.xml,text/xml,application/xml';
+    input.addEventListener('change', async () => {
+      const file = input.files[0];
+      if (!file) return;
+      const res = await fetch('/import-data?s=' + SESSION, {method: 'POST', body: await file.text()});
+      if (!res.ok) { setStatus('Import se nepodařil: ' + await res.text()); return; }
+      const url = new URL(location.href);
+      url.searchParams.delete('blank');
+      url.searchParams.set('import', (await res.json()).import);
+      location.href = url;
+    });
+    input.click();
+  };
+
+  // Designer's user buttons: their 602 expression (usually LastParam of SendAppEvent calls) runs step by step.
+  // Steps the app implements itself run natively, the rest go to the form engine.
+  const splitArgs = text => {
+    const parts = [];
+    let depth = 0, quote = null, start = 0;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (quote) { if (ch === quote) quote = null; continue; }
+      if (ch === '"' || ch === "'") quote = ch;
+      else if (ch === '(' || ch === '{' || ch === '[') depth++;
+      else if (ch === ')' || ch === '}' || ch === ']') depth--;
+      else if (ch === ',' && depth === 0) { parts.push(text.slice(start, i).trim()); start = i + 1; }
+    }
+    parts.push(text.slice(start).trim());
+    return parts.filter(Boolean);
+  };
+  const parseCall = text => {
+    const m = /^\s*([\w.]+)\s*\(([\s\S]*)\)\s*$/.exec(text);
+    return m && {name: m[1], args: m[2]};
+  };
+  const engineCommand = async command => {
+    gtk_handler_start();
+    send(JSON.stringify({type: 'perform_click', data: {command}}));
+    await queue;
+  };
+  async function runExpress(express) {
+    const top = parseCall(express);
+    const steps = top?.name === 'LastParam' ? splitArgs(top.args) : [express];
+    for (const step of steps) {
+      const call = parseCall(step);
+      if (call?.name !== 'SendAppEvent') { await engineCommand(step); continue; }
+      const [event = '', ...args] = splitArgs(call.args);
+      switch (event.replace(/\(\)$/, '').toLowerCase()) {
+        case 'checkdata':
+          if (await runCheck() && args.includes('stopincomplete')) return;
+          break;
+        case 'print': await print(args[0] === '2'); break;
+        case 'saveform': await actions['save-plain'](); break;
+        case 'loaddata': importData(); return;
+        case 'recalc': actions.recalc(); await queue; break;
+        case 'submit':
+          if (/save_data/i.test(args[0] ?? '')) { await exportData(); break; }
+          setStatus('Odesílání dat z formuláře není na Macu podporováno.');
+          return;
+        default: await engineCommand(step);
+      }
+    }
+  }
+
+  // The form's buttons that do what a toolbar button does wear that button's icon.
+  const toolbarIcon = selector => $q(`.zfo-bar ${selector} svg`).outerHTML;
+  const buttonIcons = {
+    print: toolbarIcon('[data-action="print"]'),
+    saveform: toolbarIcon('[data-menu="save"]'),
+    savedata: toolbarIcon('[data-action="export-data"]'),
+    loaddata: toolbarIcon('[data-action="import-data"]'),
+    printfields: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="1.5"/><path d="M7 14h10v7H7z" stroke-dasharray="2 1.5"/><path d="M9.5 17h5"/></svg>',
+  };
+  const userButtonBar = $q('[data-user-buttons]');
+  for (const def of __BUTTONS__) {
+    const button = document.createElement('button');
+    const fieldsOnly = def.icon === 'print' && /SendAppEvent\s*\(\s*print\s*,\s*2\s*\)/i.test(def.express);
+    const icon = fieldsOnly ? buttonIcons.printfields
+      : buttonIcons[def.icon] ?? (/loaddata/i.test(def.express) ? buttonIcons.loaddata : buttonIcons.savedata);
+    button.className = 'zfo-btn icon';
+    button.title = def.tooltip || def.caption;
+    button.innerHTML = icon;
+    button.addEventListener('click', () => runExpress(def.express));
+    userButtonBar.append(button);
+    userButtonBar.hidden = false;
+  }
+  // The form's own "Tisk" button runs CheckData and then Print, as in Form Filler.
+  page.addEventListener('click', async e => {
+    const button = e.target.closest('button[zfo-app-event]');
+    if (!button?.getAttribute('zfo-app-event').includes('print(')) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (await runCheck() === 0) print();
+  }, true);
+
+  // Side panels as in Form Filler: field help on the left, form and certificate information on the right.
+  // Each can be hidden; the choice is remembered for the next form.
+  function togglePanel(name, show) {
+    const hidden = document.body.classList.toggle(`${name}-hidden`, show === undefined ? undefined : !show);
+    $q(`.zfo-bar [data-action="${name}"]`).classList.toggle('active', !hidden);
+    try { localStorage.setItem(`zfo-${name}-hidden`, hidden ? '1' : '0'); } catch {}
+    if (ready) autoZoom();
+  }
+  for (const name of ['help', 'panel']) {
+    let hidden = false;
+    try { hidden = localStorage.getItem(`zfo-${name}-hidden`) === '1'; } catch {}
+    if (hidden) togglePanel(name, false);
+  }
+
+  // Toolbar drop-down menus (Uložit, Obnovit).
+  const closeMenus = () => document.querySelectorAll('[data-menu-list]').forEach(m => { m.hidden = true; });
+  for (const button of document.querySelectorAll('[data-menu]')) {
+    button.addEventListener('click', e => {
+      e.stopPropagation();
+      const list = $q(`[data-menu-list="${button.dataset.menu}"]`);
+      const open = list.hidden;
+      closeMenus();
+      list.hidden = !open;
+    });
+  }
+  document.addEventListener('click', closeMenus);
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenus(); });
+
+  // "Podepsat a uložit": the certificate is chosen in a dialog; the last one used is preselected.
+  const signDialog = $q('[data-sign-dialog]');
+  signDialog.addEventListener('close', () => { if (signDialog.returnValue === 'sign') actions.sign(); });
+
+  // Field defaults (Form Filler: Obnovit výchozí hodnotu, Shift+Ctrl+Del) for the field last edited.
+  let lastField = null;
+  page.addEventListener('focusin', e => { lastField = e.target.closest('input[name], select[name], textarea[name]') ?? lastField; });
+  function resetField() {
+    closeMenus();
+    if (!lastField) { setStatus('Klikněte do pole, jehož výchozí hodnotu chcete obnovit.'); return; }
+    send(JSON.stringify({type: 'default_value', data: {field: lastField.name}}));
+  }
+  function applyDefault({field, value}) {
+    const el = lastField?.name === field ? lastField : document.getElementsByName(field)[0];
+    if (!el || value === null) { setStatus('Pole nemá výchozí hodnotu.'); return; }
+    if (el.type === 'radio') {
+      document.getElementsByName(field).forEach(r => { r.checked = r.value === value; });
+    } else if (el.type === 'checkbox') {
+      el.checked = !['', '0', 'false'].includes(value);
+    } else {
+      el.value = value;
+    }
+    $(el).trigger('change');
+    setStatus(`Obnovena výchozí hodnota pole ${clean(labelFor(el))}`);
+  }
+
+  // Find (Form Filler: Najít): text of the form and values of its fields, highlighted in document order.
+  const findBar = $q('.zfo-find');
+  const findInput = document.createElement('input');
+  findInput.type = 'search';
+  findInput.placeholder = 'Najít ve formuláři';
+  let findHits = [], findIndex = -1;
+  const highlights = window.CSS?.highlights;
+  function clearFind() {
+    highlights?.delete('zfo-find');
+    highlights?.delete('zfo-find-current');
+    page.querySelectorAll('.zfo-find-hit, .zfo-find-current').forEach(el => el.classList.remove('zfo-find-hit', 'zfo-find-current'));
+    findHits = []; findIndex = -1;
+  }
+  function runFind() {
+    clearFind();
+    const query = findInput.value.trim().toLocaleLowerCase('cs');
+    if (query) {
+      const walker = document.createTreeWalker(page, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (node.nodeType === Node.TEXT_NODE) {
+          const parent = node.parentElement;
+          if (!parent?.offsetParent || parent.closest('script, style, option')) continue;
+          const text = node.data.toLocaleLowerCase('cs');
+          for (let i = text.indexOf(query); i >= 0; i = text.indexOf(query, i + query.length)) {
+            const range = new Range();
+            range.setStart(node, i);
+            range.setEnd(node, i + query.length);
+            findHits.push({range, el: parent});
+          }
+        } else if (node.matches('input[type=text], textarea, select') && node.offsetParent) {
+          const value = node.tagName === 'SELECT' ? node.selectedOptions[0]?.text ?? '' : node.value;
+          if (value.toLocaleLowerCase('cs').includes(query)) { node.classList.add('zfo-find-hit'); findHits.push({el: node}); }
+        }
+      }
+      const ranges = findHits.filter(h => h.range).map(h => h.range);
+      if (highlights && ranges.length) highlights.set('zfo-find', new Highlight(...ranges));
+    }
+    stepFind(1);
+  }
+  function stepFind(direction) {
+    if (findBar.hidden) { openFind(); return; }
+    const count = $q('[data-find-count]');
+    if (!findHits.length) { count.textContent = findInput.value.trim() ? 'Nenalezeno' : ''; return; }
+    findHits[findIndex]?.el.classList.remove('zfo-find-current');
+    findIndex = (findIndex + direction + findHits.length) % findHits.length;
+    const hit = findHits[findIndex];
+    if (hit.range) highlights?.set('zfo-find-current', new Highlight(hit.range));
+    else { highlights?.delete('zfo-find-current'); hit.el.classList.add('zfo-find-current'); }
+    hit.el.scrollIntoView({block: 'center'});
+    count.textContent = `${findIndex + 1} z ${findHits.length}`;
+  }
+  function openFind() {
+    closeMenus();
+    findBar.hidden = false;
+    findInput.focus();
+    findInput.select();
+  }
+  function closeFind() { findBar.hidden = true; clearFind(); $q('[data-find-count]').textContent = ''; }
+  let findTimer;
+  findInput.addEventListener('input', () => { clearTimeout(findTimer); findTimer = setTimeout(runFind, 150); });
+  findInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { e.preventDefault(); stepFind(e.shiftKey ? -1 : 1); }
+    if (e.key === 'Escape') { e.preventDefault(); closeFind(); }
+  });
+  findBar.querySelectorAll('[data-find-step]').forEach(b => b.addEventListener('click', () => stepFind(Number(b.dataset.findStep))));
+  $q('[data-find-close]').addEventListener('click', closeFind);
+
+  // Zoom.
+  let zoom = 1;
+  // Until the user picks a zoom, a page wider than the space between the panels is shrunk to fit (never enlarged).
+  let autoFit = true;
+  const applyZoom = z => { zoom = Math.min(3, Math.max(.4, z)); page.style.zoom = zoom; $q('.zfo-zoom').textContent = Math.round(zoom * 100) + ' %'; };
+  const widthZoom = () => ($q('.zfo-stage').clientWidth - 48) / (page.getBoundingClientRect().width / zoom);
+  const fitWidth = () => applyZoom(widthZoom());
+  const autoZoom = () => { if (autoFit) applyZoom(Math.min(1, widthZoom())); };
+  const manualZoom = z => { autoFit = false; applyZoom(z); };
+  window.addEventListener('resize', autoZoom);
+
+  const actions = {
+    open: () => native.postMessage({action: 'open'}),
+    'zoom-in': () => manualZoom(zoom + .1),
+    'zoom-out': () => manualZoom(zoom - .1),
+    'zoom-fit': () => { autoFit = false; fitWidth(); },
+    panel: () => togglePanel('panel'),
+    help: () => togglePanel('help'),
+    print,
+    check: runCheck,
+    'import-data': importData,
+    'export-data': exportData,
+    recalc: () => { gtk_handler_start(); send(JSON.stringify({type: 'recalc_form', data: ''})); setStatus('Hodnoty přepočítány'); },
+    find: () => openFind(),
+    'find-next': () => stepFind(1),
+    'find-previous': () => stepFind(-1),
+    'reset-field': resetField,
+    reset: () => {
+      if (!confirm('Obnovit výchozí hodnoty ve všech polích formuláře? Neuložené změny se ztratí.')) return;
+      const url = new URL(location.href);
+      url.searchParams.set('blank', '1');
+      location.href = url;
+    },
+    'save-plain': async () => {
+      await queue;
+      if (signatures.some(s => !s.publisher)
+          && !confirm('Uložením bez podpisu se z formuláře odstraní stávající elektronický podpis. Pokračovat?')) return;
+      const res = await fetch('/save?s=' + SESSION, {method: 'POST'});
+      if (!res.ok) { setStatus('Chyba: ' + await res.text()); return; }
+      const result = await res.json();
+      signatures = result.signatures; changed = false; renderSignatures();
+      savedStatus('Uloženo do', result.saved);
+    },
+    save: () => { closeMenus(); signDialog.returnValue = ''; signDialog.showModal(); certSelect.focus(); },
+    sign: async () => {
+      await queue;
+      if (!certSelect.value) { setStatus('Vyber certifikát pro podpis.'); actions.save(); return; }
+      try { localStorage.setItem('zfo-cert', certSelect.value); } catch {}
+      setStatus('Podepisuji… (token si může vyžádat PIN)');
+      const res = await fetch('/save?s=' + SESSION + '&cert=' + encodeURIComponent(certSelect.value), {method: 'POST'});
+      if (!res.ok) { setStatus('Chyba: ' + await res.text()); return; }
+      const result = await res.json();
+      signatures = result.signatures; changed = false; renderSignatures();
+      savedStatus('Podepsáno a uloženo jako', result.saved);
+    },
+  };
+  for (const button of document.querySelectorAll('.zfo-bar [data-action], .zfo-close[data-action]')) {
+    button.addEventListener('click', () => actions[button.dataset.action]());
+  }
+  // Native menus call into the page through this.
+  window.zfoAction = name => actions[name]?.();
+  document.addEventListener('keydown', e => {
+    const shortcut = e.key === 'F9' ? (e.shiftKey ? 'check' : 'recalc')
+      : !e.metaKey ? null
+      : e.key === '+' || e.key === '=' ? 'zoom-in'
+      : e.key === '-' ? 'zoom-out'
+      : e.key.toLowerCase() === 's' ? (e.shiftKey ? 'save' : 'save-plain')
+      : e.key === 'p' ? 'print'
+      : e.key === 'f' ? 'find'
+      : e.key.toLowerCase() === 'g' ? (e.shiftKey ? 'find-previous' : 'find-next')
+      : e.key === 'Backspace' && e.shiftKey ? 'reset-field' : null;
+    if (!shortcut) return;
+    e.preventDefault();
+    actions[shortcut]();
+  });
+})(/* __zfo_shell__ */);
+</script>

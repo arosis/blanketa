@@ -1,0 +1,17 @@
+[req]
+distinguished_name=dn
+prompt=no
+[dn]
+C=CZ
+O=Blanketa TEST
+CN=Blanketa TEST CA (neduveryhodna)
+[v3_ca]
+basicConstraints=critical,CA:TRUE
+keyUsage=critical,keyCertSign,cRLSign
+subjectKeyIdentifier=hash
+[v3_user]
+basicConstraints=critical,CA:FALSE
+keyUsage=critical,digitalSignature,nonRepudiation
+extendedKeyUsage=emailProtection
+subjectKeyIdentifier=hash
+authorityKeyIdentifier=keyid

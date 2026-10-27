@@ -1,0 +1,10 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=ZFO Editor
+Terminal=false
+Exec=zfo_editor
+Icon=package_office
+Comment=ZFO editor allows user to interact with ZFO forms.
+Categories=Office
+MimeType=application/vnd.software602.filler.form+xml

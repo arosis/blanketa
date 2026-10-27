@@ -1,0 +1,127 @@
+----------------
+RELEASE NOTES
+----------------
+
+Version 0.3.2 (25th February 2011)
+----------------------------------
+- implemented fields with content type "out" (text fields without user interaction)
+- fixed issues with merging form data models at the form initialization time
+
+Version 0.3.1 (17th February 2011)
+----------------------------------
+- faster opening of the forms
+- fixed bug with opening forms that have model element at "unspecified" position 
+
+Version 0.3 (7th January 2011)
+------------------------------
+New features:
+
+- can open also .fo files (not zipped forms)
+- Save/SaveAs functionality
+		- "Save" overwrites currently opened form (Ctrl+S)
+		- "Save as" asks for new name and stores opened form under desired name 
+			(no keyboard shortcut)
+- Close Form functionality
+		- Ctrl+W closes opened form (no save is made) and displays start page
+- implemented application events: ViewData
+- implemented xpath extensions: GetNumSigns, GetDataStr, GetHash, SignLevel,
+	DataTransform, FormCreationDate, Save, SaveAs, Is_Changed, IntAdd, IntMul,
+	GetFormDataXML, GetFormXML, GetCurrentDataXpath, SetValueToData
+	(some xpath extensions occur as application events - data transformation, opening&saving 
+	forms and data - they are always used as app events)
+- "CheckData" event is partially implemented - document API provides method check_document,
+	however results are not displayed in the GUI
+- submit through http finished
+
+Changed:
+
+- submit methods revised, http timeout set to 10 seconds
+
+Fixed:
+
+- quoting of expressions fixed
+- other minor bugs discovered while coding 
+
+Known issues:
+
+- app can 'freeze' for a few seconds while trying to connect in network-submit methods
+- app can 'freeze' for a few seconds after providing the correct password
+	when opening a large and password protected form  	
+
+Version 0.2 (7th December 2010)
+------------------------------
+New features:
+
+- can open password-protected zfo
+- can handle attached files to the form
+	- provides buttons for adding/deleting attachment, attachment name is presented in input
+
+Changed:
+
+- way of handling repeating sections. Repeating sections
+are added "clean", not just copied (with data previously inserted).
+- saving of the document. When user saves the form, currently opened
+form remains unchanged - there is created new copy with the name user
+picks in the save file dialog. (Note: password protected forms are stored without
+password)
+
+Fixed:
+
+- problem with "data-switch" attribute referencing non-existing bind 
+- errors in calculations of repeating sections
+
+Known issues:
+
+- same as version 0.1
++ calculate event continues even if constraint on some dependent bind failed
+  
+
+
+Version 0.1 (November 2010)
+---------------------------
+
+Implemented features:
+
+- fo-html conversion 
+- DOM manipulation (repeating sections of the form), 
+- value storing & calculation
+- constraint and readonly attributes evaluation
+- form save&load
+- xpath extensions and application events not
+	mentioned in "missing features"
+
+Missing features 
+(according to "XPath výrazy,  funkce a aplikační události v 602XML"):
+
+- xml signature verification
+- missing xpath extensions: 
+CmdLineParam, GetNumSigns, GetSignProperty, GetDataStr, GetHash, 
+SignLevel, PartSignLevel, GetNumPages, CleanForm, Recalc, CheckData, 
+DataTransform, FormCreationDate, Save, SaveSigned, RefreshElements, 
+SaveAs, SaveAsSigned, GetTmpFileName, Is_Changed, Transform, GetSaveFileNameDialog, 
+LoadFormData, InsertSection, RemoveSection, GetOpenFileNameDialog,  PageNo, 
+SectionNo, RowNo, CellNo, FormatNumb, IntAdd, IntMul, Message_Box, QueryTextDialog, 
+XpathExpr, GetFormDataXML, GetFormXML, Print, ActivateField, GetCurrentDataXpath, SetValueToData, 
+SetListDataTo, Switch, SubmitData, GetFieldSignerIndex, XSLCheck, SystemDataChanged, TransformDataBranche
+
+- missing application events:
+Printpdf, Print, Checkdata, Submitpart, Addsect, Delsect, 
+Fillsect, Loadformdata, Openform, Saveformsign, Openbinddata, 
+Setdatato, Gotofield, Startfiller, Formtohtml, Printparam, 
+Openfiller, Loaddata, Signclick, Csvtoxml, Openfilefrombuffer, 
+Printpreview, Savebinddata, Openlink, Viewdata
+
+
+Known issues:
+
+- in Mandriva Linux a broken package python-lxml prevents the zfo-editor from
+  functioning properly. To circumvent this problem,  the lxml package was
+  removed from the dependency list of zfo-editor in Mandriva RPM and should
+  be installed by hand instead.
+  To do so, the following steps are necessary:
+   
+    1/ install packages libxslt-devel and libxml++2.6-devel
+    2/ a root run "easy_install lxml==2.2.6"
+
+- problem with very long html selects (>1000 options) - drawing of such select
+  takes html-widget quite a long time => the gui 'freezes' for some time

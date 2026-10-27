@@ -1,0 +1,12 @@
+Metadata-Version: 1.1
+Name: zfo-editor
+Version: 0.3.2
+Summary: zfo editor
+Home-page: http://labs.nic.cz/zfo-editor/
+Author: CZ.NIC Labs
+Author-email: zfo-editor@labs.nic.cz
+License: GNU LGPL
+Description: ZFO editor allows user to interact with ZFO forms.
+Platform: Unix
+Requires: webkit
+Requires: lxml

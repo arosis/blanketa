@@ -1,0 +1,7 @@
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+   <mime-type type="application/vnd.software602.filler.form+xml">
+     <comment>602XML Form</comment>
+     <glob pattern="*.zfo"/>
+     <generic-icon name="package_office"/>
+   </mime-type>
+</mime-info>

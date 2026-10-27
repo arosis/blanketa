@@ -1,0 +1,14 @@
+include scripts/*.js
+include styles/*.css
+include styles/smoothness/*.css
+include styles/smoothness/images/*.png
+include xslt/*.xsl
+include config/log.conf
+include start_page/start.html
+include release.py
+include INSTALL
+include LICENSE
+include RELEASE_NOTES.txt
+include zfo-editor.xml
+include zfo-editor.desktop
+include packaging/*.sh
