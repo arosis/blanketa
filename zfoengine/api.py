@@ -1,6 +1,6 @@
 '''
 Public API of zfoengine - a GUI-less Python 3 port of the backend of CZ.NIC's
-zfo-editor 0.3.2 (GPL). It replaces the GTK main loop of zfo_gui.main(): the
+zfo-editor 0.3.2 (GNU LGPL v2 or later). It replaces the GTK main loop of zfo_gui.main(): the
 browser JavaScript (zfo_script.js, repe_sections.js) sends
 {"type": ..., "data": ...} messages over HTTP instead of document.title, and
 the caller returns the response list produced here.
