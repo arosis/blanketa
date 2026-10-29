@@ -41,10 +41,11 @@ def pyinstaller():
     else:
         args += ["--hidden-import", "qtpy", "--collect-submodules", "PyQt6.QtWebEngineWidgets"]
     subprocess.run([*args, str(ROOT / "desktop.py")], check=True, cwd=ROOT)
-    # LGPL: licence texts and the source of the modified library travel with the app.
+    # GPL/LGPL: licence texts and the source of the modified library travel with the app.
     licence = DIST / "Blanketa/Licence"
     shutil.rmtree(licence, ignore_errors=True)
     (licence / "zfoengine").mkdir(parents=True)
+    shutil.copy(ROOT / "LICENSE", licence)
     shutil.copy(ROOT / "THIRD-PARTY-NOTICES.md", licence)
     for f in [*(ROOT / "zfoengine").glob("*.py"), ROOT / "zfoengine/LICENSE"]:
         shutil.copy(f, licence / "zfoengine")

@@ -171,8 +171,11 @@ Kontrola podpisu bez okna (používá ji i CI):
 
 ## Licence a cizí kód
 
+Blanketa je svobodný software pod licencí [GNU GPL 3.0](LICENSE): kdokoli ji smí zdarma používat, šířit a upravovat,
+upravené verze ale musí šířit se zdrojovým kódem pod stejnou licencí. Zdrojový kód každé vydané verze je v tomto repozitáři.
+
 - `vendor/zfo-editor-src/` – zfo-editor, © CZ.NIC, GNU LGPL 2.0 nebo novější. `zfoengine/` je jeho upravený port pod stejnou licencí.
 - `vendor/pdfjs/` – PDF.js 4.10.38, © Mozilla, Apache 2.0.
 - Python knihovny podle `requirements.txt` mají vlastní licence (pyHanko MIT, pypdf BSD, lxml BSD…).
 
-Přehled a podmínky jsou v [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). Sestavená aplikace nese licence a zdroj `zfoengine/` v `Contents/Resources/Licence/`.
+Přehled a podmínky jsou v [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md). Sestavená aplikace nese licence a zdroj `zfoengine/` ve složce `Licence` (na Macu `Contents/Resources/Licence/`).

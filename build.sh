@@ -22,10 +22,10 @@ cp build/blanketa "$APP/Contents/MacOS/Blanketa"
 cp macsign/macsign "$APP/Contents/Resources/macsign"
 cp assets/blanketa.icns "$APP/Contents/Resources/blanketa.icns"
 cp -R build/dist/zfo-server "$APP/Contents/Resources/zfo-server"
-# LGPL: licence texts and the source of the modified library travel with the app.
+# GPL/LGPL: licence texts and the source of the modified library travel with the app.
 L="$APP/Contents/Resources/Licence"
 mkdir -p "$L/zfoengine"
-cp THIRD-PARTY-NOTICES.md "$L/"
+cp LICENSE THIRD-PARTY-NOTICES.md "$L/"
 cp zfoengine/*.py zfoengine/LICENSE "$L/zfoengine/"
 cp vendor/pdfjs/LICENSE "$L/pdfjs-LICENSE"
 codesign --force --deep --sign - "$APP"
