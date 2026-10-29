@@ -4,7 +4,6 @@
 """
 import copy
 import http.client
-import io
 import json
 import sys
 import tempfile

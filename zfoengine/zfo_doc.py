@@ -1664,7 +1664,7 @@ class ZFO_document:
         
         # store filename with content path to dictionary
         content_bind = self._find_bind_elem(field)[0]
-        content_path = self._get_abs_data_path(content_bind, repe_data)
+        self._get_abs_data_path(content_bind, repe_data)
                 
       mtypebind_id = input.get("mediatypebind")
       old_mtype = None

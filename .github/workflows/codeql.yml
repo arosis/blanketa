@@ -1,7 +1,7 @@
 # Code scanning (CodeQL): our Python, the pages' JavaScript and the workflows themselves. Upstream code in vendor/
-# (PDF.js, zfo-editor) is left out, see codeql-config.yml. Swift (macapp, macsign) needs a macOS build and is
-# covered by the review checklist instead.
-name: codeql
+# (PDF.js, zfo-editor) is left out, see codeql-config.yml. Swift (macapp, macsign) would need a macOS build and is
+# not scanned.
+name: Code scanning (CodeQL)
 
 on:
   push:
@@ -17,6 +17,7 @@ permissions:
 
 jobs:
   analyze:
+    name: Analyze ${{ matrix.language }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:

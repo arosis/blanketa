@@ -2,7 +2,6 @@
 
     python -I tests/test_app.py
 """
-import io
 import sys
 import tempfile
 import time

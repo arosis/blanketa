@@ -1,17 +1,25 @@
 # Builds Blanketa for macOS, Windows and Linux, tests signing on each, and on a version tag (v*) publishes a release.
-# Run by hand from the Actions tab, or by pushing a tag:  git tag v0.1.0 && git push origin v0.1.0
-name: build
+# Runs for every pull request into main (main's ruleset requires the three platform jobs), by hand from the Actions
+# tab, or by pushing a tag:  git tag v0.1.0 && git push origin v0.1.0
+name: Build, test and release
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
   push:
     tags: ["v*"]
 
 permissions:
   contents: read
 
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   macos:
+    name: Build and test on macOS
     runs-on: macos-15
     timeout-minutes: 45
     steps:
@@ -36,6 +44,7 @@ jobs:
         with: {name: blanketa-macos, path: "dist/Blanketa-*-macos.*"}
 
   windows:
+    name: Build and test on Windows
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
@@ -103,6 +112,7 @@ jobs:
         with: {name: windows-screenshot, path: "dist/windows-*.png\ndist/serve-*.txt", if-no-files-found: ignore}
 
   linux:
+    name: Build and test on Linux
     runs-on: ubuntu-22.04
     timeout-minutes: 45
     steps:
@@ -145,6 +155,7 @@ jobs:
         with: {name: linux-screenshot, path: dist/linux-screenshot.png, if-no-files-found: ignore}
 
   release:
+    name: Publish release
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [macos, windows, linux]
     runs-on: ubuntu-latest

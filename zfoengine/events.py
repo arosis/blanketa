@@ -32,8 +32,6 @@ clicks No in message dialog with question or in case of exception in processed e
 '''
 
 from . import tools
-import os
-import base64
 
 from . import evaluate
 from . import expr_quoting
@@ -45,7 +43,6 @@ from . import msg_class as mc
 from . import msgs
 from . import global_var
 import json
-import lxml.etree as etree
 
 class Event():  
   break_processing = False
