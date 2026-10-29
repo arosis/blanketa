@@ -21,14 +21,14 @@ jobs:
       - name: Python environment
         run: python -m venv .venv && .venv/bin/pip install -q -r requirements.txt
       - name: Engine tests
-        run: |
-          .venv/bin/python -I tests/test_engine.py
-          .venv/bin/python -I tests/test_security.py
+        run: .venv/bin/python -I tests/test_engine.py
       - name: Signing selftest (test keychain)
         run: |
           (cd macsign && swiftc -O -suppress-warnings macsign.swift -o macsign)
           tools/make-test-pki.sh
           .venv/bin/python -I tools/selftest.py test
+          # Renders forms, which asks macsign for trust verdicts: it runs once macsign is built.
+          .venv/bin/python -I tests/test_security.py
       - name: Build app
         run: ./build.sh
       - uses: actions/upload-artifact@v4
@@ -63,17 +63,32 @@ jobs:
       - name: Smoke test of the built app
         shell: pwsh
         run: |
-          Start-Process dist\Blanketa\Blanketa.exe -ArgumentList '--serve', '--file', "$PWD\samples-pdf\zadost.pdf", '8700'
-          Start-Sleep 15
-          $page = Invoke-WebRequest http://127.0.0.1:8700/ -UseBasicParsing
+          function Save-Screenshot($name) {
+            Add-Type -AssemblyName System.Windows.Forms, System.Drawing
+            $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+            $shot = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height
+            [System.Drawing.Graphics]::FromImage($shot).CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
+            $shot.Save("$PWD\dist\$name")
+          }
+          # The first start of a fresh build can be slow (Defender scans it); a crash shows an error dialog,
+          # which the screenshot catches.
+          $server = Start-Process dist\Blanketa\Blanketa.exe -PassThru -ArgumentList '--serve', '--file', "$PWD\samples-pdf\zadost.pdf", '8700' `
+            -RedirectStandardOutput dist\serve-out.txt -RedirectStandardError dist\serve-err.txt
+          $page = $null
+          foreach ($i in 1..90) {
+            try { $page = Invoke-WebRequest http://127.0.0.1:8700/ -UseBasicParsing; break } catch { Start-Sleep 1 }
+            if ($server.HasExited) { break }
+          }
+          if (-not $page) {
+            Save-Screenshot 'windows-server-failed.png'
+            Get-Content dist\serve-out.txt, dist\serve-err.txt -ErrorAction SilentlyContinue
+            throw "server did not answer (exited: $($server.HasExited), code: $($server.ExitCode))"
+          }
           if ($page.Content -notmatch 'pdf.html|zfoNative|SESSION') { throw 'page did not render' }
+          Stop-Process $server
           Start-Process dist\Blanketa\Blanketa.exe -ArgumentList "$PWD\samples\cssz-onz\form.zfo"
           Start-Sleep 45
-          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-          $screen = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-          $shot = New-Object System.Drawing.Bitmap $screen.Width, $screen.Height
-          [System.Drawing.Graphics]::FromImage($shot).CopyFromScreen($screen.Location, [System.Drawing.Point]::Empty, $screen.Size)
-          $shot.Save("$PWD\dist\windows-screenshot.png")
+          Save-Screenshot 'windows-screenshot.png'
       - uses: actions/upload-artifact@v4
         with:
           name: blanketa-windows
@@ -82,7 +97,7 @@ jobs:
             dist/Blanketa-*-windows-x64.zip
       - uses: actions/upload-artifact@v4
         if: always()
-        with: {name: windows-screenshot, path: dist/windows-screenshot.png, if-no-files-found: ignore}
+        with: {name: windows-screenshot, path: "dist/windows-*.png\ndist/serve-*.txt", if-no-files-found: ignore}
 
   linux:
     runs-on: ubuntu-22.04
