@@ -97,7 +97,6 @@
   body.help-hidden .zfo-help-panel { display: none; }
   .zfo-btn:disabled { opacity: .35; pointer-events: none; }
   body.zfo-empty .zfo-page { display: none; }
-  .zfo-subhead { margin: 12px 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); }
   .zfo-empty-state { margin: 18vh auto 0; text-align: center; color: var(--muted); font-size: 14px; }
   .zfo-empty-state svg { width: 56px; height: 56px; color: var(--accent); margin-bottom: 14px; }
   .zfo-empty-state h1 { font-size: 20px; font-weight: 600; color: var(--text); margin: 0 0 6px; }
@@ -359,6 +358,8 @@
   <div data-signatures="data"></div>
   <h3>Vydavatel formuláře</h3>
   <div data-signatures="publisher"></div>
+  <h3 data-license-head hidden>Držitel licence</h3>
+  <div data-signatures="license"></div>
 </aside>
 
 <footer class="zfo-status">
@@ -569,8 +570,9 @@
       (changed && data.length ? '<div class="zfo-note">Formulář byl změněn. Stávající podpis se při uložení nahradí novým.</div>' : '') +
       (data.length ? data.map(card).join('') : '<div class="zfo-empty">Data formuláře zatím nejsou podepsaná.</div>');
     $q('[data-signatures="publisher"]').innerHTML =
-      (publication ? card(publication) : '<div class="zfo-empty">Formulář nebyl dosud publikován – nemá podpis vydavatele.</div>')
-      + (license ? '<h4 class="zfo-subhead">Držitel licence</h4>' + card(license) : '');
+      publication ? card(publication) : '<div class="zfo-empty">Formulář nebyl dosud publikován – nemá podpis vydavatele.</div>';
+    $q('[data-license-head]').hidden = !license;
+    $q('[data-signatures="license"]').innerHTML = license ? card(license) : '';
   }
   renderSignatures();
 
