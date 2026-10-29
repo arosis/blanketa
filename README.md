@@ -176,6 +176,10 @@ Kontrola podpisu bez okna (používá ji i CI):
 - Na Linuxu se důvěryhodnost certifikátů hodnotí podle systémové sady kořenových CA; tokeny přes PKCS#11 zatím nejsou podporované (jen soubory `.pfx`).
 - Na Windows a Linuxu se PDF tiskne přes výchozí prohlížeč PDF v systému.
 
+## Bezpečnost
+
+Bezpečnostní chyby prosím hlaste soukromě, ne veřejným issue – postup je v [SECURITY.md](SECURITY.md).
+
 ## Licence a cizí kód
 
 Blanketa je svobodný software pod licencí [GNU GPL 3.0](LICENSE): kdokoli ji smí zdarma používat, šířit a upravovat,
