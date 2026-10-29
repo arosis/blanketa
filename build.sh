@@ -2,6 +2,7 @@
 # Builds "Blanketa.app" into build/: Swift shell + bundled Python server + macsign.
 set -euo pipefail
 cd "$(dirname "$0")"
+VERSION=$(cat VERSION)
 V=vendor/zfo-editor-src/zfo-editor-0.3.2
 APP="build/Blanketa.app"
 
@@ -20,6 +21,9 @@ swiftc -O -suppress-warnings -target "$MACOS_TARGET" macapp/main.swift -o build/
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp macapp/Info.plist "$APP/Contents/Info.plist"
+# The version shown in Finder and "About" comes from VERSION, like the package names.
+plutil -replace CFBundleShortVersionString -string "$VERSION" "$APP/Contents/Info.plist"
+plutil -replace CFBundleVersion -string "$VERSION" "$APP/Contents/Info.plist"
 cp build/blanketa "$APP/Contents/MacOS/Blanketa"
 cp macsign/macsign "$APP/Contents/Resources/macsign"
 cp assets/blanketa.icns "$APP/Contents/Resources/blanketa.icns"
@@ -34,7 +38,6 @@ codesign --force --deep --sign - "$APP"
 echo "built: $APP"
 
 # Download packages: a zip (keeps the app's signature and attributes) and a disk image.
-VERSION=$(cat VERSION)
 mkdir -p dist
 rm -f "dist/Blanketa-$VERSION-macos.zip" "dist/Blanketa-$VERSION-macos.dmg"
 ditto -c -k --keepParent "$APP" "dist/Blanketa-$VERSION-macos.zip"

@@ -1,6 +1,6 @@
 # Builds Blanketa for macOS, Windows and Linux, tests signing on each, and on a version tag (v*) publishes a release.
 # Runs for every pull request into main (main's ruleset requires the three platform jobs), by hand from the Actions
-# tab, or by pushing a tag:  git tag v0.1.0 && git push origin v0.1.0
+# tab, or by pushing a tag that matches VERSION:  git tag v0.1.1 && git push origin v0.1.1
 name: Build, test and release
 
 on:
