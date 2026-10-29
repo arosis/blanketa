@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from lxml import etree  # noqa: E402
+from pypdf import PdfWriter  # noqa: E402
 
 import certstore  # noqa: E402
 import pdf_sign  # noqa: E402
@@ -33,6 +34,18 @@ def main(source, password=None):
     sigs = pdf_sign.signatures(pdf)
     print("pdf:", [(s["subject"], s["intact"], s["covers_whole"]) for s in sigs])
     assert sigs and sigs[-1]["intact"] and sigs[-1]["covers_whole"], "PDF signature does not verify"
+
+    # Government forms are often encrypted with an owner password only; they must fill and sign the same way.
+    writer = PdfWriter(clone_from=io.BytesIO((ROOT / "samples-pdf/zadost.pdf").read_bytes()))
+    writer.encrypt(user_password="", owner_password="selftest", algorithm="AES-128")
+    encrypted = io.BytesIO()
+    writer.write(encrypted)
+    pdf = pdf_sign.sign(pdf_sign.fill(encrypted.getvalue(), {"jmeno": "Jana Nováková"}), key, cert)
+    sigs = pdf_sign.signatures(pdf)
+    print("encrypted pdf:", [(s["subject"], s["intact"], s["covers_whole"]) for s in sigs],
+          pdf_sign.form_fields(pdf).get("jmeno"))
+    assert sigs and sigs[-1]["intact"] and pdf_sign.form_fields(pdf).get("jmeno") == "Jana Nováková", \
+        "encrypted PDF does not fill or verify"
 
     fo = zipfile.ZipFile(ROOT / "samples/cuzk/form.zfo").read("form.fo")
     signed = zfo_sign.sign(fo, key, cert, "sha256")

@@ -1,6 +1,7 @@
 """Filling and signing PDF forms (AcroForm). Every change is an incremental update, so earlier signatures stay valid."""
 import io
 import logging
+import struct
 from datetime import timezone
 from pathlib import Path
 
@@ -17,7 +18,7 @@ from pyhanko.sign.validation import validate_pdf_signature
 from pyhanko.stamp import TextStampStyle
 from pyhanko_certvalidator.registry import SimpleCertificateStore
 from pypdf import PdfReader, PdfWriter
-from pypdf.generic import DictionaryObject, NameObject, NumberObject
+from pypdf.generic import ArrayObject, DictionaryObject, NameObject, NumberObject, StreamObject
 
 # Trust is judged by macOS (keychain.trust); pyHanko's own path building only logs noise about it.
 logging.getLogger("pyhanko").setLevel(logging.CRITICAL)
@@ -56,39 +57,70 @@ def form_fields(pdf):
 
 
 class _IncrementWriter(PdfWriter):
-    """pypdf always ends an incremental update with a cross-reference stream; after a classic xref table
-    macOS (CoreGraphics, Preview) then cannot read the file. Such files get a classic table again."""
+    """Writes the incremental update itself, for two cases pypdf gets wrong:
+    - after a classic xref table pypdf adds a cross-reference stream, which macOS (CoreGraphics, Preview) cannot
+      read; such files get a classic table again;
+    - pypdf refuses encrypted files. Government forms are often encrypted with an owner password only (anyone may
+      open and fill them); the changed objects are encrypted with the document's own key."""
+
+    def write_stream(self, stream):
+        if not (self.incremental and self._reader.is_encrypted):
+            return super().write_stream(stream)
+        self._reader.stream.seek(0)
+        stream.write(self._reader.stream.read(-1))
+        if self.list_objects_in_increment():
+            self._write_increment(stream)
 
     def _write_increment(self, stream):
-        start = self._reader._startxref
-        self._reader.stream.seek(start)
-        if not self._reader.stream.read(4) == b"xref":
+        reader = self._reader
+        start = reader._startxref
+        reader.stream.seek(start)
+        classic = reader.stream.read(4) == b"xref"
+        encryption = reader._encryption if reader.is_encrypted else None
+        if not classic and encryption is None:
             return super()._write_increment(stream)
         positions = {}
         for i, obj in enumerate(self._objects):
             if obj is not None and (i >= len(self._original_hash) or obj.hash_bin() != self._original_hash[i]):
                 positions[i + 1] = stream.tell()
                 stream.write(f"{i + 1} 0 obj\n".encode())
-                obj.write_to_stream(stream)
+                (encryption.encrypt_object(obj, i + 1, 0) if encryption else obj).write_to_stream(stream)
                 stream.write(b"\nendobj\n")
-        xref = stream.tell()
-        stream.write(b"xref\n")
-        ids = sorted(positions)
-        while ids:
-            run = [ids.pop(0)]
-            while ids and ids[0] == run[-1] + 1:
-                run.append(ids.pop(0))
-            stream.write(f"{run[0]} {len(run)}\n".encode())
-            stream.write(b"".join(f"{positions[i]:010d} 00000 n\r\n".encode() for i in run))
-        trailer = DictionaryObject({NameObject("/Size"): NumberObject(len(self._objects) + 1),
-                                    NameObject("/Root"): self.root_object.indirect_reference,
+        trailer = DictionaryObject({NameObject("/Root"): self.root_object.indirect_reference,
                                     NameObject("/Prev"): NumberObject(start)})
         if self._info is not None:
             trailer[NameObject("/Info")] = self._info.indirect_reference
         if self._ID:
             trailer[NameObject("/ID")] = self._ID
-        stream.write(b"trailer\n")
-        trailer.write_to_stream(stream)
+        if encryption is not None:
+            trailer[NameObject("/Encrypt")] = reader.trailer.raw_get("/Encrypt")
+        xref = stream.tell()
+        if classic:
+            trailer[NameObject("/Size")] = NumberObject(len(self._objects) + 1)
+            stream.write(b"xref\n")
+            ids = sorted(positions)
+            while ids:
+                run = [ids.pop(0)]
+                while ids and ids[0] == run[-1] + 1:
+                    run.append(ids.pop(0))
+                stream.write(f"{run[0]} {len(run)}\n".encode())
+                stream.write(b"".join(f"{positions[i]:010d} 00000 n\r\n".encode() for i in run))
+            stream.write(b"trailer\n")
+            trailer.write_to_stream(stream)
+        else:
+            # A cross-reference stream is never encrypted; it lists itself too.
+            own = len(self._objects) + 1
+            positions[own] = xref
+            ids = sorted(positions)
+            trailer.update({NameObject("/Type"): NameObject("/XRef"), NameObject("/Size"): NumberObject(own + 1),
+                            NameObject("/W"): ArrayObject([NumberObject(1), NumberObject(4), NumberObject(1)]),
+                            NameObject("/Index"): ArrayObject(NumberObject(n) for i in ids for n in (i, 1))})
+            table = StreamObject()
+            table.update(trailer)
+            table.set_data(b"".join(struct.pack(">BIB", 1, positions[i], 0) for i in ids))
+            stream.write(f"{own} 0 obj\n".encode())
+            table.flate_encode().write_to_stream(stream)
+            stream.write(b"\nendobj\n")
         stream.write(f"\nstartxref\n{xref}\n%%EOF\n".encode())
 
 
@@ -155,9 +187,17 @@ class KeychainSigner(signers.Signer):
         return self.key.sign(data, padding.PKCS1v15(), hashes.SHA256())
 
 
+def _open(pdf):
+    """pyHanko reader; a document encrypted with an owner password only opens with an empty user password."""
+    reader = PdfFileReader(io.BytesIO(pdf), strict=False)
+    if reader.encrypted:
+        reader.decrypt("")
+    return reader
+
+
 def empty_signature_field(pdf):
     """Name of the form's first unsigned signature field, where the signature appears; None signs invisibly."""
-    reader = PdfFileReader(io.BytesIO(pdf), strict=False)
+    reader = _open(pdf)
     for name, value, _ in fields.enumerate_sig_fields(reader, filled_status=False):
         return name
     return None
@@ -167,6 +207,8 @@ def sign(pdf, key, cert, reason=None, location=None, placement=None):
     """Signs into the form's empty signature field. Without one, a new field is added: visible where `placement`
     ({"page": 0-based index, "box": [x1, y1, x2, y2] in PDF points}) puts it, otherwise invisible."""
     writer = IncrementalPdfFileWriter(io.BytesIO(pdf), strict=False)
+    if writer.prev.encrypted:
+        writer.encrypt("")
     field = empty_signature_field(pdf)
     new_field = None
     if field is None:
@@ -184,7 +226,7 @@ def sign(pdf, key, cert, reason=None, location=None, placement=None):
 
 def signatures(pdf):
     """One dict per signature, in signing order, shaped like zfo_verify.describe."""
-    reader = PdfFileReader(io.BytesIO(pdf), strict=False)
+    reader = _open(pdf)
     result = []
     for sig in reader.embedded_signatures:
         cert = sig.signer_cert

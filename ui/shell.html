@@ -212,6 +212,29 @@
     padding: 0 !important; border-style: none !important; vertical-align: top;
   }
   .zfo-page td:has(*):has(+ td > button[zfo-app-event*="addsect"]) { border-right: 0.75pt solid #000 !important; }
+  /* A date field and its picker button share one line, as in Form Filler: the button is a small calendar icon. */
+  .zfo-page td:has(> .ui-datepicker-trigger) { white-space: nowrap; }
+  .zfo-page td > input.date-pick { width: calc(100% - 20px) !important; vertical-align: top; }
+  .zfo-page .ui-datepicker-trigger {
+    box-sizing: border-box; width: 20px; height: 100%; min-height: 22px; margin: 0; padding: 0; vertical-align: top;
+    border: none; border-left: 1px solid rgba(0, 0, 0, .15); font-size: 0; cursor: pointer;
+    background: var(--field) center / 14px 14px no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14' fill='none' stroke='%23333' stroke-width='1.2'%3E%3Crect x='1.5' y='2.5' width='11' height='10' rx='1'/%3E%3Cpath d='M1.5 5.5h11M4.5 1v3M9.5 1v3'/%3E%3C/svg%3E");
+  }
+  .zfo-page .ui-datepicker-trigger:disabled { background-color: var(--field-readonly); cursor: default; opacity: .5; }
+  /* A repeating block's +/- buttons sit in the margin beside the paper, so the block keeps its place on the page
+     (some forms draw their text as a picture the fields have to line up with). */
+  .zfo-page [class~="602-repetition-block"] { position: relative; }
+  .zfo-page [class~="602-repetition-block"] > button[onclick^="clone_div"],
+  .zfo-page [class~="602-repetition-block"] > button[onclick^="del_div"] {
+    position: absolute; left: -28px; width: 20px; height: 20px; padding: 0; border: 1px solid #adadad; border-radius: 2px;
+    background: linear-gradient(#fff, #e6e6e6); font: 13px/16px Tahoma, sans-serif; color: #000; cursor: pointer;
+  }
+  .zfo-page [class~="602-repetition-block"] > button[onclick^="clone_div"] { top: 0; }
+  .zfo-page [class~="602-repetition-block"] > button[onclick^="del_div"] { top: 24px; }
+  .zfo-page [class~="602-repetition-block"] > button[onclick^="del_div"] + br { display: none; }
+  /* Over a background picture, blocks keep their margins apart as 602 lays them out (CSS would collapse them),
+     so every field lands on its box. */
+  .zfo-page #zfo_form > div[style*="background-image"] div { display: flow-root; }
   #pending_request { position: fixed !important; inset: 52px 0 28px 0 !important; width: auto !important; height: auto !important; }
 </style>
 
