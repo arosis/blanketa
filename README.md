@@ -17,7 +17,8 @@ Formuláře podepsané Blanketou otevře i Software602 Form Filler a podpis uzn�
 ## Podpora
 
 Blanketa je zdarma a zdarma zůstane. Pokud vám ušetřila čas, můžete na její další vývoj přispět libovolnou částkou
-převodem na účet **7133557349/0800** (IBAN CZ43 0800 0000 0071 3355 7349). QR platbu najdete v aplikaci pod
+převodem na účet **7133557349/0800** (IBAN CZ43 0800 0000 0071 3355 7349) nebo kartou přes
+[GitHub Sponsors](https://github.com/sponsors/arosis). QR platbu najdete v aplikaci pod
 „Podpořit Blanketu“ (na Macu v menu Blanketa, jinde v menu Nápověda). Děkuji!
 
 ## Stažení a instalace
