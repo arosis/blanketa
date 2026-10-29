@@ -37,15 +37,15 @@ jobs:
       - name: Python environment
         run: python -m pip install -q -r requirements-desktop.txt pyinstaller==6.22.3
       - name: Engine tests
-        run: python -I tests/test_engine.py
+        run: python -X utf8 -I tests/test_engine.py
       - name: Signing selftest (Windows certificate store and PFX file)
         shell: pwsh
         run: |
           bash tools/make-test-pki.sh
           $password = ConvertTo-SecureString test -AsPlainText -Force
           Import-PfxCertificate -FilePath pki\user.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password | Out-Null
-          python -I tools/selftest.py system
-          python -I tools/selftest.py test
+          python -X utf8 -I tools/selftest.py system
+          python -X utf8 -I tools/selftest.py test
       - name: Inno Setup
         shell: pwsh
         run: if (-not (Get-Command iscc -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
