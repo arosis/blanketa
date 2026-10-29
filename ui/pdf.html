@@ -307,6 +307,7 @@ __SHELL_STYLE__
   const zoomTo = scale => { autoFit = false; viewer.currentScale = Math.min(4, Math.max(.25, scale)); };
   const actions = {
     open: () => native?.postMessage({action: 'open'}),
+    support: () => zfoSupport(),
     'save-plain': async () => {
       closeMenus();
       try { await saved(await post('/pdf-save'), 'Uloženo do'); } catch (e) { setStatus('Chyba: ' + e.message); }

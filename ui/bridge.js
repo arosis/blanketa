@@ -79,3 +79,63 @@ window.zfoCertificates = () => {
     remember: () => { try { localStorage.setItem('zfo-cert', select.value); } catch {} },
   };
 };
+
+// Opens a web page in the system browser; the app windows only ever show local forms.
+window.zfoOpenUrl = url => {
+  if (!/^https:\/\//.test(url)) return;
+  if (window.zfoNative) window.zfoNative.postMessage({action: 'openUrl', url});
+  else window.open(url, '_blank', 'noopener');
+};
+
+// "Podpořit Blanketu": the app is free; this shows how to send a voluntary contribution. The QR code is a Czech
+// QR platba (SPD) for the account below without an amount, so the payer chooses it in their bank app.
+window.zfoSupport = (() => {
+  const SUPPORT = {
+    account: '7133557349/0800',
+    iban: 'CZ43 0800 0000 0071 3355 7349',
+    qr: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 164 164"><path transform="scale(4)" stroke="#000" d="M2 2.5h7m1 0h1m1 0h1m2 0h2m4 0h2m1 0h2m1 0h4m1 0h7m-37 1h1m5 0h1m4 0h5m1 0h3m6 0h1m3 0h1m5 0h1m-37 1h1m1 0h3m1 0h1m2 0h1m1 0h4m1 0h3m2 0h4m1 0h3m1 0h1m1 0h3m1 0h1m-37 1h1m1 0h3m1 0h1m1 0h2m4 0h1m5 0h1m1 0h4m1 0h1m2 0h1m1 0h3m1 0h1m-37 1h1m1 0h3m1 0h1m1 0h3m5 0h2m2 0h1m1 0h3m2 0h1m2 0h1m1 0h3m1 0h1m-37 1h1m5 0h1m1 0h2m1 0h1m1 0h1m1 0h3m1 0h1m2 0h1m1 0h1m5 0h1m5 0h1m-37 1h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7m-29 1h5m1 0h3m2 0h5m3 0h1m-28 1h1m3 0h1m1 0h4m2 0h1m2 0h2m2 0h4m1 0h1m4 0h5m2 0h1m-37 1h4m5 0h3m2 0h1m3 0h2m2 0h2m1 0h3m1 0h1m2 0h3m1 0h1m-35 1h7m4 0h1m1 0h1m1 0h3m1 0h4m2 0h1m1 0h1m1 0h1m2 0h1m-35 1h1m4 0h1m2 0h1m1 0h1m1 0h2m1 0h3m1 0h4m5 0h1m3 0h1m1 0h2m-36 1h2m1 0h1m2 0h7m3 0h3m2 0h1m1 0h1m2 0h8m2 0h1m-35 1h1m2 0h1m1 0h1m5 0h2m1 0h1m3 0h1m1 0h4m1 0h1m2 0h1m1 0h2m2 0h1m-36 1h1m2 0h3m1 0h3m1 0h1m2 0h1m1 0h1m2 0h2m1 0h1m3 0h3m2 0h3m-35 1h1m1 0h4m1 0h2m1 0h1m1 0h1m3 0h3m1 0h2m1 0h1m2 0h1m1 0h1m1 0h1m1 0h5m-37 1h1m1 0h3m1 0h1m2 0h1m2 0h3m3 0h2m4 0h1m1 0h2m1 0h3m2 0h1m-33 1h1m2 0h1m4 0h2m1 0h2m1 0h2m1 0h2m2 0h1m2 0h4m2 0h1m2 0h2m-34 1h4m6 0h2m1 0h2m2 0h1m2 0h1m3 0h1m1 0h1m2 0h1m-33 1h2m6 0h2m1 0h2m4 0h2m2 0h1m2 0h1m2 0h1m2 0h1m3 0h1m1 0h1m-37 1h1m1 0h1m1 0h3m1 0h3m2 0h1m1 0h1m1 0h3m1 0h1m1 0h1m2 0h1m1 0h4m4 0h1m-34 1h1m5 0h5m2 0h3m1 0h1m1 0h4m2 0h1m1 0h3m1 0h1m-33 1h2m1 0h4m1 0h1m2 0h1m1 0h2m1 0h1m1 0h4m3 0h1m1 0h1m3 0h1m1 0h1m-34 1h1m2 0h1m3 0h1m3 0h2m1 0h1m3 0h4m4 0h2m3 0h2m1 0h1m-36 1h1m1 0h4m1 0h1m5 0h3m2 0h2m3 0h2m3 0h2m2 0h2m-35 1h2m1 0h1m1 0h1m1 0h2m2 0h4m2 0h3m3 0h1m1 0h4m3 0h2m1 0h2m-35 1h1m2 0h2m2 0h7m3 0h1m1 0h4m2 0h3m-25 1h1m2 0h1m3 0h6m1 0h3m1 0h1m6 0h1m2 0h2m-35 1h2m1 0h2m1 0h7m1 0h1m1 0h1m4 0h1m4 0h1m1 0h9m-29 1h2m1 0h1m1 0h3m2 0h1m1 0h6m2 0h1m3 0h1m3 0h1m-37 1h7m1 0h3m1 0h1m2 0h1m1 0h1m2 0h1m2 0h1m1 0h1m1 0h2m1 0h1m1 0h1m1 0h1m-35 1h1m5 0h1m2 0h1m2 0h2m2 0h4m2 0h2m4 0h1m3 0h5m-37 1h1m1 0h3m1 0h1m1 0h1m1 0h2m6 0h2m2 0h1m1 0h1m3 0h5m1 0h1m-35 1h1m1 0h3m1 0h1m3 0h3m1 0h1m1 0h1m2 0h2m2 0h1m1 0h2m1 0h1m1 0h1m3 0h1m1 0h1m-37 1h1m1 0h3m1 0h1m3 0h1m2 0h2m1 0h1m3 0h1m1 0h2m3 0h1m2 0h1m2 0h1m-34 1h1m5 0h1m2 0h1m1 0h1m1 0h2m2 0h2m2 0h1m1 0h2m7 0h1m1 0h2m-36 1h7m1 0h4m1 0h3m3 0h1m1 0h1m1 0h1m2 0h2m1 0h2m2 0h1m1 0h2"/></svg>',
+    links: [
+      // {title: 'GitHub Sponsors', url: 'https://github.com/sponsors/…'},
+      // {title: 'Ko-fi', url: 'https://ko-fi.com/…'},
+    ],
+  };
+  let dialog;
+  return () => {
+    if (!dialog) {
+      dialog = document.createElement('dialog');
+      dialog.className = 'zfo-dialog zfo-support';
+      dialog.innerHTML = `<style>
+          .zfo-support { width: 400px; font: 13px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif; }
+          .zfo-support-qr { display: grid; grid-template-columns: 140px 1fr; gap: 16px; align-items: center; margin: 4px 0 6px; }
+          .zfo-support-qr svg { width: 140px; height: 140px; display: block; }
+          .zfo-support dl { margin: 0; display: grid; gap: 2px; }
+          .zfo-support dt { color: #6e6e73; font-size: 12px; }
+          .zfo-support dd { margin: 0 0 6px; font-weight: 600; user-select: text; -webkit-user-select: text; }
+          .zfo-support-links { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+        </style>
+        <h2>Podpořit Blanketu</h2>
+        <p>Blanketa je zdarma a zdarma zůstane. Pokud vám ušetřila čas, můžete na její další vývoj přispět
+          libovolnou částkou. Děkuji!</p>
+        <div class="zfo-support-qr">${SUPPORT.qr}
+          <dl><dt>Číslo účtu</dt><dd data-account></dd><dt>IBAN</dt><dd data-iban></dd>
+            <dt>QR platbu naskenujte v aplikaci banky, částku zvolíte sami.</dt></dl></div>
+        <div class="zfo-support-links" data-links></div>
+        <div class="zfo-dialog-buttons"><button type="button" class="zfo-btn primary" data-close>Zavřít</button></div>`;
+      dialog.querySelector('[data-account]').textContent = SUPPORT.account;
+      dialog.querySelector('[data-iban]').textContent = SUPPORT.iban;
+      const links = dialog.querySelector('[data-links]');
+      for (const link of SUPPORT.links) {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'zfo-btn';
+        button.textContent = link.title;
+        button.addEventListener('click', () => window.zfoOpenUrl(link.url));
+        links.append(button);
+      }
+      links.hidden = !SUPPORT.links.length;
+      dialog.querySelector('[data-close]').addEventListener('click', () => dialog.close());
+      document.body.append(dialog);
+    }
+    dialog.showModal();
+  };
+})();

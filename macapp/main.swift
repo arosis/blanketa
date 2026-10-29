@@ -79,6 +79,10 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
             if let path = body["path"] as? String {
                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
             }
+        case "openUrl":
+            if let link = body["url"] as? String, let url = URL(string: link), url.scheme == "https" {
+                NSWorkspace.shared.open(url)
+            }
         case "saveFile":
             if let name = body["name"] as? String, let content = body["content"] as? String {
                 saveFile(name: name, folder: body["folder"] as? String, content: content)
@@ -270,6 +274,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let main = NSMenu()
         let appItem = NSMenuItem()
         appItem.submenu = NSMenu()
+        appItem.submenu!.addItem(formItem("Podpořit Blanketu…", "support"))
+        appItem.submenu!.addItem(.separator())
         appItem.submenu!.addItem(withTitle: "Ukončit Blanketu", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         let fileItem = NSMenuItem()
         fileItem.submenu = NSMenu(title: "Soubor")

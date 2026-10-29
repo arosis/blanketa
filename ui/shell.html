@@ -101,6 +101,7 @@
   .zfo-empty-state svg { width: 56px; height: 56px; color: var(--accent); margin-bottom: 14px; }
   .zfo-empty-state h1 { font-size: 20px; font-weight: 600; color: var(--text); margin: 0 0 6px; }
   .zfo-empty-state .zfo-btn { margin: 22px auto 0; display: inline-flex; }
+  .zfo-empty-state .zfo-support-link { display: block; margin: 28px auto 0; font-size: 12px; }
   .zfo-recent { margin: 36px auto 0; width: 440px; text-align: left; }
   .zfo-recent h2 { font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px 10px; }
   .zfo-recent button { display: flex; flex-direction: column; gap: 1px; width: 100%; padding: 7px 10px; border: 0; border-radius: 8px;
@@ -400,7 +401,8 @@
       <h1>Žádný formulář není otevřený</h1>
       <div>Otevřete formulář 602XML (.zfo) nebo dokument PDF k vyplnění a podpisu.</div>
       <button class="zfo-btn primary" data-action="open">Otevřít formulář…</button>
-      <div class="zfo-recent" data-recent hidden><h2>Naposledy otevřené</h2></div></div>`);
+      <div class="zfo-recent" data-recent hidden><h2>Naposledy otevřené</h2></div>
+      <button class="zfo-link zfo-support-link" data-action="support">Blanketa je zdarma – podpořit její vývoj</button></div>`);
     const escHtml = s => s.replace(/[&<>]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;'}[c]));
     window.zfoRecent = paths => {
       const list = $q('[data-recent]');
@@ -419,10 +421,11 @@
     const open = () => native?.postMessage({action: 'open'});
     document.addEventListener('click', e => {
       if (e.target.closest('[data-action="open"]')) open();
+      if (e.target.closest('[data-action="support"]')) zfoSupport();
       const recent = e.target.closest('[data-path]');
       if (recent) native?.postMessage({action: 'openFile', path: recent.dataset.path});
     });
-    window.zfoAction = name => { if (name === 'open') open(); };
+    window.zfoAction = name => { if (name === 'open') open(); else if (name === 'support') zfoSupport(); };
     return;
   }
 
@@ -900,6 +903,7 @@
 
   const actions = {
     open: () => native.postMessage({action: 'open'}),
+    support: () => zfoSupport(),
     'zoom-in': () => manualZoom(zoom + .1),
     'zoom-out': () => manualZoom(zoom - .1),
     'zoom-fit': () => { autoFit = false; fitWidth(); },

@@ -10,6 +10,7 @@ import socket
 import subprocess
 import sys
 import time
+import webbrowser
 from pathlib import Path
 
 FROZEN = hasattr(sys, "_MEIPASS")
@@ -53,6 +54,8 @@ class Bridge:
                 open_with_system(path.parent)
         elif action == "printPdf":
             open_with_system(msg["path"])
+        elif action == "openUrl" and str(msg.get("url", "")).startswith("https://"):
+            webbrowser.open(msg["url"])
         elif action == "saveFile":
             chosen = window.create_file_dialog(self._app.webview.FileDialog.SAVE, directory=msg.get("folder") or "",
                                                save_filename=msg["name"], file_types=("XML (*.xml)",))
@@ -167,6 +170,7 @@ class DesktopApp:
                 act("Nápověda k poli", "help"),
                 act("Informace o formuláři a podpisech", "panel"),
             ]),
+            Menu("Nápověda", [act("Podpořit Blanketu…", "support")]),
         ]
 
     def run(self, paths):
