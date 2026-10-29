@@ -1,6 +1,7 @@
 """Builds samples-pdf/zadost.pdf: a small Czech AcroForm (text, checkbox, radio, choice, signature field)."""
 import sys
 from pathlib import Path
+
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -39,6 +40,7 @@ c.save()
 # Signature field over the box drawn above.
 from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
 from pyhanko.sign import fields
+
 with open(out, "rb+") as f:
     w = IncrementalPdfFileWriter(f)
     fields.append_signature_field(w, fields.SigFieldSpec("podpis_zadatele", on_page=0, box=(200, y, 420, y + 60)))

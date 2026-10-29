@@ -11,14 +11,20 @@ from cryptography.hazmat.primitives.asymmetric import padding
 from pyhanko.pdf_utils.font import opentype
 from pyhanko.pdf_utils.font.opentype import GlyphAccumulatorFactory
 from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
-from pyhanko.pdf_utils.text import TextBoxStyle
 from pyhanko.pdf_utils.reader import PdfFileReader
+from pyhanko.pdf_utils.text import TextBoxStyle
 from pyhanko.sign import fields, signers
 from pyhanko.sign.validation import validate_pdf_signature
 from pyhanko.stamp import TextStampStyle
 from pyhanko_certvalidator.registry import SimpleCertificateStore
 from pypdf import PdfReader, PdfWriter
-from pypdf.generic import ArrayObject, DictionaryObject, NameObject, NumberObject, StreamObject
+from pypdf.generic import (
+    ArrayObject,
+    DictionaryObject,
+    NameObject,
+    NumberObject,
+    StreamObject,
+)
 
 # Trust is judged by macOS (keychain.trust); pyHanko's own path building only logs noise about it.
 logging.getLogger("pyhanko").setLevel(logging.CRITICAL)
@@ -198,7 +204,7 @@ def _open(pdf):
 def empty_signature_field(pdf):
     """Name of the form's first unsigned signature field, where the signature appears; None signs invisibly."""
     reader = _open(pdf)
-    for name, value, _ in fields.enumerate_sig_fields(reader, filled_status=False):
+    for name, _value, _ in fields.enumerate_sig_fields(reader, filled_status=False):
         return name
     return None
 

@@ -1,5 +1,7 @@
 # Blanketa
 
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/arosis/blanketa/badge)](https://scorecard.dev/viewer/?uri=github.com/arosis/blanketa)
+
 **Web: [blanketa.cz](https://blanketa.cz)** · autor: [Richard Winkler Bejr](https://winkler-bejrovi.cz)
 
 Aplikace pro macOS, Windows a Linux (Ubuntu, Debian, Mint …) na vyplňování a elektronické podepisování:

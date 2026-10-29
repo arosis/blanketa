@@ -26,3 +26,6 @@ pki/*.srl
 pki/*.keychain-db
 pki/.fl*
 dist/
+
+# test coverage data
+.coverage

@@ -1,9 +1,14 @@
 """Verify every nested enveloping XMLDSig layer of a 602XML form (.fo or .zfo)."""
-import sys, io, zipfile, hashlib, base64
-from lxml import etree
+import base64
+import hashlib
+import io
+import sys
+import zipfile
+
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
+from lxml import etree
 
 DS = "http://www.w3.org/2000/09/xmldsig#"
 C14N = "http://www.w3.org/TR/2001/REC-xml-c14n-20010315"

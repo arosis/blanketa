@@ -1,6 +1,10 @@
 """Signing keys held by macOS (keychain or CryptoTokenKit token), used through macsign."""
-import os, json, base64, subprocess
+import base64
+import json
+import os
+import subprocess
 from pathlib import Path
+
 from cryptography import x509
 
 MACSIGN = Path(os.environ.get("ZFO_MACSIGN", Path(__file__).resolve().parent / "macsign/macsign"))

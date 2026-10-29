@@ -7,13 +7,25 @@ usage: app.py [PORT]               opens forms from samples/*/form.zfo, saves to
        app.py --file PATH [PORT]   opens one form, saves the signed copy next to it
 PORT 0 picks a free port; the chosen one is printed as "PORT <n>".
 """
-import io, os, re, json, sys, copy, time, base64, secrets, tempfile, threading, zipfile
+import base64
+import copy
+import io
+import json
+import os
+import re
+import secrets
+import sys
+import tempfile
+import threading
+import time
+import zipfile
 from datetime import datetime
-from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse, parse_qs, quote
-from lxml import etree
+from pathlib import Path
+from urllib.parse import parse_qs, quote, urlparse
+
 from cryptography import x509
+from lxml import etree
 
 import barcode
 import certstore
@@ -98,7 +110,7 @@ def render_empty():
 
 def pdf_signatures(pdf):
     found = pdf_sign.signatures(pdf)
-    for sig, verdict in zip(found, certstore.trust([sig.pop("der") for sig in found])):
+    for sig, verdict in zip(found, certstore.trust([sig.pop("der") for sig in found]), strict=True):
         sig.update(trusted=verdict["trusted"], reason=verdict.get("reason", ""))
     return found
 
@@ -228,7 +240,7 @@ def page_geometry(doc):
 def signatures(fo):
     """Signature layers of a form.fo with integrity and the system's trust verdicts, outermost first."""
     found = zfo_verify.describe(etree.fromstring(fo, etree.XMLParser(huge_tree=True)))
-    for sig, verdict in zip(found, certstore.trust([sig.pop("der") for sig in found])):
+    for sig, verdict in zip(found, certstore.trust([sig.pop("der") for sig in found]), strict=True):
         sig.update(trusted=verdict["trusted"], reason=verdict.get("reason", ""))
     return found
 
@@ -291,7 +303,7 @@ def import_data(session, xml):
     try:
         data = etree.fromstring(xml, etree.XMLParser(resolve_entities=False, no_network=True))
     except etree.XMLSyntaxError as e:
-        raise ValueError(f"Soubor není platné XML: {e}")
+        raise ValueError(f"Soubor není platné XML: {e}") from None
     expected = engine.data_element(session["doc"])
     if data.tag != expected.tag:
         raise ValueError(f"Data patří k jinému formuláři (kořen {etree.QName(data).localname}, "

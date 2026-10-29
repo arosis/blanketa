@@ -8,7 +8,6 @@ payloads are built like set_inputs_init_values(), get_parent_repe(), server_add_
 """
 import json
 import logging
-import re
 import sys
 import time
 from pathlib import Path
@@ -16,7 +15,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from lxml import etree, html as lhtml  # noqa: E402
+from lxml import etree  # noqa: E402
+from lxml import html as lhtml
 
 from zfoengine import api  # noqa: E402
 
