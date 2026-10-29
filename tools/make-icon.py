@@ -17,7 +17,7 @@ def draw():
     top, bottom = (61, 139, 253), (10, 84, 190)
     for y in range(S):
         t = y / S
-        ImageDraw.Draw(body).line([(0, y), (S, y)], fill=tuple(round(a + (b - a) * t) for a, b in zip(top, bottom)))
+        ImageDraw.Draw(body).line([(0, y), (S, y)], fill=tuple(round(a + (b - a) * t) for a, b in zip(top, bottom, strict=True)))
     mask = Image.new("L", (S, S), 0)
     ImageDraw.Draw(mask).rounded_rectangle([100, 100, 924, 924], radius=185, fill=255)
     img.paste(body, (0, 0), mask)

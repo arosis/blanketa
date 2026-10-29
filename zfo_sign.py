@@ -6,12 +6,18 @@ Filled data live in an unreferenced dsig:Object appended to the publisher signat
 (the top-level signature of the unfilled form), so the publisher layers stay valid
 and only the user's signature covers the data.
 """
-import sys, copy, zipfile, hashlib, base64, random
+import base64
+import copy
+import hashlib
+import random
+import sys
+import zipfile
 from datetime import datetime, timezone
-from lxml import etree
+
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
+from lxml import etree
 
 DS = "http://www.w3.org/2000/09/xmldsig#"
 FM = "http://software602.cz/forms"

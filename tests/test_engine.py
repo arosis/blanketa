@@ -15,7 +15,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from lxml import etree, html as lhtml  # noqa: E402
+from lxml import etree  # noqa: E402
+from lxml import html as lhtml
 
 from zfoengine import api  # noqa: E402
 

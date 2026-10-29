@@ -1,0 +1,15 @@
+name: Nápad
+description: Něco nového, nebo aby něco fungovalo jinak.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: potreba
+    attributes:
+      label: Co potřebujete
+      description: Kdo to potřebuje a co dnes dělá místo toho.
+    validations: {required: true}
+  - type: textarea
+    id: hotovo
+    attributes:
+      label: Hotovo, když
+      description: Jak poznáte, že je nápad splněný.

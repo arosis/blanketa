@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Bezpečnostní chyba
+    url: https://github.com/arosis/blanketa/security/advisories/new
+    about: Bezpečnostní chyby hlaste soukromě, ne veřejným issue.

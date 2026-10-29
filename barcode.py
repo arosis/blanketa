@@ -19,8 +19,8 @@ def interleaved_2_of_5(digits):
     if len(digits) % 2:
         digits = "0" + digits
     widths = [1, 1, 1, 1]
-    for first, second in zip(digits[::2], digits[1::2]):
-        for bar, space in zip(ITF_DIGITS[first], ITF_DIGITS[second]):
+    for first, second in zip(digits[::2], digits[1::2], strict=True):
+        for bar, space in zip(ITF_DIGITS[first], ITF_DIGITS[second], strict=True):
             widths += [WIDE if bar == "w" else 1, WIDE if space == "w" else 1]
     return widths + [WIDE, 1, 1]
 

@@ -1,0 +1,36 @@
+name: Chyba
+description: Blanketa se chová jinak, než by měla.
+labels: [bug]
+body:
+  - type: textarea
+    id: popis
+    attributes:
+      label: Co se děje
+      description: Kroky, které chybu vyvolají, a co se stane.
+    validations: {required: true}
+  - type: textarea
+    id: ocekavani
+    attributes:
+      label: Co jste čekali
+    validations: {required: true}
+  - type: input
+    id: formular
+    attributes:
+      label: Formulář
+      description: Který formulář (název nebo odkaz na veřejný vzor). Nikdy nepřikládejte vyplněný formulář s osobními údaji.
+  - type: dropdown
+    id: system
+    attributes:
+      label: Systém
+      options: [macOS, Windows, Linux]
+    validations: {required: true}
+  - type: input
+    id: verze
+    attributes:
+      label: Verze Blankety
+      placeholder: např. 0.1.0
+  - type: dropdown
+    id: certifikat
+    attributes:
+      label: Odkud byl certifikát (pokud jde o podpis)
+      options: [Netýká se podpisu, Systémové úložiště nebo klíčenka, Čipová karta nebo token, Soubor .pfx/.p12]

@@ -1,7 +1,11 @@
-# Python checks run by CI (.github/workflows/ci.yml): syntax errors and pyflakes (undefined names, unused imports
-# and variables). vendor/ is upstream code and is not checked.
+# Python checks run by CI (.github/workflows/ci.yml): syntax errors, pyflakes (undefined names, unused imports and
+# variables), bugbear (likely bugs) and import order. vendor/ is upstream code and is not checked; zfoengine/, a port
+# of upstream code, gets bugbear and import order only once it is cleaned up.
 extend-exclude = ["vendor"]
 target-version = "py312"
 
 [lint]
-select = ["E9", "F"]
+select = ["E9", "F", "B", "I"]
+
+[lint.per-file-ignores]
+"zfoengine/**" = ["B", "I"]

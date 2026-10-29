@@ -208,6 +208,7 @@ def trust(certificates):
         lines = "\n".join(base64.b64encode(der).decode() for der in certificates).encode()
         return [json.loads(line) for line in _winsign(["trust"], lines).splitlines() if line.strip()]
     import asyncio
+
     from asn1crypto import x509 as asn1_x509
     from pyhanko_certvalidator import CertificateValidator, ValidationContext
     roots = [asn1_x509.Certificate.load(c.public_bytes(serialization.Encoding.DER)) for c in _system_roots()]
