@@ -1,5 +1,5 @@
 <!-- Application chrome injected into the form page.
-     Placeholders: __SESSION__ __FILE__ __SIGNATURES__ __PAGE__ __COLORS__ __INFO__ __BLANK__ __FONTS__ __BUTTONS__ __EMPTY__ -->
+     Placeholders: __SESSION__ __FILE__ __SIGNATURES__ __PAGE__ __COLORS__ __INFO__ __BLANK__ __FONTS__ __BUTTONS__ __CODES__ __EMPTY__ -->
 <style>
   __FONTS__
   :root {
@@ -195,6 +195,14 @@
   .zfo-page input[type=checkbox]:checked {
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 2.5l7 7M9.5 2.5l-7 7' stroke='%23000' stroke-width='1.4'/%3E%3C/svg%3E");
   }
+  /* A choice alone in its cell (ČSSZ "ano / ne" boxes) sits in the middle of the cell instead of hanging over its
+     border; the cell is often narrower than the button with its usual margins. */
+  .zfo-page td:has(> span:only-child > input:is([type=radio], [type=checkbox]):only-child),
+  .zfo-page td:has(> input:is([type=radio], [type=checkbox]):only-child) {
+    padding: 0 !important; text-align: center !important; vertical-align: middle !important;
+  }
+  .zfo-page td > span:only-child > input:is([type=radio], [type=checkbox]):only-child,
+  .zfo-page td > input:is([type=radio], [type=checkbox]):only-child { margin: 0; vertical-align: middle; }
   .zfo-page input[type=checkbox]:disabled, .zfo-page input[type=radio]:disabled { background-color: var(--field-readonly); cursor: default; }
   .zfo-page td:has(> input[type=text]), .zfo-page td:has(> select) { padding: 0 !important; }
   .zfo-page td > input[type=text], .zfo-page td > select { height: 100%; }
@@ -424,6 +432,23 @@
   let ready = false;
   const paper = __PAGE__;
   Object.assign(page.style, paper);
+  // Lists the form marks "show the code" (form602displaycode): each item starts with its code, so a narrow field
+  // shows "01" or "CZ" as in Form Filler instead of a cut-off label. The engine may refill a list later.
+  const codeLists = new Set(__CODES__);
+  const showCodes = select => {
+    for (const option of select.options) {
+      if (option.value && !option.dataset.code) {
+        option.dataset.code = option.value;
+        option.textContent = option.textContent.trim() && option.textContent.trim() !== option.value
+          ? `${option.value} – ${option.textContent.trim()}` : option.value;
+      }
+    }
+  };
+  for (const select of page.querySelectorAll('select[name]')) {
+    if (!codeLists.has(select.name)) continue;
+    showCodes(select);
+    new MutationObserver(() => showCodes(select)).observe(select, {childList: true});
+  }
   // The form's own field colours replace zfo-editor's bright yellow.
   const colors = __COLORS__;
   document.documentElement.style.setProperty('--field', colors.field);

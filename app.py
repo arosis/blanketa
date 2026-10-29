@@ -155,8 +155,15 @@ def render(name, blank=False, data=None):
              .replace("__BLANK__", json.dumps(blank))
              .replace("__FONTS__", embedded_fonts(doc))
              .replace("__BUTTONS__", json.dumps(user_buttons(doc), ensure_ascii=False))
+             .replace("__CODES__", json.dumps(code_lists(doc), ensure_ascii=False))
              .replace("__EMPTY__", "false"))
     return html.replace("</body>", shell + "</body>", 1)
+
+
+def code_lists(doc):
+    """Bindings of the lists that show their item's code rather than its label (form602displaycode)."""
+    return sorted({cell.get("form602bind") for cell in doc.iter("{http://www.w3.org/1999/XSL/Format}table-cell")
+                   if cell.get("form602displaycode") == "true" and cell.get("form602bind")})
 
 
 def user_buttons(doc):
