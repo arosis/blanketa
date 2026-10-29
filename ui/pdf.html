@@ -94,7 +94,7 @@ __SHELL_STYLE__
       <label><input type="radio" name="mode" value="place" checked>Viditelný podpis – umístím ho na stránku</label>
       <label><input type="radio" name="mode" value="invisible">Neviditelný podpis</label>
     </fieldset>
-    <label>Certifikát<select class="zfo-cert" data-cert title="Certifikát pro podpis"></select></label>
+    <label>Certifikát<span data-cert-slot></span></label>
     <div class="zfo-dialog-buttons">
       <button class="zfo-btn" value="cancel">Zrušit</button>
       <button class="zfo-btn primary" value="sign">Podepsat a uložit</button>
@@ -102,9 +102,10 @@ __SHELL_STYLE__
   </form>
 </dialog>
 
+<script src="/bridge.js"></script>
 <script type="module">
   const SESSION = '__SESSION__';
-  const native = window.webkit?.messageHandlers?.app;
+  const native = window.zfoNative;
   const $q = s => document.querySelector(s);
   const status = $q('[data-status]');
   const setStatus = (text, html) => { html ? (status.innerHTML = text) : (status.textContent = text); };
@@ -202,21 +203,12 @@ __SHELL_STYLE__
       (signatures.length ? signatures.map(card).join('') : '<div class="zfo-empty">Dokument zatím není podepsaný.</div>');
   };
 
-  const certSelect = $q('[data-cert]');
-  fetch('/identities').then(r => r.json()).then(list => {
-    certSelect.innerHTML = list.length ? '<option value="">Vyber certifikát pro podpis…</option>'
-                                       : '<option value="">Žádný podpisový certifikát</option>';
-    for (const c of list) {
-      const o = document.createElement('option');
-      o.value = c.id;
-      o.textContent = (c.token ? '🔑 ' : '') + c.subject + (c.source === 'test' ? ' (TEST)' : '') + ' – do ' + c.not_after;
-      certSelect.append(o);
-    }
-    try { const last = localStorage.getItem('zfo-cert'); if (list.some(c => c.id === last)) certSelect.value = last; } catch {}
-  });
+  const certificates = window.zfoCertificates();
+  const certSelect = certificates.select;
+  $q('[data-cert-slot]').replaceWith(certificates.element);
 
   const savedStatus = (verb, path) => {
-    const reveal = native ? ' <a data-reveal>Zobrazit ve Finderu</a>' : '';
+    const reveal = native ? ` <a data-reveal>${window.zfoIsMac ? 'Zobrazit ve Finderu' : 'Zobrazit ve složce'}</a>` : '';
     setStatus(`${verb} <b title="${esc(path)}">${esc(path.split('/').pop())}</b>${reveal}`, true);
     $q('[data-reveal]')?.addEventListener('click', () => native.postMessage({action: 'reveal', path}));
   };
@@ -242,7 +234,8 @@ __SHELL_STYLE__
   const signWith = async placement => {
     setStatus('Podepisuji… (token si může vyžádat PIN)');
     try {
-      await saved(await post('/pdf-save', '&cert=' + encodeURIComponent(certSelect.value), {placement}), 'Podepsáno a uloženo jako');
+      await saved(await post('/pdf-save', '&cert=' + encodeURIComponent(certSelect.value),
+                             {placement, password: certificates.password()}), 'Podepsáno a uloženo jako');
     } catch (e) { setStatus('Chyba: ' + e.message); }
   };
   let placing = null;
@@ -359,10 +352,10 @@ __SHELL_STYLE__
   }
   window.zfoAction = name => actions[name]?.();
   document.addEventListener('keydown', e => {
-    if (!e.metaKey) return;
+    if (!window.zfoShortcut(e)) return;
     const shortcut = e.key === '+' || e.key === '=' ? 'zoom-in' : e.key === '-' ? 'zoom-out'
       : e.key.toLowerCase() === 's' ? (e.shiftKey ? 'save' : 'save-plain') : e.key === 'p' ? 'print' : null;
-    if (!shortcut || native) return;
+    if (!shortcut || native?.platform === 'mac') return;
     e.preventDefault();
     actions[shortcut]();
   });

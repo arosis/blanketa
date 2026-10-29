@@ -14,7 +14,7 @@ from urllib.parse import urlparse, parse_qs, quote
 from lxml import etree
 from cryptography import x509
 
-import keychain
+import certstore
 import pdf_sign
 import zfo_sign
 import zfo_verify
@@ -26,11 +26,6 @@ EDITOR = RESOURCES / "vendor/zfo-editor-src/zfo-editor-0.3.2"
 PDFJS = RESOURCES / "vendor/pdfjs"
 DS = "http://www.w3.org/2000/09/xmldsig#"
 XSLT = etree.XSLT(etree.parse(str(RESOURCES / "ui/fo2html.xsl")))
-APP_SUPPORT = Path.home() / "Library/Application Support/Blanketa"
-TEST_KEYCHAIN = Path(os.environ.get("ZFO_TEST_KEYCHAIN",
-                                    APP_SUPPORT / "test.keychain-db" if hasattr(sys, "_MEIPASS")
-                                    else ROOT / "pki/test.keychain-db"))
-TEST_KEYCHAIN_PASSWORD = os.environ.get("ZFO_TEST_KEYCHAIN_PASSWORD", "test")
 FORMS = {}
 SINGLE_FILE = False
 SESSIONS = {}
@@ -83,7 +78,7 @@ def render_empty():
 
 def pdf_signatures(pdf):
     found = pdf_sign.signatures(pdf)
-    for sig, verdict in zip(found, keychain.trust([sig.pop("der") for sig in found])):
+    for sig, verdict in zip(found, certstore.trust([sig.pop("der") for sig in found])):
         sig.update(trusted=verdict["trusted"], reason=verdict.get("reason", ""))
     return found
 
@@ -107,13 +102,13 @@ def render_pdf(name):
             .replace("__INFO__", json.dumps(pdf_info(pdf), ensure_ascii=False)))
 
 
-def save_pdf(session, values, identity_id=None, placement=None):
+def save_pdf(session, values, identity_id=None, placement=None, password=None):
     """Field values go in as an incremental update, so earlier signatures stay valid. Signed: a new
     "-podepsany" file, which the window then continues with. Unsigned: the open file itself."""
     name = session["name"]
     pdf = pdf_sign.fill(session["pdf"], values) if values else session["pdf"]
     if identity_id:
-        pdf = pdf_sign.sign(pdf, *signer(identity_id), placement=placement)
+        pdf = pdf_sign.sign(pdf, *signer(identity_id, password), placement=placement)
         target = output_path(name)
     else:
         target = form_path(name) if SINGLE_FILE else ROOT / "out" / f"{name}-ulozeny.pdf"
@@ -206,36 +201,15 @@ def page_geometry(doc):
 
 
 def signatures(fo):
-    """Signature layers of a form.fo with integrity and macOS trust verdicts, outermost first."""
+    """Signature layers of a form.fo with integrity and the system's trust verdicts, outermost first."""
     found = zfo_verify.describe(etree.fromstring(fo, etree.XMLParser(huge_tree=True)))
-    for sig, verdict in zip(found, keychain.trust([sig.pop("der") for sig in found])):
+    for sig, verdict in zip(found, certstore.trust([sig.pop("der") for sig in found])):
         sig.update(trusted=verdict["trusted"], reason=verdict.get("reason", ""))
     return found
 
 
-def signing_identities():
-    """Identities usable for signing: login keychain, tokens and the local test keychain."""
-    sources = [("system", None)] + ([("test", TEST_KEYCHAIN)] if TEST_KEYCHAIN.exists() else [])
-    found = []
-    for source, path in sources:
-        for item in keychain.identities(path):
-            cert = item["cert"]
-            try:
-                usage = cert.extensions.get_extension_for_class(x509.KeyUsage).value
-                if not (usage.digital_signature or usage.content_commitment):
-                    continue
-            except x509.ExtensionNotFound:
-                pass
-            found.append({"id": f"{source}:{item['sha1']}", "subject": item["subject"], "token": item["token"],
-                          "source": source, "not_after": f"{cert.not_valid_after_utc:%d. %m. %Y}"})
-    return found
-
-
-def signer(identity_id):
-    source, sha1 = identity_id.split(":", 1)
-    if source == "test":
-        return keychain.load(sha1, TEST_KEYCHAIN, TEST_KEYCHAIN_PASSWORD)
-    return keychain.load(sha1)
+def signer(identity_id, password=None):
+    return certstore.load(identity_id, password)
 
 
 def form_info(name):
@@ -294,11 +268,11 @@ def import_data(session, xml):
     return {"import": token}
 
 
-def save(session, identity_id=None):
+def save(session, identity_id=None, password=None):
     """Signed: a new "-podepsany" file next to the form. Unsigned (Form Filler's "Uložit"): the open file itself."""
     name = session["name"]
     if identity_id:
-        fo = filled_form(session, *signer(identity_id))
+        fo = filled_form(session, *signer(identity_id, password))
         target = output_path(name)
     else:
         fo = filled_form(session)
@@ -308,6 +282,11 @@ def save(session, identity_id=None):
 
 
 class Handler(BaseHTTPRequestHandler):
+    def log_message(self, format, *args):
+        # A windowed Windows build has no stderr.
+        if sys.stderr:
+            super().log_message(format, *args)
+
     def _send(self, code, body, ctype):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
@@ -330,13 +309,17 @@ class Handler(BaseHTTPRequestHandler):
                          ".png": "image/png"}.get(path.suffix, "application/octet-stream")
                 return self._send(200, path.read_bytes(), ctype)
             return self._send(404, b"not found", "text/plain")
+        if url.path == "/bridge.js":
+            # Started by the Windows/Linux app (desktop.py): pages talk to it through pywebview.
+            flag = b"window.ZFO_DESKTOP = true;\n" if os.environ.get("ZFO_DESKTOP") else b""
+            return self._send(200, flag + (RESOURCES / "ui/bridge.js").read_bytes(), "text/javascript")
         if url.path == "/pdf":
             session = SESSIONS.get(parse_qs(url.query).get("s", [""])[0])
             if session is None or "pdf" not in session:
                 return self._send(404, b"not found", "text/plain")
             return self._send(200, session["pdf"], "application/pdf")
         if url.path == "/identities":
-            return self._send(200, json.dumps(signing_identities(), ensure_ascii=False).encode(), "application/json")
+            return self._send(200, json.dumps(certstore.identities(), ensure_ascii=False).encode(), "application/json")
         name = parse_qs(url.query).get("form", [None])[0]
         if not name and SINGLE_FILE and not FORMS:
             return self._send(200, render_empty().encode(), "text/html; charset=utf-8")
@@ -356,6 +339,13 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         url = urlparse(self.path)
+        if url.path == "/add-certificate":
+            request = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
+            try:
+                certstore.add_pfx(base64.b64decode(request["data"]), request.get("password") or "")
+            except (KeyError, ValueError, OSError) as e:
+                return self._send(400, str(e).encode(), "text/plain; charset=utf-8")
+            return self._send(200, json.dumps(certstore.identities(), ensure_ascii=False).encode(), "application/json")
         session = SESSIONS.get(parse_qs(url.query).get("s", [""])[0])
         if session is None:
             return self._send(404, "Relace vypršela, načti formulář znovu".encode(), "text/plain; charset=utf-8")
@@ -367,7 +357,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, json.dumps(responses, ensure_ascii=False).encode(), "application/json")
             if url.path == "/save":
                 try:
-                    result = save(session, parse_qs(url.query).get("cert", [""])[0] or None)
+                    result = save(session, parse_qs(url.query).get("cert", [""])[0] or None,
+                                  json.loads(body or b"{}").get("password"))
                 except (LookupError, RuntimeError, ValueError, OSError) as e:
                     return self._send(400, str(e).encode(), "text/plain; charset=utf-8")
                 return self._send(200, json.dumps(result, ensure_ascii=False).encode(), "application/json")
@@ -377,7 +368,7 @@ class Handler(BaseHTTPRequestHandler):
                     values = request.get("values") or {}
                     result = (print_pdf(session, values) if url.path == "/pdf-print"
                               else save_pdf(session, values, parse_qs(url.query).get("cert", [""])[0] or None,
-                                            request.get("placement")))
+                                            request.get("placement"), request.get("password")))
                 except (LookupError, RuntimeError, ValueError, OSError) as e:
                     return self._send(400, str(e).encode(), "text/plain; charset=utf-8")
                 return self._send(200, json.dumps(result, ensure_ascii=False).encode(), "application/json")
@@ -390,24 +381,40 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, b"not found", "text/plain")
 
 
-if __name__ == "__main__":
-    args = sys.argv[1:]
+def watch_parent():
+    """End together with the app that started this server, even when it is killed without cleaning up."""
+    if os.environ.get("ZFO_WATCH_STDIN"):
+        # The desktop shell keeps our stdin open; end of input means it is gone (works on Windows too).
+        # The descriptor is read directly: a windowed Windows build has no sys.stdin object.
+        try:
+            while os.read(0, 4096):
+                pass
+        except OSError:
+            return
+        os._exit(0)
+    parent = os.getppid()
+    while os.getppid() == parent:
+        threading.Event().wait(2)
+    os._exit(0)
+
+
+def main(args):
+    global SINGLE_FILE
     if args[:1] in (["--file"], ["--empty"]):
         if args[0] == "--file":
             path = Path(args[1]).expanduser().resolve()
             FORMS[path.stem] = path
             args = args[1:]
         SINGLE_FILE, args = True, args[1:]
-        # Started by the Mac app: end together with it, even when it is killed without cleaning up.
-        parent = os.getppid()
-        def watch_parent():
-            while os.getppid() == parent:
-                threading.Event().wait(2)
-            os._exit(0)
         threading.Thread(target=watch_parent, daemon=True).start()
     else:
         FORMS.update({p.parent.name: p for p in sorted((ROOT / "samples").glob("*/form.zfo"))})
         FORMS.update({p.stem: p for p in sorted((ROOT / "samples-pdf").glob("*.pdf"))})
     server = ThreadingHTTPServer(("127.0.0.1", int(args[0]) if args else 8602), Handler)
-    print(f"PORT {server.server_address[1]}", flush=True)
+    if sys.stdout:
+        print(f"PORT {server.server_address[1]}", flush=True)
     server.serve_forever()
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

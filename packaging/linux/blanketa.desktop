@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Blanketa
+GenericName=Formuláře ZFO a PDF
+Comment=Vyplňování a podepisování formulářů ZFO (602XML) a PDF
+Exec=blanketa %F
+Icon=blanketa
+Terminal=false
+Categories=Office;Viewer;
+MimeType=application/vnd.software602.filler.form-xml-zip;application/pdf;

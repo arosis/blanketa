@@ -7,6 +7,8 @@ pyHanko[opentype]==0.38.0
 pyhanko-certvalidator==0.33.0
 uharfbuzz==0.55.0
 fonttools==4.68.0
+# time zones for pyHanko where the system has none (Windows, minimal Linux)
+tzdata==2026.6
 
 # Build (build.sh)
 pyinstaller==6.22.3

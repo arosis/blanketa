@@ -1,6 +1,6 @@
 #!/bin/bash
-# Test PKI for signing without a real certificate: an untrusted CA, one signing certificate and a macOS keychain
-# holding it. Output goes to pki/ (or the directory given). Never use these for anything but tests.
+# Test PKI for signing without a real certificate: an untrusted CA, one signing certificate (user.pfx) and, on
+# macOS, a keychain holding it. Windows and Linux use user.pfx (Windows can also import it into its store). Output goes to pki/ (or the directory given). Never use these for anything but tests.
 #   tools/make-test-pki.sh [DIR]
 # The keychain password is "test" (app.py's default ZFO_TEST_KEYCHAIN_PASSWORD).
 set -euo pipefail
@@ -19,9 +19,11 @@ openssl x509 -req -in user.csr -CA ca.crt -CAkey ca.key -CAcreateserial -out use
 openssl pkcs12 -export -inkey user.key -in user.crt -certfile ca.crt -out user.pfx -passout pass:test \
   -keypbe PBE-SHA1-3DES -certpbe PBE-SHA1-3DES -macalg sha1
 
-rm -f test.keychain-db
-security create-keychain -p test "$PWD/test.keychain-db"
-security set-keychain-settings "$PWD/test.keychain-db"
-security import user.pfx -k "$PWD/test.keychain-db" -P test -T /usr/bin/security
-security set-key-partition-list -S apple-tool:,apple: -s -k test "$PWD/test.keychain-db" >/dev/null
+if [ "$(uname)" = Darwin ]; then
+  rm -f test.keychain-db
+  security create-keychain -p test "$PWD/test.keychain-db"
+  security set-keychain-settings "$PWD/test.keychain-db"
+  security import user.pfx -k "$PWD/test.keychain-db" -P test -T /usr/bin/security
+  security set-key-partition-list -S apple-tool:,apple: -s -k test "$PWD/test.keychain-db" >/dev/null
+fi
 echo "test PKI in $PWD"

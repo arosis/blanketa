@@ -1,10 +1,31 @@
 # Blanketa
 
-Aplikace pro macOS na vyplňování a elektronické podepisování:
+Aplikace pro macOS, Windows a Linux (Ubuntu, Debian, Mint …) na vyplňování a elektronické podepisování:
 - **formulářů 602XML (`.zfo`)**, které jinak otevře jen Software602 Form Filler pro Windows (např. ČÚZK návrh na vklad, formuláře ČSSZ a krajů);
 - **PDF formulářů (AcroForm)**.
 
-Podepisuje se certifikátem z klíčenky macOS nebo z tokenu (CryptoTokenKit). Formuláře podepsané Blanketou otevře i Software602 Form Filler a podpis uzná.
+Podepisuje se certifikátem:
+
+| Systém | Odkud certifikát |
+|---|---|
+| macOS | klíčenka a tokeny (CryptoTokenKit) |
+| Windows | úložiště certifikátů uživatele včetně čipových karet |
+| všude | soubor `.pfx` / `.p12` přidaný v dialogu podpisu; heslo se zadává při podpisu a neukládá se |
+
+Formuláře podepsané Blanketou otevře i Software602 Form Filler a podpis uzná.
+
+## Stažení a instalace
+
+Hotové balíčky vytváří GitHub Actions (`.github/workflows/build.yml`) při každé značce `v*`, nebo ručně ze záložky Actions:
+
+| Systém | Soubor | Instalace |
+|---|---|---|
+| macOS | `Blanketa-<verze>-macos.dmg` (nebo `.zip`) | přetáhnout do Aplikací; poprvé otevřít přes pravé tlačítko → Otevřít (není notarizovaná) |
+| Windows 10/11 | `Blanketa-<verze>-setup.exe` | instalátor bez práv správce; nabídne otevírání `.zfo` v Blanketě. Přenosná verze: `…-windows-x64.zip` |
+| Ubuntu, Debian, Mint | `blanketa_<verze>_amd64.deb` | `sudo apt install ./blanketa_<verze>_amd64.deb` |
+| jiný Linux | `blanketa-<verze>-linux-amd64.tar.gz` | rozbalit a spustit `Blanketa/install.sh` (bez roota, do domovské složky) |
+
+Windows potřebují Microsoft Edge WebView2 (Windows 10/11 ho mají; instalátor jinak nabídne stažení).
 
 ## Co umí
 
@@ -40,12 +61,18 @@ Technický popis formátu ZFO: [docs/zfo-format.md](docs/zfo-format.md).
 ## Architektura
 
 ```
-build/Blanketa.app
-├─ MacOS/Blanketa      Swift (macapp/main.swift): okna s WKWebView, menu, tisk, dialogy
-└─ Resources/
-   ├─ zfo-server/         Python (app.py) zabalený PyInstallerem; jeden proces na okno, lokální HTTP
-   └─ macsign             Swift (macsign/macsign.swift): seznam identit, podpis a důvěra přes Security.framework
+macOS:  build/Blanketa.app
+        ├─ MacOS/Blanketa     Swift (macapp/main.swift): okna s WKWebView, menu, tisk, dialogy
+        └─ Resources/
+           ├─ zfo-server/     Python (app.py) zabalený PyInstallerem; jeden proces na okno, lokální HTTP
+           └─ macsign         Swift (macsign/macsign.swift): identity, podpis a důvěra přes Security.framework
+
+Windows, Linux:  dist/Blanketa/Blanketa(.exe)
+        desktop.py (pywebview: WebView2 na Windows, Qt WebEngine na Linuxu) spouští pro každé okno
+        sám sebe s --serve, tedy stejný server app.py; na Windows podepisuje winsign.ps1 (.NET)
 ```
+
+Stránky jsou na všech systémech stejné; s aplikací kolem sebe mluví přes `ui/bridge.js`.
 
 | Soubor | Úloha |
 |---|---|
@@ -56,11 +83,15 @@ build/Blanketa.app
 | `ui/fo2html.xsl` | doplněk XSLT zfo-editoru (obrázky, rozměry) |
 | `zfo_sign.py`, `zfo_verify.py` | podpis a ověření vrstev XMLDSig |
 | `pdf_sign.py` | vyplnění a podpis PDF, ověření podpisů |
-| `keychain.py` | klíč v klíčence nebo na tokenu přes `macsign` |
+| `certstore.py` | podpisové identity na všech systémech: klíčenka (`keychain.py` + `macsign`), úložiště Windows (`winsign.ps1`), soubory `.pfx`; důvěryhodnost certifikátů podle systému |
+| `desktop.py` | okna aplikace pro Windows a Linux |
+| `ui/bridge.js` | spojení stránek s aplikací (macOS / Windows a Linux / prohlížeč), sdílený výběr certifikátu |
 
 ## Sestavení
 
-Potřeba je Xcode Command Line Tools a Python 3.12+.
+PyInstaller neumí sestavovat pro jiný systém, takže každá verze se sestavuje na svém systému. Všechny tři najednou postaví GitHub Actions.
+
+**macOS** (Xcode Command Line Tools, Python 3.12+):
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
@@ -70,7 +101,29 @@ python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 ./build.sh
 ```
 
-Výsledek je `build/Blanketa.app`, podepsaná ad hoc (bez notarizace). Na jiném Macu je ji proto poprvé potřeba otevřít přes pravé tlačítko → Otevřít.
+Výsledek je `build/Blanketa.app` a `dist/Blanketa-<verze>-macos.dmg` / `.zip`, podepsané ad hoc (bez notarizace).
+
+**Windows** (Python 3.12+, pro instalátor Inno Setup 6):
+
+```bash
+python -m pip install -r requirements-desktop.txt pyinstaller
+```
+
+```bash
+python tools/build_desktop.py
+```
+
+**Linux** – nejjednodušeji v Dockeru, výsledek je v `dist/`:
+
+```bash
+docker build -f Dockerfile.linux-build -t blanketa-build .
+```
+
+```bash
+docker run --rm -v "$PWD/dist:/src/dist" blanketa-build
+```
+
+Verze aplikace je v souboru `VERSION`, ikona se kreslí skriptem `tools/make-icon.py`.
 
 ## Vývoj
 
@@ -98,7 +151,13 @@ Testy enginu:
 tools/make-test-pki.sh
 ```
 
-Skript vytvoří v `pki/` nedůvěryhodnou testovací CA, podpisový certifikát a klíčenku `pki/test.keychain-db` s heslem `test`. Aplikace tuto identitu nabízí s označením „(TEST)“. Sestavená aplikace ji hledá v `~/Library/Application Support/Blanketa/test.keychain-db`. Pro skutečné podání je potřeba kvalifikovaný certifikát v klíčence nebo na tokenu.
+Skript vytvoří v `pki/` nedůvěryhodnou testovací CA, podpisový certifikát `pki/user.pfx` (heslo `test`) a na Macu i klíčenku `pki/test.keychain-db`. Aplikace spuštěná ze zdrojů tuto identitu nabízí s označením „(TEST)“; do sestavené aplikace se nejsnáz přidá jako soubor `user.pfx` v dialogu podpisu. Pro skutečné podání je potřeba kvalifikovaný certifikát.
+
+Kontrola podpisu bez okna (používá ji i CI):
+
+```bash
+.venv/bin/python -I tools/selftest.py test
+```
 
 ## Omezení
 
@@ -106,7 +165,9 @@ Skript vytvoří v `pki/` nedůvěryhodnou testovací CA, podpisový certifikát
 - Odesílání na portály (submit) není podporované.
 - Formuláře s mnoha opakováními se otevírají pomalu (desítky sekund).
 - PDF formuláře XFA nejsou podporované.
-- Aplikace není notarizovaná.
+- Aplikace není notarizovaná (macOS) ani podepsaná certifikátem vydavatele (Windows SmartScreen ji při prvním spuštění může varovat).
+- Na Linuxu se důvěryhodnost certifikátů hodnotí podle systémové sady kořenových CA; tokeny přes PKCS#11 zatím nejsou podporované (jen soubory `.pfx`).
+- Na Windows a Linuxu se PDF tiskne přes výchozí prohlížeč PDF v systému.
 
 ## Licence a cizí kód
 

@@ -1,0 +1,10 @@
+.venv
+build
+dist
+out
+render
+docs-src
+samples-raw
+samples-pdf-raw
+.git
+__pycache__

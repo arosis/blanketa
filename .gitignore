@@ -24,3 +24,4 @@ pki/*.csr
 pki/*.srl
 pki/*.keychain-db
 pki/.fl*
+dist/

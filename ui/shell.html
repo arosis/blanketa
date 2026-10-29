@@ -71,7 +71,10 @@
   .zfo-dialog h2 { margin: 0 0 8px; font-size: 15px; }
   .zfo-dialog p { margin: 0 0 14px; color: var(--muted); }
   .zfo-dialog label { display: grid; gap: 6px; font-weight: 500; }
-  .zfo-dialog .zfo-cert { max-width: none; width: 100%; }
+  .zfo-dialog .zfo-cert { max-width: none; width: 100%; box-sizing: border-box; }
+  .zfo-dialog input.zfo-cert { height: 30px; padding: 0 8px; border: 1px solid var(--line); border-radius: 7px; font: inherit; }
+  .zfo-cert-choice { display: grid; gap: 10px; }
+  .zfo-link { justify-self: start; padding: 0; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; }
   .zfo-dialog-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
   .zfo-btn.primary:hover { background: #0857bd; }
   .zfo-btn svg { width: 18px; height: 18px; flex: none; }
@@ -334,11 +337,12 @@
   <span class="msg" data-status>Otevírám formulář…</span>
 </footer>
 
+<script src="/bridge.js"></script>
 <script>
 (() => {
   const SESSION = '__SESSION__';
   const FILE = __FILE__;
-  const native = window.webkit?.messageHandlers?.app;
+  const native = window.zfoNative;
   const $q = s => document.querySelector(s);
   const status = $q('[data-status]');
   const setStatus = (text, html) => { html ? (status.innerHTML = text) : (status.textContent = text); };
@@ -477,7 +481,7 @@
       if (type === 'get_multiswitch_list' && !window.selectsSynced) {
         window.selectsSynced = true;
         $('select[name]:visible').each(function () { if (this.value) $(this).trigger('change'); });
-        $q('[data-cert-slot]').replaceWith(certSelect);
+        $q('[data-cert-slot]').replaceWith(certificates.element);
         $q('[data-find-slot]').replaceWith(findInput);
         enqueue(() => { ready = true; fitPage(); autoZoom(); });
       }
@@ -518,20 +522,8 @@
 
   // Certificates for signing. The select joins the toolbar only after the form scripts have
   // wired up their own selects, so they do not treat it as a form field.
-  const certSelect = document.createElement('select');
-  certSelect.className = 'zfo-cert';
-  certSelect.title = 'Certifikát pro podpis';
-  fetch('/identities').then(r => r.json()).then(list => {
-    certSelect.innerHTML = list.length ? '<option value="">Vyber certifikát pro podpis…</option>'
-                                       : '<option value="">Žádný podpisový certifikát</option>';
-    for (const c of list) {
-      const o = document.createElement('option');
-      o.value = c.id;
-      o.textContent = (c.token ? '🔑 ' : '') + c.subject + (c.source === 'test' ? ' (TEST)' : '') + ' – do ' + c.not_after;
-      certSelect.append(o);
-    }
-    try { const last = localStorage.getItem('zfo-cert'); if (list.some(c => c.id === last)) certSelect.value = last; } catch {}
-  });
+  const certificates = window.zfoCertificates();
+  const certSelect = certificates.select;
 
   // Form description (Form Filler: Vlastnosti → Popis formuláře).
   const info = __INFO__;
@@ -597,7 +589,7 @@
   const print = async (fieldsOnly = false) => {
     await queue;
     document.body.classList.toggle('zfo-print-fields', fieldsOnly === true);
-    if (native) {
+    if (native?.printsNatively) {
       native.postMessage({action: 'print'});
     } else {
       window.print();
@@ -607,7 +599,7 @@
   window.zfoPrinted = () => document.body.classList.remove('zfo-print-fields');
 
   const savedStatus = (verb, path) => {
-    const reveal = native ? ' <a data-reveal>Zobrazit ve Finderu</a>' : '';
+    const reveal = native ? ` <a data-reveal>${window.zfoIsMac ? 'Zobrazit ve Finderu' : 'Zobrazit ve složce'}</a>` : '';
     setStatus(`${verb} <b title="${esc(path)}">${esc(path.split('/').pop())}</b>${reveal}`, true);
     $q('[data-reveal]')?.addEventListener('click', () => native.postMessage({action: 'reveal', path}));
   };
@@ -894,9 +886,10 @@
     sign: async () => {
       await queue;
       if (!certSelect.value) { setStatus('Vyber certifikát pro podpis.'); actions.save(); return; }
-      try { localStorage.setItem('zfo-cert', certSelect.value); } catch {}
+      certificates.remember();
       setStatus('Podepisuji… (token si může vyžádat PIN)');
-      const res = await fetch('/save?s=' + SESSION + '&cert=' + encodeURIComponent(certSelect.value), {method: 'POST'});
+      const res = await fetch('/save?s=' + SESSION + '&cert=' + encodeURIComponent(certSelect.value),
+                              {method: 'POST', body: JSON.stringify({password: certificates.password()})});
       if (!res.ok) { setStatus('Chyba: ' + await res.text()); return; }
       const result = await res.json();
       signatures = result.signatures; changed = false; renderSignatures();
@@ -910,7 +903,7 @@
   window.zfoAction = name => actions[name]?.();
   document.addEventListener('keydown', e => {
     const shortcut = e.key === 'F9' ? (e.shiftKey ? 'check' : 'recalc')
-      : !e.metaKey ? null
+      : !window.zfoShortcut(e) ? null
       : e.key === '+' || e.key === '=' ? 'zoom-in'
       : e.key === '-' ? 'zoom-out'
       : e.key.toLowerCase() === 's' ? (e.shiftKey ? 'save' : 'save-plain')

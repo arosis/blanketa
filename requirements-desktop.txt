@@ -1,0 +1,7 @@
+# Windows and Linux app (desktop.py, tools/build_desktop.py), on top of requirements.txt.
+-r requirements.txt
+pywebview==6.2.1
+pythonnet==3.2.1; sys_platform == "win32"
+PyQt6==6.11.0; sys_platform == "linux"
+PyQt6-WebEngine==6.11.0; sys_platform == "linux"
+qtpy==2.4.3; sys_platform == "linux"

@@ -137,13 +137,13 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
         webView.evaluateJavaScript("window.zfoPrinted && zfoPrinted()")
     }
 
-    // File inputs in the page (e.g. the form's "Import dat do formuláře") use the system open panel.
+    // File inputs in the page ("Import dat do formuláře", a certificate file for signing) use the system open panel.
     func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
                  initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = parameters.allowsMultipleSelection
         panel.canChooseDirectories = false
-        panel.allowedContentTypes = [.xml]
+        panel.allowedContentTypes = [.xml] + ["pfx", "p12"].compactMap { UTType(filenameExtension: $0) }
         panel.beginSheetModal(for: window) { completionHandler($0 == .OK ? panel.urls : nil) }
     }
 
@@ -161,6 +161,19 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
         alert.addButton(withTitle: "Pokračovat")
         alert.addButton(withTitle: "Zrušit")
         alert.beginSheetModal(for: window) { completionHandler($0 == .alertFirstButtonReturn) }
+    }
+
+    // prompt() in the page asks for secrets only (the password of a certificate file), so the field is masked.
+    func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?,
+                 initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
+        let alert = NSAlert()
+        alert.messageText = prompt
+        let field = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        alert.accessoryView = field
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Zrušit")
+        alert.window.initialFirstResponder = field
+        alert.beginSheetModal(for: window) { completionHandler($0 == .alertFirstButtonReturn ? field.stringValue : nil) }
     }
 
     func windowWillClose(_ notification: Notification) {
