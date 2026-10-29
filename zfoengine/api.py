@@ -95,16 +95,16 @@ def handle(doc, msg_type, data):
                                                     type=msg_types.INFO)
     if not msg_type or msg_type.startswith("_") or not hasattr(geh, msg_type):
       if msg_type != _DOCUMENT_READY:
-        log.warning('Handler for %s does not exist.' % msg_type)
+        log.warning('Handler for %r does not exist.', msg_type)
       return responses
     func = getattr(geh, msg_type)
     if not callable(func) or getattr(func, "__module__", None) != geh.__name__:
-      log.warning('Handler for %s does not exist.' % msg_type)
+      log.warning('Handler for %r does not exist.', msg_type)
       return responses
     try:
       responses += func(doc, data)
     except Exception as ex:
-      log.exception("Handler %s failed" % msg_type)
+      log.exception("Handler %r failed", msg_type)
       responses += geh._construct_web_response("empty_callback()")
       responses += geh._construct_gtk_info_response("%s: %s" % (msg_type, ex), area="message_area",
                                                     type=msg_types.ERROR)

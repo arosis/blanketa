@@ -126,9 +126,23 @@ class LocalServer(unittest.TestCase):
         self.assertEqual(self.request("POST", f"/export-data?s={session}", origin=f"http://127.0.0.1:{self.port}")[0], 200)
         self.assertEqual(self.request("POST", f"/export-data?s={session}", origin="https://attacker.example")[0], 403)
 
+    def test_static_files_stay_in_their_folders(self):
+        self.assertEqual(self.request("GET", "/static/scripts/zfo_script.js")[0], 200)
+        for path in ("/static/../../../../app.py", "/pdfjs/../../app.py", "/static/..%2f..%2fapp.py", "/pdfjs//etc/passwd"):
+            self.assertEqual(self.request("GET", path)[0], 404, path)
+
     def test_certificate_file_needs_a_session(self):
         body = json.dumps({"data": "", "password": ""})
         self.assertEqual(self.request("POST", "/add-certificate", body=body)[0], 404)
+
+
+class CertificateIds(unittest.TestCase):
+    def test_identity_id_cannot_name_another_file(self):
+        for bad in ("file:../../../etc/passwd", "file:" + "a" * 39, "test:../user", "file:"):
+            with self.assertRaises(LookupError, msg=bad):
+                certstore.load(bad, "x")
+        with self.assertRaises(LookupError):
+            certstore.remove_pfx("../certificates")
 
 
 class Sessions(unittest.TestCase):

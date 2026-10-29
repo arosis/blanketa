@@ -11,6 +11,7 @@ import base64
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -105,6 +106,7 @@ def add_pfx(data, password):
 
 
 def remove_pfx(sha1):
+    sha1 = _sha1(sha1)
     index_path, index = _files_index()
     index_path.write_text(json.dumps([e for e in index if e["sha1"] != sha1]))
     (config_dir() / "certificates" / f"{sha1}.p12").unlink(missing_ok=True)
@@ -162,9 +164,17 @@ def identities():
     return found
 
 
+def _sha1(value):
+    """An identity's SHA-1 thumbprint; ids come from requests and name files, so nothing else is accepted."""
+    if not re.fullmatch(r"[0-9a-f]{40}", value or ""):
+        raise LookupError(f"neplatný certifikát {value!r}")
+    return value
+
+
 def load(identity_id, password=None):
     """(key, certificate) for an identity id from identities()."""
     source, sha1 = identity_id.split(":", 1)
+    sha1 = _sha1(sha1.lower())
     if source == "file":
         return _load_pfx(config_dir() / "certificates" / f"{sha1}.p12", password)
     if source == "test" and not IS_MAC:

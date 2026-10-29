@@ -277,7 +277,7 @@ def export_data(session):
 def import_data(session, xml):
     """Form Filler's "Import dat do formuláře": checks the XML matches the form's data model, returns a reload token."""
     try:
-        data = etree.fromstring(xml)
+        data = etree.fromstring(xml, etree.XMLParser(resolve_entities=False, no_network=True))
     except etree.XMLSyntaxError as e:
         raise ValueError(f"Soubor není platné XML: {e}")
     expected = engine.data_element(session["doc"])
