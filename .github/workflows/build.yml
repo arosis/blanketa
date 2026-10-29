@@ -10,6 +10,7 @@ on:
 jobs:
   macos:
     runs-on: macos-14
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -20,8 +21,8 @@ jobs:
         run: .venv/bin/python -I tests/test_engine.py
       - name: Signing selftest (test keychain)
         run: |
-          tools/make-test-pki.sh
           (cd macsign && swiftc -O -suppress-warnings macsign.swift -o macsign)
+          tools/make-test-pki.sh
           .venv/bin/python -I tools/selftest.py test
       - name: Build app
         run: ./build.sh
@@ -30,6 +31,7 @@ jobs:
 
   windows:
     runs-on: windows-latest
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -77,6 +79,7 @@ jobs:
 
   linux:
     runs-on: ubuntu-22.04
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
