@@ -34,8 +34,8 @@ LOCK = threading.Lock()
 # Sessions hold a whole document each; a window only ever uses its newest few (reload, reset, import).
 MAX_SESSIONS = 8
 
-SHELL = (RESOURCES / "ui/shell.html").read_text()
-PDF_PAGE = (RESOURCES / "ui/pdf.html").read_text().replace(
+SHELL = (RESOURCES / "ui/shell.html").read_text(encoding="utf-8")
+PDF_PAGE = (RESOURCES / "ui/pdf.html").read_text(encoding="utf-8").replace(
     "__SHELL_STYLE__", re.search(r"<style>.*?</style>", SHELL, re.S).group(0).replace("__FONTS__", ""))
 
 

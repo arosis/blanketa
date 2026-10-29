@@ -46,7 +46,8 @@ jobs:
       - name: Engine tests
         run: |
           python -X utf8 -I tests/test_engine.py
-          python -X utf8 -I tests/test_security.py
+          # Without UTF-8 mode on purpose: the built app has the system code page, and so must the code it runs.
+          python -I tests/test_security.py
       - name: Signing selftest (Windows certificate store and PFX file)
         shell: pwsh
         run: |

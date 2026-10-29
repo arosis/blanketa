@@ -84,7 +84,7 @@ def _windows_identities():
 
 def _files_index():
     path = config_dir() / "certificates.json"
-    return path, (json.loads(path.read_text()) if path.exists() else [])
+    return path, (json.loads(path.read_text(encoding="utf-8")) if path.exists() else [])
 
 
 def add_pfx(data, password):
@@ -101,14 +101,14 @@ def add_pfx(data, password):
     index_path, index = _files_index()
     index = [e for e in index if e["sha1"] != sha1] + [
         {"sha1": sha1, "subject": _common_name(cert), "not_after": f"{cert.not_valid_after_utc:%d. %m. %Y}"}]
-    index_path.write_text(json.dumps(index))
+    index_path.write_text(json.dumps(index), encoding="utf-8")
     return sha1
 
 
 def remove_pfx(sha1):
     sha1 = _sha1(sha1)
     index_path, index = _files_index()
-    index_path.write_text(json.dumps([e for e in index if e["sha1"] != sha1]))
+    index_path.write_text(json.dumps([e for e in index if e["sha1"] != sha1]), encoding="utf-8")
     (config_dir() / "certificates" / f"{sha1}.p12").unlink(missing_ok=True)
 
 

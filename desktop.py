@@ -128,11 +128,11 @@ class DesktopApp:
 
     def recent(self):
         path = self._recent_path()
-        found = json.loads(path.read_text()) if path.exists() else []
+        found = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
         return [p for p in found if Path(p).exists()][:10]
 
     def _remember(self, path):
-        self._recent_path().write_text(json.dumps([str(path)] + [p for p in self.recent() if p != str(path)]))
+        self._recent_path().write_text(json.dumps([str(path)] + [p for p in self.recent() if p != str(path)]), encoding="utf-8")
 
     def open(self, path=None):
         path = path.resolve() if path else None

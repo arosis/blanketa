@@ -16,7 +16,7 @@ import tarfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-VERSION = (ROOT / "VERSION").read_text().strip()
+VERSION = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 EDITOR = "vendor/zfo-editor-src/zfo-editor-0.3.2"
 IS_WINDOWS = sys.platform == "win32"
 DIST = ROOT / "dist"
@@ -82,8 +82,8 @@ def package_linux():
         shutil.copy(ROOT / source, root / target)
     (root / "DEBIAN").mkdir()
     size = sum(f.stat().st_size for f in root.rglob("*") if f.is_file()) // 1024
-    control = (ROOT / "packaging/linux/control").read_text().replace("@VERSION@", VERSION)
-    (root / "DEBIAN/control").write_text(control.replace("@ARCH@", arch).replace("@SIZE@", str(size)))
+    control = (ROOT / "packaging/linux/control").read_text(encoding="utf-8").replace("@VERSION@", VERSION)
+    (root / "DEBIAN/control").write_text(control.replace("@ARCH@", arch).replace("@SIZE@", str(size)), encoding="utf-8")
     for script in ("postinst", "postrm"):
         shutil.copy(ROOT / f"packaging/linux/{script}", root / f"DEBIAN/{script}")
         (root / f"DEBIAN/{script}").chmod(0o755)
