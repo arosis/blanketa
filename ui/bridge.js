@@ -113,6 +113,7 @@ window.zfoSupport = (() => {
           .zfo-support dt { color: #6e6e73; font-size: 12px; }
           .zfo-support dd { margin: 0 0 6px; font-weight: 600; user-select: text; -webkit-user-select: text; }
           .zfo-support-links { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+          .zfo-support-about { margin: 14px 0 0; font-size: 12px; color: #6e6e73; }
         </style>
         <h2>Podpořit Blanketu</h2>
         <p>Blanketa je zdarma a zdarma zůstane. Pokud vám ušetřila čas, můžete na její další vývoj přispět
@@ -121,6 +122,8 @@ window.zfoSupport = (() => {
           <dl><dt>Číslo účtu</dt><dd data-account></dd><dt>IBAN</dt><dd data-iban></dd>
             <dt>QR platbu naskenujte v aplikaci banky, částku zvolíte sami.</dt></dl></div>
         <div class="zfo-support-links" data-links></div>
+        <p class="zfo-support-about"><a href="https://blanketa.cz">blanketa.cz</a> · Vytvořil
+          <a href="https://winkler-bejrovi.cz">Richard Winkler Bejr</a></p>
         <div class="zfo-dialog-buttons"><button type="button" class="zfo-btn primary" data-close>Zavřít</button></div>`;
       dialog.querySelector('[data-account]').textContent = SUPPORT.account;
       dialog.querySelector('[data-iban]').textContent = SUPPORT.iban;

@@ -1,5 +1,7 @@
 # Blanketa
 
+**Web: [blanketa.cz](https://blanketa.cz)** · autor: [Richard Winkler Bejr](https://winkler-bejrovi.cz)
+
 Aplikace pro macOS, Windows a Linux (Ubuntu, Debian, Mint …) na vyplňování a elektronické podepisování:
 - **formulářů 602XML (`.zfo`)**, které jinak otevře jen Software602 Form Filler pro Windows (např. ČÚZK návrh na vklad, formuláře ČSSZ a krajů);
 - **PDF formulářů (AcroForm)**.
