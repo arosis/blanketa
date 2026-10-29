@@ -1,0 +1,6 @@
+name: Blanketa CodeQL config
+paths-ignore:
+  - vendor
+  - build
+  - dist
+  - docs-src
