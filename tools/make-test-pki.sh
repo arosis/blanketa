@@ -4,6 +4,8 @@
 #   tools/make-test-pki.sh [DIR]
 # The keychain password is "test" (app.py's default ZFO_TEST_KEYCHAIN_PASSWORD).
 set -euo pipefail
+# Git Bash on Windows would rewrite "/C=CZ/O=..." below into a file path.
+export MSYS_NO_PATHCONV=1
 cd "$(dirname "$0")/.."
 DIR="${1:-pki}"
 mkdir -p "$DIR"
