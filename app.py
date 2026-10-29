@@ -7,13 +7,15 @@ usage: app.py [PORT]               opens forms from samples/*/form.zfo, saves to
        app.py --file PATH [PORT]   opens one form, saves the signed copy next to it
 PORT 0 picks a free port; the chosen one is printed as "PORT <n>".
 """
-import io, os, re, json, sys, copy, base64, secrets, tempfile, threading, zipfile
+import io, os, re, json, sys, copy, time, base64, secrets, tempfile, threading, zipfile
+from datetime import datetime
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, quote
 from lxml import etree
 from cryptography import x509
 
+import barcode
 import certstore
 import pdf_sign
 import zfo_sign
@@ -25,6 +27,8 @@ RESOURCES = Path(getattr(sys, "_MEIPASS", ROOT))
 EDITOR = RESOURCES / "vendor/zfo-editor-src/zfo-editor-0.3.2"
 PDFJS = RESOURCES / "vendor/pdfjs"
 DS = "http://www.w3.org/2000/09/xmldsig#"
+# ui/fo2html.xsl draws fm:barcode through bl:barcode(); the XSLT itself cannot encode a barcode.
+etree.FunctionNamespace("urn:blanketa")["barcode"] = lambda _context, *args: barcode.svg_data_uri(*args)
 XSLT = etree.XSLT(etree.parse(str(RESOURCES / "ui/fo2html.xsl")))
 FORMS = {}
 SINGLE_FILE = False
@@ -237,11 +241,15 @@ def form_info(name):
     """Form description as Form Filler shows it under "Popis formuláře"."""
     with zipfile.ZipFile(form_path(name)) as z:
         summary = etree.fromstring(z.read("summary/summary.xml")).find("summary") if "summary/summary.xml" in z.namelist() else None
+        # "Modifikován": the forms carry no such attribute; Form Filler stamps form.fo in the archive when it saves.
+        modified = datetime(*z.getinfo("form.fo").date_time).isoformat()
     fo = etree.fromstring(read_fo(form_path(name)), etree.XMLParser(huge_tree=True))
     params = fo.find(".//{http://software602.cz/forms}formparams")
     get = lambda el, attr: el.get(attr, "") if el is not None else ""
-    return {"title": get(summary, "title"), "author": get(summary, "author"), "form_id": get(params, "form-id"),
-            "created": get(params, "creationdate"), "version": get(params, "xmlcore-version")}
+    return {"title": get(summary, "title"), "subject": get(summary, "subject"), "author": get(summary, "author"),
+            "keywords": get(summary, "keywords"), "comment": get(summary, "comment"), "code": get(summary, "formcode"),
+            "form_id": get(params, "form-id") or get(summary, "form-id"), "created": get(params, "creationdate"),
+            "modified": modified, "version": get(params, "xmlcore-version")}
 
 
 def filled_form(session, key=None, cert=None):
@@ -259,7 +267,11 @@ def write_zfo(name, fo, target):
     out = io.BytesIO()
     with zipfile.ZipFile(form_path(name)) as zin, zipfile.ZipFile(out, "w") as zout:
         for info in zin.infolist():
-            data = fo if info.filename == "form.fo" else zin.read(info.filename)
+            data = zin.read(info.filename)
+            if info.filename == "form.fo":
+                # Stamped with the time of saving, as Form Filler does: it is what "Modifikován" shows.
+                info, data = copy.copy(info), fo
+                info.date_time = time.localtime()[:6]
             zout.writestr(info, data, compress_type=info.compress_type)
     target.write_bytes(out.getvalue())
 

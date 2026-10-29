@@ -12,8 +12,10 @@ APP="build/Blanketa.app"
   --collect-all pyhanko --collect-all pyhanko_certvalidator --collect-all uharfbuzz --collect-submodules fontTools --collect-data tzdata \
   --collect-submodules zfoengine --hidden-import lxml._elementpath app.py
 
-swiftc -O -suppress-warnings macsign/macsign.swift -o macsign/macsign
-swiftc -O -suppress-warnings macapp/main.swift -o build/blanketa
+# The Swift parts target the oldest macOS Info.plist promises; otherwise swiftc targets the build machine's own.
+MACOS_TARGET="arm64-apple-macos$(plutil -extract LSMinimumSystemVersion raw macapp/Info.plist)"
+swiftc -O -suppress-warnings -target "$MACOS_TARGET" macsign/macsign.swift -o macsign/macsign
+swiftc -O -suppress-warnings -target "$MACOS_TARGET" macapp/main.swift -o build/blanketa
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"

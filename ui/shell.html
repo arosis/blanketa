@@ -333,6 +333,17 @@
   <div class="zfo-page"></div>
 </main>
 
+<dialog class="zfo-dialog" data-publisher-warning>
+  <form method="dialog">
+    <h2>Upozornění k&nbsp;formuláři</h2>
+    <p data-publisher-warning-text></p>
+    <div class="zfo-dialog-buttons">
+      <button class="zfo-btn" value="details">Zobrazit podpisy</button>
+      <button class="zfo-btn primary" value="ok">Pokračovat</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog class="zfo-dialog" data-sign-dialog>
   <form method="dialog">
     <h2>Podepsat a uložit</h2>
@@ -576,6 +587,25 @@
   }
   renderSignatures();
 
+  // Form Filler warns when it opens a form its publisher has not signed, or whose publisher signature is broken:
+  // nobody vouches for where such a form came from. Once per file and session, so reloads (import, reset) stay quiet.
+  {
+    const publication = signatures.find(s => s.role === 'publication');
+    const key = 'zfo-publisher-warned:' + FILE;
+    let warned = false;
+    try { warned = sessionStorage.getItem(key) === '1'; } catch {}
+    if (!warned && (!publication || !publication.intact)) {
+      const dialog = $q('[data-publisher-warning]');
+      dialog.querySelector('[data-publisher-warning-text]').textContent = publication
+        ? 'Podpis vydavatele formuláře je porušen. Formulář mohl být po vydání změněn. Vyplňujte ho, jen pokud důvěřujete jeho zdroji.'
+        : 'Formulář nebyl dosud publikován: nemá podpis vydavatele, takže nelze ověřit, kdo ho vydal a zda nebyl změněn. '
+          + 'Vyplňujte ho, jen pokud důvěřujete jeho zdroji.';
+      dialog.addEventListener('close', () => { if (dialog.returnValue === 'details') togglePanel('panel', true); }, {once: true});
+      try { sessionStorage.setItem(key, '1'); } catch {}
+      dialog.showModal();
+    }
+  }
+
   // Certificates for signing. The select joins the toolbar only after the form scripts have
   // wired up their own selects, so they do not treat it as a form field.
   const certificates = window.zfoCertificates(SESSION);
@@ -583,11 +613,17 @@
 
   // Form description (Form Filler: Vlastnosti → Popis formuláře).
   const info = __INFO__;
+  const day = iso => new Date(iso).toLocaleDateString('cs-CZ');
   $q('[data-info]').innerHTML = [
     info.title && `<b>${esc(info.title)}</b>`,
-    info.author && `Vydavatel: ${esc(info.author)}`,
+    info.subject && `Předmět: ${esc(info.subject)}`,
+    info.author && `Autor: ${esc(info.author)}`,
+    info.keywords && `Klíčová slova: ${esc(info.keywords)}`,
+    info.comment && `Komentář: ${esc(info.comment)}`,
+    info.code && `Kód formuláře: ${esc(info.code)}`,
     info.form_id && `ID formuláře: ${esc(info.form_id)}`,
-    info.created && `Vytvořen: ${new Date(info.created).toLocaleDateString('cs-CZ')}`,
+    info.created && `Vytvořen: ${day(info.created)}`,
+    info.modified && `Modifikován: ${day(info.modified)}`,
     __BLANK__ && 'Zobrazeny výchozí hodnoty – vyplněná data nejsou načtena.',
   ].filter(Boolean).join('<br>');
 

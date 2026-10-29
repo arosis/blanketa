@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   macos:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -29,6 +29,7 @@ jobs:
           .venv/bin/python -I tools/selftest.py test
           # Renders forms, which asks macsign for trust verdicts: it runs once macsign is built.
           .venv/bin/python -I tests/test_security.py
+          .venv/bin/python -I tests/test_app.py
       - name: Build app
         run: ./build.sh
       - uses: actions/upload-artifact@v4
@@ -48,6 +49,7 @@ jobs:
           python -X utf8 -I tests/test_engine.py
           # Without UTF-8 mode on purpose: the built app has the system code page, and so must the code it runs.
           python -I tests/test_security.py
+          python -I tests/test_app.py
       - name: Signing selftest (Windows certificate store and PFX file)
         shell: pwsh
         run: |
@@ -120,6 +122,7 @@ jobs:
         run: |
           python -I tests/test_engine.py
           python -I tests/test_security.py
+          python -I tests/test_app.py
       - name: Signing selftest (PFX file)
         run: tools/make-test-pki.sh && python -I tools/selftest.py test
       - name: Build app and packages

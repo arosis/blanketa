@@ -4,9 +4,20 @@
                 xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
                 xmlns:fo="http://www.w3.org/1999/XSL/Format"
                 xmlns:fm="http://software602.cz/forms"
-                exclude-result-prefixes="fo fm">
+                xmlns:bl="urn:blanketa"
+                exclude-result-prefixes="fo fm bl">
 
   <xsl:import href="../vendor/zfo-editor-src/zfo-editor-0.3.2/xslt/fo2html.xsl"/>
+
+  <!-- Barcode the form draws itself (zfo-editor drops it): an SVG from barcode.py; its text when it cannot be drawn. -->
+  <xsl:template match="fm:barcode">
+    <xsl:variable name="src" select="bl:barcode(string(@symbology), normalize-space(.), string(@barcode-height),
+                                                string(@narrow-bar-width), string(@display-text))"/>
+    <xsl:choose>
+      <xsl:when test="$src != ''"><img class="zfo-barcode" src="{$src}" alt="Čárový kód {normalize-space(.)}"/></xsl:when>
+      <xsl:otherwise><xsl:value-of select="normalize-space(.)"/></xsl:otherwise>
+    </xsl:choose>
+  </xsl:template>
 
   <!-- Embedded picture: real image type from its signature, size from the enclosing fo:instream-foreign-object. -->
   <xsl:template match="fm:internal-graphic">
