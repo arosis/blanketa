@@ -203,7 +203,7 @@ __SHELL_STYLE__
       (signatures.length ? signatures.map(card).join('') : '<div class="zfo-empty">Dokument zatím není podepsaný.</div>');
   };
 
-  const certificates = window.zfoCertificates();
+  const certificates = window.zfoCertificates(SESSION);
   const certSelect = certificates.select;
   $q('[data-cert-slot]').replaceWith(certificates.element);
 

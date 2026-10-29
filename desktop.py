@@ -9,6 +9,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import webbrowser
 from pathlib import Path
@@ -22,6 +23,13 @@ def server_command(args):
     if FROZEN:
         return [sys.executable, "--serve", *args]
     return [sys.executable, str(Path(__file__).with_name("app.py")), *args]
+
+
+def is_print_file(path):
+    """A PDF that app.print_pdf wrote for printing; nothing else is handed to the system's default program."""
+    path = Path(path).resolve()
+    return (path.parent == Path(tempfile.gettempdir()).resolve() and path.name.startswith("zfo-tisk-")
+            and path.suffix.lower() == ".pdf" and path.is_file())
 
 
 def open_with_system(path):
@@ -40,6 +48,9 @@ class Bridge:
 
     def message(self, msg):
         action, window = msg.get("action"), self._form.window
+        # Only the form server's own pages may drive the app (see FormWindow.keep_home).
+        if not (window.get_current_url() or "").startswith(self._form.home):
+            return
         if action == "open":
             self._app.open_dialog(window)
         elif action == "openFile":
@@ -52,9 +63,9 @@ class Bridge:
                 subprocess.Popen(["explorer", "/select,", str(path)])
             else:
                 open_with_system(path.parent)
-        elif action == "printPdf":
+        elif action == "printPdf" and is_print_file(msg["path"]):
             open_with_system(msg["path"])
-        elif action == "openUrl" and str(msg.get("url", "")).startswith("https://"):
+        elif action == "openUrl" and str(msg.get("url", "")).startswith(("https://", "http://")):
             webbrowser.open(msg["url"])
         elif action == "saveFile":
             chosen = window.create_file_dialog(self._app.webview.FileDialog.SAVE, directory=msg.get("folder") or "",
@@ -87,9 +98,16 @@ class FormWindow:
                 break
             except OSError:
                 time.sleep(0.1)
-        self.window = app.webview.create_window(path.name if path else "Blanketa", f"http://127.0.0.1:{port}/",
+        self.home = f"http://127.0.0.1:{port}/"
+        self.window = app.webview.create_window(path.name if path else "Blanketa", self.home,
                                                 js_api=Bridge(app, self), width=1280, height=900, text_select=True)
         self.window.events.closed += self.close
+        self.window.events.loaded += self.keep_home
+
+    def keep_home(self):
+        """The pages turn links into the browser; should anything still take the window elsewhere, it comes back."""
+        if not (self.window.get_current_url() or self.home).startswith(self.home):
+            self.window.load_url(self.home)
 
     def close(self):
         if self.server.poll() is None:

@@ -31,10 +31,26 @@ SINGLE_FILE = False
 SESSIONS = {}
 IMPORTS = {}
 LOCK = threading.Lock()
+# Sessions hold a whole document each; a window only ever uses its newest few (reload, reset, import).
+MAX_SESSIONS = 8
 
 SHELL = (RESOURCES / "ui/shell.html").read_text()
 PDF_PAGE = (RESOURCES / "ui/pdf.html").read_text().replace(
     "__SHELL_STYLE__", re.search(r"<style>.*?</style>", SHELL, re.S).group(0).replace("__FONTS__", ""))
+
+
+def js(value):
+    """JSON for a <script> block: a form's own texts (title, signer names, button captions) cannot end the script."""
+    return json.dumps(value, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+
+
+def new_session(content):
+    session = secrets.token_urlsafe(12)
+    with LOCK:
+        SESSIONS[session] = content
+        while len(SESSIONS) > MAX_SESSIONS:
+            SESSIONS.pop(next(iter(SESSIONS)))
+    return session
 
 
 def form_path(name):
@@ -94,12 +110,11 @@ def pdf_info(pdf):
 def render_pdf(name):
     """PDF forms are shown by PDF.js; the file itself is fetched from /pdf."""
     pdf = form_path(name).read_bytes()
-    session = secrets.token_urlsafe(12)
-    SESSIONS[session] = {"name": name, "pdf": pdf}
+    session = new_session({"name": name, "pdf": pdf})
     return (PDF_PAGE.replace("__SESSION__", session)
-            .replace("__FILE__", json.dumps(form_path(name).name, ensure_ascii=False))
-            .replace("__SIGNATURES__", json.dumps(pdf_signatures(pdf), ensure_ascii=False))
-            .replace("__INFO__", json.dumps(pdf_info(pdf), ensure_ascii=False)))
+            .replace("__FILE__", js(form_path(name).name))
+            .replace("__SIGNATURES__", js(pdf_signatures(pdf)))
+            .replace("__INFO__", js(pdf_info(pdf))))
 
 
 def save_pdf(session, values, identity_id=None, placement=None, password=None):
@@ -138,24 +153,22 @@ def render(name, blank=False, data=None):
         if data is not None:
             etree.SubElement(stripped, f"{{{DS}}}Object").append(data)
         fo = etree.tostring(stripped)
-    session = secrets.token_urlsafe(12)
-    with LOCK:
-        SESSIONS[session] = {"name": name, "doc": engine.open_document(fo)}
+    session = new_session({"name": name, "doc": engine.open_document(fo)})
     doc = etree.fromstring(fo, etree.XMLParser(huge_tree=True))
     for hidden in doc.xpath("//dsig:SignatureProperties | //dsig:Object[not(@Id)]", namespaces={"dsig": DS}):
         hidden.getparent().remove(hidden)
     html = etree.tostring(XSLT(etree.ElementTree(doc), PATH_TO_JS="'/static/scripts/'",
                                PATH_TO_CSS="'/static/styles/'"), method="html", encoding="unicode")
     shell = (SHELL.replace("__SESSION__", session)
-             .replace("__FILE__", json.dumps(form_path(name).name if SINGLE_FILE else name, ensure_ascii=False))
-             .replace("__SIGNATURES__", json.dumps(signatures(fo), ensure_ascii=False))
-             .replace("__PAGE__", json.dumps(page_geometry(doc)))
-             .replace("__COLORS__", json.dumps(field_colors(doc)))
-             .replace("__INFO__", json.dumps(form_info(name), ensure_ascii=False))
-             .replace("__BLANK__", json.dumps(blank))
+             .replace("__FILE__", js(form_path(name).name if SINGLE_FILE else name))
+             .replace("__SIGNATURES__", js(signatures(fo)))
+             .replace("__PAGE__", js(page_geometry(doc)))
+             .replace("__COLORS__", js(field_colors(doc)))
+             .replace("__INFO__", js(form_info(name)))
+             .replace("__BLANK__", js(blank))
              .replace("__FONTS__", embedded_fonts(doc))
-             .replace("__BUTTONS__", json.dumps(user_buttons(doc), ensure_ascii=False))
-             .replace("__CODES__", json.dumps(code_lists(doc), ensure_ascii=False))
+             .replace("__BUTTONS__", js(user_buttons(doc)))
+             .replace("__CODES__", js(code_lists(doc)))
              .replace("__EMPTY__", "false"))
     return html.replace("</body>", shell + "</body>", 1)
 
@@ -180,11 +193,12 @@ def user_buttons(doc):
 
 
 def embedded_fonts(doc):
-    """@font-face rules for TrueType fonts the form carries in fm:fonts."""
+    """@font-face rules for TrueType fonts the form carries in fm:fonts. They land in a <style> block, so a font
+    whose name or data could close it is left out."""
     rules = []
     for font in doc.iter("{http://software602.cz/forms}font"):
         name, data = font.get("name"), "".join((font.text or "").split())
-        if name and data:
+        if name and data and re.fullmatch(r"[\w .-]+", name) and re.fullmatch(r"[A-Za-z0-9+/]+=*", data):
             rules.append(f'@font-face {{ font-family: {json.dumps(name)}; src: url(data:font/ttf;base64,{data}) format("truetype"); }}')
     return "\n  ".join(rules)
 
@@ -301,7 +315,19 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _foreign(self):
+        """Any web page in the user's browser can reach localhost. A request whose Host is not this server (DNS
+        rebinding) or a POST from another origin (a forged form) is refused before it reads or changes anything."""
+        port = self.server.server_address[1]
+        own = {f"127.0.0.1:{port}", f"localhost:{port}"}
+        if self.headers.get("Host") not in own:
+            return True
+        origin = self.headers.get("Origin")
+        return self.command == "POST" and origin is not None and origin not in {f"http://{h}" for h in own}
+
     def do_GET(self):
+        if self._foreign():
+            return self._send(403, b"forbidden", "text/plain")
         url = urlparse(self.path)
         if url.path.startswith("/static/"):
             path = (EDITOR / url.path[len("/static/"):]).resolve()
@@ -345,7 +371,12 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, b"form not found", "text/plain")
 
     def do_POST(self):
+        if self._foreign():
+            return self._send(403, b"forbidden", "text/plain")
         url = urlparse(self.path)
+        session = SESSIONS.get(parse_qs(url.query).get("s", [""])[0])
+        if session is None:
+            return self._send(404, "Relace vypršela, načti formulář znovu".encode(), "text/plain; charset=utf-8")
         if url.path == "/add-certificate":
             request = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
             try:
@@ -353,9 +384,6 @@ class Handler(BaseHTTPRequestHandler):
             except (KeyError, ValueError, OSError) as e:
                 return self._send(400, str(e).encode(), "text/plain; charset=utf-8")
             return self._send(200, json.dumps(certstore.identities(), ensure_ascii=False).encode(), "application/json")
-        session = SESSIONS.get(parse_qs(url.query).get("s", [""])[0])
-        if session is None:
-            return self._send(404, "Relace vypršela, načti formulář znovu".encode(), "text/plain; charset=utf-8")
         body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
         with LOCK:
             if url.path == "/ipc":

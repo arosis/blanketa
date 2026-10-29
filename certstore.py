@@ -197,6 +197,7 @@ def trust(certificates):
     if IS_WINDOWS:
         lines = "\n".join(base64.b64encode(der).decode() for der in certificates).encode()
         return [json.loads(line) for line in _winsign(["trust"], lines).splitlines() if line.strip()]
+    import asyncio
     from asn1crypto import x509 as asn1_x509
     from pyhanko_certvalidator import CertificateValidator, ValidationContext
     roots = [asn1_x509.Certificate.load(c.public_bytes(serialization.Encoding.DER)) for c in _system_roots()]
@@ -205,7 +206,7 @@ def trust(certificates):
     for cert in others:
         context = ValidationContext(trust_roots=roots, other_certs=others, allow_fetching=False)
         try:
-            CertificateValidator(cert, validation_context=context).validate_usage(set())
+            asyncio.run(CertificateValidator(cert, validation_context=context).async_validate_usage(set()))
             result.append({"trusted": True, "reason": ""})
         except Exception as e:  # noqa: BLE001 - any failure means "not trusted", with the reason shown
             result.append({"trusted": False, "reason": str(e).splitlines()[0][:200]})

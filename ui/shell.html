@@ -97,6 +97,7 @@
   body.help-hidden .zfo-help-panel { display: none; }
   .zfo-btn:disabled { opacity: .35; pointer-events: none; }
   body.zfo-empty .zfo-page { display: none; }
+  .zfo-subhead { margin: 12px 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); }
   .zfo-empty-state { margin: 18vh auto 0; text-align: center; color: var(--muted); font-size: 14px; }
   .zfo-empty-state svg { width: 56px; height: 56px; color: var(--accent); margin-bottom: 14px; }
   .zfo-empty-state h1 { font-size: 20px; font-weight: 600; color: var(--text); margin: 0 0 6px; }
@@ -521,9 +522,8 @@
         } else if (r.type === 'javascript') {
           try { (0, eval)(r.data); } catch (e) { console.error(e, r.data.slice(0, 200)); }
         } else if (r.type === 'gtk' && r.info_area === 'message_area') {
-          const div = document.createElement('div');
-          div.innerHTML = String(r.data?.to_display ?? '');
-          setStatus(div.textContent);
+          // The message may carry markup and the form's own texts: parsed inertly, only its text is shown.
+          setStatus(new DOMParser().parseFromString(String(r.data?.to_display ?? ''), 'text/html').body.textContent);
         }
       }
       if (GlobalVars.handlers_active < 0) GlobalVars.handlers_active = 0;
@@ -563,17 +563,20 @@
   let signatures = __SIGNATURES__;
   function renderSignatures() {
     const data = signatures.filter(s => !s.publisher);
-    const publisher = signatures.find(s => s.publisher);
+    const publication = signatures.find(s => s.role === 'publication');
+    const license = signatures.findLast(s => s.role === 'license');
     $q('[data-signatures="data"]').innerHTML =
       (changed && data.length ? '<div class="zfo-note">Formulář byl změněn. Stávající podpis se při uložení nahradí novým.</div>' : '') +
       (data.length ? data.map(card).join('') : '<div class="zfo-empty">Data formuláře zatím nejsou podepsaná.</div>');
-    $q('[data-signatures="publisher"]').innerHTML = publisher ? card(publisher) : '<div class="zfo-empty">Formulář nemá podpis vydavatele.</div>';
+    $q('[data-signatures="publisher"]').innerHTML =
+      (publication ? card(publication) : '<div class="zfo-empty">Formulář nebyl dosud publikován – nemá podpis vydavatele.</div>')
+      + (license ? '<h4 class="zfo-subhead">Držitel licence</h4>' + card(license) : '');
   }
   renderSignatures();
 
   // Certificates for signing. The select joins the toolbar only after the form scripts have
   // wired up their own selects, so they do not treat it as a form field.
-  const certificates = window.zfoCertificates();
+  const certificates = window.zfoCertificates(SESSION);
   const certSelect = certificates.select;
 
   // Form description (Form Filler: Vlastnosti → Popis formuláře).

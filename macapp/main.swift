@@ -5,13 +5,15 @@ import PDFKit
 import WebKit
 import UniformTypeIdentifiers
 
-final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUIDelegate {
+final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUIDelegate, WKNavigationDelegate {
     let window: NSWindow
     let webView: WKWebView
     let server = Process()
     let file: URL?
     var onClose: (() -> Void)?
     var onOpen: ((URL?) -> Void)?
+    // The form server's port, once it reported one; only pages from it may use the window and talk to the app.
+    var port: Int?
 
     // Without a file the window shows the application with only "Otevřít" and the recent files.
     init(file: URL?) {
@@ -23,6 +25,7 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
         super.init()
         config.userContentController.add(self, name: "app")
         webView.uiDelegate = self
+        webView.navigationDelegate = self
         // Swift owns the window; AppKit's own release on close would free it a second time.
         window.isReleasedWhenClosed = false
         window.title = file?.lastPathComponent ?? "Blanketa"
@@ -52,6 +55,7 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
                   let port = line.split(separator: "\n").first(where: { $0.hasPrefix("PORT ") })?.dropFirst(5) else { return }
             handle.readabilityHandler = nil
             DispatchQueue.main.async {
+                self?.port = Int(port)
                 self?.webView.load(URLRequest(url: URL(string: "http://127.0.0.1:\(port)/")!))
             }
         }
@@ -62,8 +66,28 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
         }
     }
 
+    private func isOwn(_ url: URL?) -> Bool {
+        url?.scheme == "http" && url?.host == "127.0.0.1" && url?.port == port && port != nil
+    }
+
+    // A link or script must not take the window to another site: that page would reach the app through "app".
+    // Web addresses open in the browser instead; the placeholder pages are about:blank.
+    func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
+                 decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        let url = action.request.url
+        if isOwn(url) || url?.absoluteString == "about:blank" {
+            return decisionHandler(.allow)
+        }
+        if let url, ["http", "https"].contains(url.scheme), action.navigationType == .linkActivated {
+            NSWorkspace.shared.open(url)
+        }
+        decisionHandler(.cancel)
+    }
+
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-        guard let body = message.body as? [String: Any] else { return }
+        let origin = message.frameInfo.securityOrigin
+        guard message.frameInfo.isMainFrame, origin.protocol == "http", origin.host == "127.0.0.1", origin.port == port,
+              let body = message.body as? [String: Any] else { return }
         switch body["action"] as? String {
         case "open": onOpen?(nil)
         case "openFile":
@@ -80,7 +104,7 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
             }
         case "openUrl":
-            if let link = body["url"] as? String, let url = URL(string: link), url.scheme == "https" {
+            if let link = body["url"] as? String, let url = URL(string: link), ["http", "https"].contains(url.scheme) {
                 NSWorkspace.shared.open(url)
             }
         case "saveFile":

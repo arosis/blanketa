@@ -26,7 +26,8 @@ if (!window.zfoIsMac) {
 // Certificate choice for the signing dialog, shared by both pages. Builds (detached, so form scripts never
 // see it as a field) a select filled from /identities, a password field shown for certificate files, and
 // "Přidat certifikát ze souboru…" for .pfx/.p12 files. Returns {element, select, password(), remember()}.
-window.zfoCertificates = () => {
+// session: the page's session token, which the server requires before it stores a certificate file.
+window.zfoCertificates = session => {
   const element = document.createElement('div');
   element.className = 'zfo-cert-choice';
   element.innerHTML = `<select class="zfo-cert" title="Certifikát pro podpis"></select>
@@ -65,7 +66,7 @@ window.zfoCertificates = () => {
       if (secret === null) return;
       let binary = '';
       for (const byte of new Uint8Array(await file.arrayBuffer())) binary += String.fromCharCode(byte);
-      const res = await fetch('/add-certificate', {method: 'POST', body: JSON.stringify({data: btoa(binary), password: secret})});
+      const res = await fetch('/add-certificate?s=' + session, {method: 'POST', body: JSON.stringify({data: btoa(binary), password: secret})});
       if (!res.ok) { alert(await res.text()); return; }
       const known = new Set(list.map(c => c.id));
       list = await res.json();
@@ -82,7 +83,7 @@ window.zfoCertificates = () => {
 
 // Opens a web page in the system browser; the app windows only ever show local forms.
 window.zfoOpenUrl = url => {
-  if (!/^https:\/\//.test(url)) return;
+  if (!/^https?:\/\//.test(url)) return;
   if (window.zfoNative) window.zfoNative.postMessage({action: 'openUrl', url});
   else window.open(url, '_blank', 'noopener');
 };
@@ -139,3 +140,16 @@ window.zfoSupport = (() => {
     dialog.showModal();
   };
 })();
+
+// Links in a form (fo:basic-link) or a PDF never navigate the app window: a web page there could reach the host.
+// Web links open in the system browser, links within the page keep working, anything else (javascript:, file:) is
+// dropped.
+document.addEventListener('click', e => {
+  const link = e.target.closest?.('a[href]');
+  if (!link) return;
+  const href = link.getAttribute('href');
+  if (href.startsWith('#')) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  if (/^https?:\/\//i.test(link.href)) window.zfoOpenUrl(link.href);
+}, true);

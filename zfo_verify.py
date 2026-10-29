@@ -24,16 +24,31 @@ def c14n(el, alg):
     return etree.tostring(el, method="c14n", exclusive=(alg == EXC), with_comments=False)
 
 
+def signed_object(sig, uri):
+    """The element a reference signs: in 602XML always a dsig:Object of the layer itself, and the only element in
+    the document with that Id. Anything else is refused, so a pristine copy hidden elsewhere (e.g. in the unsigned
+    KeyInfo) cannot stand in for a changed original (signature wrapping)."""
+    if not uri or not uri.startswith("#"):
+        return None
+    found = sig.getroottree().xpath("//*[@Id=$id]", id=uri[1:])
+    if len(found) != 1 or found[0].getparent() is not sig or found[0].tag != f"{{{DS}}}Object":
+        return None
+    return found[0]
+
+
 def check(sig):
     """Returns ([(reference URI, digest ok)], signature status, certificate) for one layer."""
     si = sig.find(f"{{{DS}}}SignedInfo")
     digests = []
     for ref in si.findall(f"{{{DS}}}Reference"):
-        target = sig.xpath(f"//*[@Id='{ref.get('URI')[1:]}']")[0]
+        target = signed_object(sig, ref.get("URI"))
+        if target is None:
+            digests.append((ref.get("URI"), False))
+            continue
         algs = [t.get("Algorithm") for t in ref.iter(f"{{{DS}}}Transform")]
         digest = DIG[ref.find(f"{{{DS}}}DigestMethod").get("Algorithm")](c14n(target, algs[-1] if algs else C14N)).digest()
         digests.append((ref.get("URI"), digest == base64.b64decode(ref.findtext(f"{{{DS}}}DigestValue"))))
-    cert = x509.load_der_x509_certificate(base64.b64decode(sig.findtext(f".//{{{DS}}}X509Certificate").replace("\n", "")))
+    cert = x509.load_der_x509_certificate(base64.b64decode(sig.findtext(f"{{{DS}}}KeyInfo//{{{DS}}}X509Certificate").replace("\n", "")))
     alg = si.find(f"{{{DS}}}CanonicalizationMethod").get("Algorithm")
     try:
         cert.public_key().verify(base64.b64decode(sig.findtext(f"{{{DS}}}SignatureValue")), c14n(si, alg),
@@ -64,7 +79,11 @@ def describe(root):
             "subject": names[0].value if names else cert.subject.rfc4514_string(),
             "issuer": issuer[0].value if issuer else cert.issuer.rfc4514_string(),
             "publisher": "602XML" in cert.subject.rfc4514_string(),
-            "intact": status == "OK" and all(ok for _, ok in digests),
+            # Form Filler: "Publication Key" = the form's publisher; "License Key" = only the licence of the
+            # designer tool, a form with no publication layer "has not been published yet".
+            "role": ("publication" if "Publication Key" in cert.subject.rfc4514_string()
+                     else "license" if "License Key" in cert.subject.rfc4514_string() else None),
+            "intact": status == "OK" and bool(digests) and all(ok for _, ok in digests),
             "not_after": cert.not_valid_after_utc.isoformat(),
             "signed_at": signed_at[0] if signed_at else None,
             "der": cert.public_bytes(serialization.Encoding.DER),
@@ -80,7 +99,7 @@ def verify(sig, depth=0):
         for uri, match in digests:
             print(pad + f"digest {uri}: {'OK' if match else 'MISMATCH'}")
         print(pad + f"signature {layer.get('Id')}: {status} | {cert.subject.rfc4514_string()} | {cert.not_valid_after_utc:%Y-%m-%d}")
-        ok &= status == "OK" and all(match for _, match in digests)
+        ok &= status == "OK" and bool(digests) and all(match for _, match in digests)
     return ok
 
 
