@@ -532,6 +532,40 @@
     }
     gtk_handler_finished();
   };
+  // Everything else on the page is cheap next to going through every field, so nothing is done when the answer and the
+  // page are the same as last time.
+  const applyReadonly = window.set_readonly_inputs_callback;
+  let readonlyApplied = null;
+  window.set_readonly_inputs_callback = data => {
+    const names = JSON.stringify(data.readonly_names);
+    elementsNamed('');
+    if (readonlyApplied?.names === names && readonlyApplied.page === named) { gtk_handler_finished(); return; }
+    applyReadonly(data);
+    elementsNamed('');
+    readonlyApplied = {names, page: named};
+  };
+  // The engine only keeps a repeating section's HTML to hand it back, and with code lists it runs to megabytes each way.
+  // It keeps the section's name instead, and the page swaps that for the HTML in the answers.
+  const sectionHtml = {};
+  window.send_rep_sections_originals = () => {
+    const references = {};
+    for (const section of page.querySelectorAll('[class^="602-repetition-"]')) {
+      const name = section.getAttribute('name');
+      if (!name) continue;
+      const reference = name.slice(0, name.lastIndexOf('-rep-'));
+      sectionHtml[reference] = section.outerHTML;
+      references[name] = reference;
+    }
+    gtk_handler_start();
+    send(JSON.stringify({type: 'set_html_templates', data: references}));
+  };
+  const startSections = window.init_rep_sections_callback;
+  window.init_rep_sections_callback = data => {
+    for (const name of Object.keys(data.templates)) data.templates[name] = sectionHtml[data.templates[name]];
+    startSections(data);
+  };
+  const addSection = window.server_add_section_callback;
+  window.server_add_section_callback = data => addSection({...data, repe_html: sectionHtml[data.repe_html]});
   // Each section copied while opening would bind these two to every field of the page again; once at the end is enough.
   for (const name of ['set_field_info_request_handler', 'set_date_inputs_clear_func']) {
     const original = window[name];
@@ -632,17 +666,17 @@
     const tail = queue = queue.then(task).catch(log)
       .then(() => { if (queue === tail && !ready) finishOpening(); }).catch(log);
   };
-  // These only read the current state back into the page, and every stored value asks for all of them. A request still
-  // waiting behind no newer change gives the same answer, so a form storing 50 values refreshes once, not 50 times.
+  // These only read the current state back into the page, and every stored value asks for all of them. Only the newest
+  // request of each kind needs an answer, so a form storing 50 values refreshes once, not 50 times.
   const REFRESHES = new Set(['get_repeatable', 'get_readonly_binds', 'get_multiswitch_list']);
-  const waiting = new Set();
+  const newestRefresh = new Map();
+  let messages = 0;
   window.send = msg => {
     const type = JSON.parse(msg).type;
-    if (!REFRESHES.has(type)) waiting.clear();
-    else if (waiting.has(type)) { gtk_handler_finished(); return; }
-    else waiting.add(type);
+    const number = ++messages;
+    if (REFRESHES.has(type)) newestRefresh.set(type, number);
     enqueue(async () => {
-      waiting.delete(type);
+      if (REFRESHES.has(type) && newestRefresh.get(type) !== number) { gtk_handler_finished(); return; }
       const res = await fetch('/ipc?s=' + SESSION, {method: 'POST', body: msg});
       if (!res.ok) { setStatus('Chyba: ' + await res.text()); return; }
       for (const r of await res.json()) {
