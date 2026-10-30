@@ -2,6 +2,7 @@
 
     python -I tests/test_app.py
 """
+import copy
 import io
 import os
 import re
@@ -195,6 +196,57 @@ class SignatureFieldNames(unittest.TestCase):
     def test_ordinary_field_is_analysed(self):
         document = pdf_sign.sign(pdf_sign.sign((ROOT / "samples-pdf/zadost.pdf").read_bytes(), self.KEY, self.CERT), self.KEY, self.CERT)
         self.assertFalse(any(found["changes_unchecked"] for found in pdf_sign.signatures(document)))
+
+
+class OpeningForms(unittest.TestCase):
+    """Most of the time goes in the page, which no test here can run; these guard the engine's part and the page's fixes."""
+    SECTIONS = 50
+
+    @classmethod
+    def setUpClass(cls):
+        with zipfile.ZipFile(ROOT / "samples/dva-ucastnici/form.zfo") as source:
+            parts = [(item, source.read(item.filename)) for item in source.infolist()]
+        doc = etree.fromstring(next(data for item, data in parts if item.filename == "form.fo"), etree.XMLParser(huge_tree=True))
+        sections = doc.xpath("//dsig:Object[not(@Id)]//*[local-name()='opak1']", namespaces={"dsig": app.DS})
+        for _ in range(cls.SECTIONS - len(sections)):
+            sections[-1].addnext(copy.deepcopy(sections[0]))
+        cls.folder = tempfile.TemporaryDirectory()
+        path = Path(cls.folder.name) / "form.zfo"
+        with zipfile.ZipFile(path, "w") as out:
+            for item, data in parts:
+                out.writestr(item, etree.tostring(doc) if item.filename == "form.fo" else data)
+        app.FORMS["many-sections"] = path
+
+    @classmethod
+    def tearDownClass(cls):
+        del app.FORMS["many-sections"]
+        cls.folder.cleanup()
+
+    def test_engine_answers_quickly_with_many_sections(self):
+        started = time.monotonic()
+        page = app.render("many-sections")
+        session = app.SESSIONS[re.search(r"const SESSION = '([\w-]+)'", page).group(1)]
+        for message in ("document.ready", "init_rep_sections", "get_readonly_binds", "get_selected_listboxes",
+                        "get_multiswitch_list", "get_repeatable"):
+            answer = app.engine.handle(session["doc"], message, "")
+        # The engine's share only, usually about two seconds; generous for a loaded CI runner.
+        self.assertLess(time.monotonic() - started, 20)
+        self.assertEqual(answer[0]["data"].count('"o1_porad_cislo"'), self.SECTIONS)
+
+    def test_form_is_not_painted_before_the_shell_styles_it(self):
+        page = app.render("many-sections")
+        self.assertLess(page.index(app.OPENING_STYLE), page.index("<body"))
+        self.assertIn("body:not(.zfo-app) > * { display: none; }", app.OPENING_STYLE)
+
+    def test_page_keeps_its_opening_fixes(self):
+        # Removing one breaks nothing else, the form just opens slowly again.
+        for fix in ("window.get_html_elem =", "window.fill_inputs =", "window.set_multiswitch_controls_callback =",
+                    "window.populate_repeating_sections =", "REFRESHES.has(type)", "classList.add('zfo-opening')",
+                    "AVAILABLE_WHILE_OPENING.has(name)"):
+            self.assertIn(fix, app.SHELL)
+
+    def test_page_lays_out_only_after_opening(self):
+        self.assertNotIn("]:visible", app.SHELL)  # jQuery measures it, and a page still hidden has no visible field
 
 
 if __name__ == "__main__":

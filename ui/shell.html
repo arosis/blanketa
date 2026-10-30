@@ -85,6 +85,9 @@
     font: inherit; padding: 0 8px; color: var(--text);
   }
   .zfo-stage { grid-column: 2; grid-row: 2; overflow: auto; position: relative; }
+  body.zfo-opening .zfo-page { display: none; }
+  body.zfo-opening .zfo-bar button:not([data-action="open"], [data-action="help"], [data-action="panel"]) { opacity: .35; pointer-events: none; }
+  body.zfo-opening .zfo-stage::before { content: "Otevírám formulář…"; display: block; margin-top: 18vh; text-align: center; color: var(--muted); font-size: 14px; }
   .zfo-page {
     position: relative; margin: 28px auto 40px; box-sizing: border-box; width: 21cm; background: #fff; padding: 36px 40px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, .12), 0 8px 28px rgba(0, 0, 0, .10); border-radius: 2px;
@@ -457,6 +460,90 @@
   let queue = Promise.resolve();
   let changed = false;
   let ready = false;
+  const opening = {populating: false, after: []};
+  // The page stays out of layout until the form is complete: the user never sees it half built, and the form scripts'
+  // many small changes do not each lay out thousands of fields again. Everything that measures it runs after finishOpening.
+  // Meanwhile only a problem reaches the status bar; the engine's "form ready" and "value stored" would say otherwise.
+  document.body.classList.add('zfo-opening');
+  const OPENING_STATUS = status.textContent;
+  const INFO_MESSAGE = 'info';
+  const finishOpening = () => {
+    document.body.classList.remove('zfo-opening');
+    if (status.textContent === OPENING_STATUS) setStatus('Formulář je připraven');
+    ready = true;
+    fitPage();
+    autoZoom();
+  };
+  // zfo-editor looks every field up with $("*[name=…]"), which walks all elements of the page, and code lists can hold
+  // over 100 000 options. Same rules as its get_html_elem, but candidates come from an index of names, rebuilt only when
+  // the page changed. takeRecords notices a change made a moment ago, in the same task, too.
+  let named = null;
+  const pageChanges = new MutationObserver(() => { named = null; });
+  pageChanges.observe(page, {childList: true, subtree: true, attributes: true, attributeFilter: ['name']});
+  const elementsNamed = name => {
+    if (pageChanges.takeRecords().length) named = null;
+    if (!named) {
+      named = new Map();
+      for (const element of page.querySelectorAll('[name]')) {
+        const key = element.getAttribute('name');
+        named.has(key) ? named.get(key).push(element) : named.set(key, [element]);
+      }
+    }
+    return named.get(name) ?? [];
+  };
+  const sectionDepth = element => {
+    let depth = 0;
+    for (let node = element?.parentElement; node; node = node.parentElement) {
+      if (node.getAttribute('class')?.startsWith('602-repetition-')) depth++;
+    }
+    return depth;
+  };
+  window.get_html_elem = (parent, name, shouldBeInput) => {
+    const scope = parent == null ? null : $(parent)[0];
+    if (parent != null && !scope) return null;
+    const allowedDepth = sectionDepth(scope) + 1;
+    for (const element of elementsNamed(name)) {
+      if (scope && (scope === element || !scope.contains(element))) continue;
+      if (shouldBeInput && /(^|\s)602-repetition-(row|block|table)(\s|$)/.test(element.className)) continue;
+      if (sectionDepth(element) <= allowedDepth) return element;
+    }
+    return null;
+  };
+  // Its fill_inputs also counted each section's copies through a full walk of the page and never used the number.
+  window.fill_inputs = (parent, data) => {
+    for (const [name, value] of Object.entries(data)) {
+      if (is_array(value)) {
+        value.forEach((copy, index) => fill_inputs($(get_html_elem(parent, `${name}-rep-${index}`, false)), copy));
+      } else {
+        const input = get_html_elem(parent, name, true);
+        if (input && !$(input).hasClass('shouldStayEmpty')) set_input_value(input, value);
+      }
+    }
+  };
+  // Showing or hiding a part measures the page even when nothing changes, and this runs after every stored value.
+  window.set_multiswitch_controls_callback = ({data: switches}) => {
+    for (const {bindref, active_value, cases} of switches) {
+      for (const value of cases) {
+        const show = value === active_value;
+        for (const part of elementsNamed(`div-${bindref}-${value}`)) {
+          if (part.tagName === 'DIV' && (part.style.display === 'none') === show) $(part)[show ? 'show' : 'hide']();
+        }
+      }
+    }
+    gtk_handler_finished();
+  };
+  // Each section copied while opening would bind these two to every field of the page again; once at the end is enough.
+  for (const name of ['set_field_info_request_handler', 'set_date_inputs_clear_func']) {
+    const original = window[name];
+    window[name] = (...args) => { if (!opening.populating) original(...args); };
+    opening.after.push(original);
+  }
+  const populate = window.populate_repeating_sections;
+  window.populate_repeating_sections = (...args) => {
+    opening.populating = true;
+    try { populate(...args); } finally { opening.populating = false; }
+    opening.after.forEach(run => run());
+  };
   const paper = __PAGE__;
   Object.assign(page.style, paper);
   // Lists the form marks "show the code" (form602displaycode): each item starts with its code, so a narrow field
@@ -531,10 +618,31 @@
     }
     target?.click();
   }, true);
-  const enqueue = task => { queue = queue.then(task).catch(e => console.error('zfo', e)); };
+  // Whether a field would be visible once the page is shown; jQuery's :visible measures, and the page is not laid out yet.
+  const shown = element => {
+    for (let node = element; node && node !== page; node = node.parentElement) {
+      if (getComputedStyle(node).display === 'none') return false;
+    }
+    return true;
+  };
+  // Each answer sends the next message before its task ends, so an empty queue means opening is over. That holds when a
+  // step failed too: the user then gets the form as far as it got rather than an empty page.
+  const enqueue = task => {
+    const log = e => console.error('zfo', e);
+    const tail = queue = queue.then(task).catch(log)
+      .then(() => { if (queue === tail && !ready) finishOpening(); }).catch(log);
+  };
+  // These only read the current state back into the page, and every stored value asks for all of them. A request still
+  // waiting behind no newer change gives the same answer, so a form storing 50 values refreshes once, not 50 times.
+  const REFRESHES = new Set(['get_repeatable', 'get_readonly_binds', 'get_multiswitch_list']);
+  const waiting = new Set();
   window.send = msg => {
+    const type = JSON.parse(msg).type;
+    if (!REFRESHES.has(type)) waiting.clear();
+    else if (waiting.has(type)) { gtk_handler_finished(); return; }
+    else waiting.add(type);
     enqueue(async () => {
-      const type = JSON.parse(msg).type;
+      waiting.delete(type);
       const res = await fetch('/ipc?s=' + SESSION, {method: 'POST', body: msg});
       if (!res.ok) { setStatus('Chyba: ' + await res.text()); return; }
       for (const r of await res.json()) {
@@ -544,7 +652,7 @@
           applyDefault(r.data);
         } else if (r.type === 'javascript') {
           try { (0, eval)(r.data); } catch (e) { console.error(e, r.data.slice(0, 200)); }
-        } else if (r.type === 'gtk' && r.info_area === 'message_area') {
+        } else if (r.type === 'gtk' && r.info_area === 'message_area' && (ready || r.info_type !== INFO_MESSAGE)) {
           // The message may carry markup and the form's own texts: parsed inertly, only its text is shown.
           setStatus(new DOMParser().parseFromString(String(r.data?.to_display ?? ''), 'text/html').body.textContent);
         }
@@ -554,10 +662,9 @@
       if (type === 'store_val' && !changed && ready) { changed = true; renderSignatures(); }
       if (type === 'get_multiswitch_list' && !window.selectsSynced) {
         window.selectsSynced = true;
-        $('select[name]:visible').each(function () { if (this.value) $(this).trigger('change'); });
+        $('select[name]').each(function () { if (this.value && shown(this)) $(this).trigger('change'); });
         $q('[data-cert-slot]').replaceWith(certificates.element);
         $q('[data-find-slot]').replaceWith(findInput);
-        enqueue(() => { ready = true; fitPage(); autoZoom(); });
       }
     });
   };
@@ -784,6 +891,7 @@
     await queue;
   };
   async function runExpress(express) {
+    if (!ready) return;
     const top = parseCall(express);
     const steps = top?.name === 'LastParam' ? splitArgs(top.args) : [express];
     for (const step of steps) {
@@ -1017,11 +1125,14 @@
       savedStatus('Podepsáno a uloženo jako', result.saved);
     },
   };
+  // A hidden page has no visible fields: until it is shown, a check would find nothing wrong and the zoom nothing to fit.
+  const AVAILABLE_WHILE_OPENING = new Set(['open', 'support', 'help', 'panel']);
+  const act = name => { if (ready || AVAILABLE_WHILE_OPENING.has(name)) actions[name]?.(); };
   for (const button of document.querySelectorAll('.zfo-bar [data-action], .zfo-close[data-action]')) {
-    button.addEventListener('click', () => actions[button.dataset.action]());
+    button.addEventListener('click', () => act(button.dataset.action));
   }
   // Native menus call into the page through this.
-  window.zfoAction = name => actions[name]?.();
+  window.zfoAction = act;
   document.addEventListener('keydown', e => {
     const shortcut = e.key === 'F9' ? (e.shiftKey ? 'check' : 'recalc')
       : !window.zfoShortcut(e) ? null
@@ -1034,7 +1145,7 @@
       : e.key === 'Backspace' && e.shiftKey ? 'reset-field' : null;
     if (!shortcut) return;
     e.preventDefault();
-    actions[shortcut]();
+    act(shortcut);
   });
 })(/* __zfo_shell__ */);
 </script>
