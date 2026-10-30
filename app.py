@@ -42,6 +42,8 @@ PDFJS = RESOURCES / "vendor/pdfjs"
 DS = "http://www.w3.org/2000/09/xmldsig#"
 # ui/fo2html.xsl draws fm:barcode through bl:barcode(); the XSLT itself cannot encode a barcode.
 etree.FunctionNamespace("urn:blanketa")["barcode"] = lambda _context, *args: barcode.svg_data_uri(*args)
+OPENING_STYLE = ('<style>body:not(.zfo-app) > * { display: none; } body:not(.zfo-app)::before { content: "Otevírám formulář…"; '
+                 'display: block; margin-top: 30vh; text-align: center; font: 14px sans-serif; color: #6e6e73; }</style>')
 XSLT = etree.XSLT(etree.parse(str(RESOURCES / "ui/fo2html.xsl")))
 FORMS = {}
 SINGLE_FILE = False
@@ -210,7 +212,8 @@ def render(name, blank=False, data=None):
              .replace("__BUTTONS__", js(user_buttons(doc)))
              .replace("__CODES__", js(code_lists(doc)))
              .replace("__EMPTY__", "false"))
-    return html.replace("</body>", shell + "</body>", 1)
+    # The form arrives before the shell's styles; without this the browser paints it unstyled while the page loads.
+    return html.replace("</head>", OPENING_STYLE + "</head>", 1).replace("</body>", shell + "</body>", 1)
 
 
 def code_lists(doc):
