@@ -7,12 +7,14 @@ SOURCE is an identity source (system, test, file); the first identity of that so
 when signing or verification fails.
 """
 import io
+import os
 import sys
 import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+os.environ["ZFO_OFFLINE"] = "1"  # tests never download trusted lists
 
 from lxml import etree  # noqa: E402
 from pypdf import PdfWriter  # noqa: E402

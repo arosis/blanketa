@@ -575,10 +575,13 @@
     const level = !sig.intact ? 'bad' : (sig.trusted && !expired) ? 'ok' : 'warn';
     const state = !sig.intact ? 'Podpis je porušen – obsah byl po podpisu změněn'
       : sig.trusted ? 'Podpis je platný, certifikát je důvěryhodný'
+      : sig.unverifiable ? 'Obsah je neporušený, důvěryhodnost certifikátu se nepodařilo ověřit'
       : 'Obsah je neporušený, certifikát není hodnocen jako důvěryhodný';
     return `<div class="zfo-card ${level}" title="${esc(sig.reason || '')}">
       <div class="who">${icons[level]}${esc(sig.subject)}</div>
       <div class="state">${state}</div>
+      ${sig.trust_source === 'eu' ? '<div class="meta">Vydavatel je v důvěryhodném seznamu EU.</div>' : ''}
+      ${sig.unverifiable ? `<div class="meta">${esc(sig.reason)}</div>` : ''}
       <div class="meta">Podepsáno: ${fmt(sig.signed_at)}<br>Vystavil: ${esc(sig.issuer)}<br>
         ${expired ? 'Platnost certifikátu skončila' : 'Certifikát platí do'} ${new Date(sig.not_after).toLocaleDateString('cs-CZ')}</div>
     </div>`;

@@ -7,7 +7,7 @@ Blanketa sama je pod licencí GNU GPL 3.0 (`LICENSE`). Obsahuje tyto cizí souč
 | `zfoengine/` – upravený port backendu zfo-editoru 0.3.2 | © 2009–2010 CZ.NIC, z.s.p.o.; úpravy 2026 Richard Winkler Bejr | GNU LGPL 2.0 nebo novější | `zfoengine/LICENSE` |
 | `vendor/zfo-editor-src/` – zfo-editor 0.3.2 beze změn (XSLT, skripty, styly) | © 2009–2010 CZ.NIC, z.s.p.o. | GNU LGPL 2.0 nebo novější | `vendor/zfo-editor-src/zfo-editor-0.3.2/LICENSE` |
 | `vendor/pdfjs/` – PDF.js 4.10.38 | © Mozilla Foundation | Apache 2.0 | `vendor/pdfjs/LICENSE` |
-| Python knihovny v `requirements.txt` (pyHanko, pypdf, lxml, cryptography, …) | jejich autoři | vlastní (MIT, BSD, Apache 2.0) | v balíčcích |
+| Python knihovny v `requirements.txt` (pyHanko, pypdf, lxml, cryptography, certifi, …) | jejich autoři | vlastní (MIT, BSD, Apache 2.0, MPL 2.0) | v balíčcích |
 
 Změny v `zfoengine/` proti zfo-editoru 0.3.2 jsou popsané v hlavičkách souborů a podrobně v historii gitu. Původní zdroj je v `vendor/zfo-editor-src/` (`zfo-editor-0.3.2.tar.gz`, `zfo-editor-0.3.2-3.src.rpm`).
 
