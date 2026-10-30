@@ -122,6 +122,15 @@
   .zfo-card .state { margin: 6px 0 2px 26px; }
   .zfo-card .meta { margin-left: 26px; color: var(--muted); font-size: 12px; line-height: 1.5; }
   .zfo-card.ok .state { color: var(--ok); } .zfo-card.warn .state { color: var(--warn); } .zfo-card.bad .state { color: var(--bad); }
+  .zfo-notice {
+    position: fixed; top: 60px; left: 50%; transform: translateX(-50%); z-index: 50;
+    width: min(680px, calc(100vw - 32px)); box-sizing: border-box; display: flex; gap: 12px; align-items: flex-start;
+    padding: 10px 12px; background: #fff8e6; color: #5c3b00; border: 1px solid #e6c67a; border-radius: 10px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, .18); line-height: 1.45;
+  }
+  .zfo-notice[hidden] { display: none; }
+  .zfo-notice span { flex: 1; }
+  .zfo-notice button { flex: none; border: 0; background: none; color: inherit; cursor: pointer; font-size: 14px; }
   .zfo-note { margin: 0 12px 8px; padding: 8px 12px; border-radius: 10px; background: #fff4e0; color: #7a4a00; font-size: 12px; }
   .zfo-empty { margin: 0 16px 8px; color: var(--muted); }
   .zfo-info { margin: 0 12px 4px; padding: 10px 12px; background: #fff; border: 1px solid var(--line); border-radius: 10px; font-size: 12px; line-height: 1.6; color: var(--muted); }
@@ -143,7 +152,7 @@
     :root { --field: transparent !important; --field-readonly: transparent !important; }
     html, body { height: auto !important; overflow: visible !important; background: #fff !important; }
     body.zfo-app { display: block; }
-    .zfo-bar, .zfo-help-panel, .zfo-panel, .zfo-status, #pending_request { display: none !important; }
+    .zfo-bar, .zfo-help-panel, .zfo-panel, .zfo-status, .zfo-notice, #pending_request { display: none !important; }
     .zfo-stage { overflow: visible; }
     .zfo-page { margin: 0 auto; box-shadow: none; border-radius: 0; zoom: 1 !important; }
     .zfo-page button[zfo-app-event] { visibility: hidden; }
@@ -321,6 +330,8 @@
   <div class="zfo-help" data-help-text></div>
 </aside>
 
+<div class="zfo-notice" data-notice role="alert" hidden><span></span><button title="Zavřít upozornění">✕</button></div>
+
 <main class="zfo-stage">
   <div class="zfo-find" hidden>
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg>
@@ -393,7 +404,7 @@
   const setStatus = (text, html) => { html ? (status.innerHTML = text) : (status.textContent = text); };
 
   // Move the generated form into the paper page, then show the application chrome around it.
-  const chrome = [...document.querySelectorAll('.zfo-bar, .zfo-help-panel, .zfo-stage, .zfo-panel, .zfo-status, .zfo-dialog')];
+  const chrome = [...document.querySelectorAll('.zfo-bar, .zfo-help-panel, .zfo-stage, .zfo-panel, .zfo-status, .zfo-dialog, .zfo-notice')];
   const page = $q('.zfo-page');
   for (const node of [...document.body.childNodes]) {
     if (!chrome.includes(node) && node.nodeName !== 'STYLE' && !(node.nodeName === 'SCRIPT' && node.textContent.includes('__zfo_shell__'))) {
@@ -625,7 +636,16 @@
     info.created && `Vytvořen: ${day(info.created)}`,
     info.modified && `Modifikován: ${day(info.modified)}`,
     __BLANK__ && 'Zobrazeny výchozí hodnoty – vyplněná data nejsou načtena.',
+    info.scripts && 'Formulář obsahuje výpočty v JavaScriptu 602, které Blanketa nevyhodnocuje.',
   ].filter(Boolean).join('<br>');
+  if (info.scripts) {
+    const notice = $q('[data-notice]');
+    notice.querySelector('span').textContent = 'Tento formulář obsahuje výpočty v JavaScriptu 602, které Blanketa neumí '
+      + 'vyhodnotit. Některá pole nebo části formuláře proto mohou zůstat prázdné nebo neaktuální. Před odesláním formulář '
+      + 'zkontrolujte, spolehlivý výsledek dá Software602 Form Filler.';
+    notice.querySelector('button').addEventListener('click', () => { notice.hidden = true; });
+    notice.hidden = false;
+  }
 
   // Form check (Form Filler: Zkontrolovat, Shift+F9): required fields and constraints.
   const labelFor = el => {
