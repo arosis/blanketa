@@ -196,9 +196,10 @@ __SHELL_STYLE__
   const fmt = iso => iso ? new Date(iso).toLocaleString('cs-CZ', {dateStyle: 'medium', timeStyle: 'short'}) : '–';
   const card = sig => {
     const expired = new Date(sig.not_after) < new Date();
-    const level = !sig.intact ? 'bad' : (sig.trusted && !expired && !sig.modified) ? 'ok' : 'warn';
+    const level = !sig.intact ? 'bad' : (sig.trusted && !expired && !sig.modified && !sig.changes_unchecked) ? 'ok' : 'warn';
     const state = !sig.intact ? 'Podpis je porušen – podepsaný obsah byl změněn'
       : sig.modified ? 'Podepsaná verze je neporušená, ale po podpisu se změnilo víc než vyplněná pole'
+      : sig.changes_unchecked ? 'Podepsaná verze je neporušená, ale změny po podpisu se nepodařilo zkontrolovat'
       : sig.trusted ? 'Podpis je platný, certifikát je důvěryhodný'
       : sig.unverifiable ? 'Obsah je neporušený, důvěryhodnost certifikátu se nepodařilo ověřit'
       : 'Obsah je neporušený, certifikát není hodnocen jako důvěryhodný';
@@ -209,7 +210,7 @@ __SHELL_STYLE__
       ${sig.unverifiable ? `<div class="meta">${esc(sig.reason)}</div>` : ''}
       <div class="meta">Podepsáno: ${fmt(sig.signed_at)}<br>Vystavil: ${esc(sig.issuer)}<br>
         ${expired ? 'Platnost certifikátu skončila' : 'Certifikát platí do'} ${new Date(sig.not_after).toLocaleDateString('cs-CZ')}
-        ${sig.intact && !sig.covers_whole ? '<br>Po podpisu byla doplněna pole nebo další podpisy.' : ''}</div>
+        ${sig.intact && !sig.covers_whole && !sig.changes_unchecked ? '<br>Po podpisu byla doplněna pole nebo další podpisy.' : ''}</div>
     </div>`;
   };
   let signatures = __SIGNATURES__;

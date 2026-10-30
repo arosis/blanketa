@@ -10,12 +10,21 @@ import tempfile
 import time
 import unittest
 import zipfile
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import rsa
 from lxml import etree
 from pypdf import PdfWriter
-from pypdf.generic import ArrayObject, NameObject, TextStringObject
+from pypdf.generic import (
+    ArrayObject,
+    DictionaryObject,
+    NameObject,
+    NumberObject,
+    TextStringObject,
+)
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -23,6 +32,7 @@ os.environ["ZFO_OFFLINE"] = "1"  # tests never download trusted lists
 
 import app  # noqa: E402
 import barcode  # noqa: E402
+import pdf_sign  # noqa: E402
 
 ITF_BY_PATTERN = {pattern: digit for digit, pattern in barcode.ITF_DIGITS.items()}
 
@@ -138,6 +148,53 @@ class UnsupportedForms(unittest.TestCase):
         writer.add_blank_page(100, 100)
         writer.write(out)
         self.assertEqual(app.pdf_info(out.getvalue())["xfa"], "")
+
+
+class SignatureFieldNames(unittest.TestCase):
+    """Czech offices name signature fields like "El.podpis [0]", which pyHanko's analysis of later changes refuses."""
+
+    KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    NAME = x509.Name([x509.NameAttribute(x509.NameOID.COUNTRY_NAME, "CZ"), x509.NameAttribute(x509.NameOID.COMMON_NAME, "Test")])
+    CERT = (x509.CertificateBuilder().subject_name(NAME).issuer_name(NAME).public_key(KEY.public_key()).serial_number(1)
+            .not_valid_before(datetime.now(timezone.utc) - timedelta(days=1)).not_valid_after(datetime.now(timezone.utc) + timedelta(days=1))
+            .sign(KEY, hashes.SHA256()))
+
+    def signed(self):
+        writer, out = PdfWriter(), io.BytesIO()
+        writer.add_blank_page(200, 200)
+        field = writer._add_object(DictionaryObject({
+            NameObject("/FT"): NameObject("/Sig"), NameObject("/T"): TextStringObject("El.podpis [0]"),
+            NameObject("/Type"): NameObject("/Annot"), NameObject("/Subtype"): NameObject("/Widget"),
+            NameObject("/Rect"): ArrayObject([NumberObject(0)] * 4), NameObject("/F"): NumberObject(132)}))
+        writer.pages[0][NameObject("/Annots")] = ArrayObject([field])
+        writer.root_object[NameObject("/AcroForm")] = writer._add_object(DictionaryObject({NameObject("/Fields"): ArrayObject([field])}))
+        writer.write(out)
+        return pdf_sign.sign(out.getvalue(), self.KEY, self.CERT)
+
+    def test_last_signature_covering_the_file_is_intact(self):
+        found = pdf_sign.signatures(self.signed())[0]
+        self.assertTrue(found["intact"])
+        self.assertTrue(found["covers_whole"])
+        self.assertFalse(found["changes_unchecked"])
+
+    def test_later_changes_that_cannot_be_analysed_are_reported(self):
+        first, second = pdf_sign.signatures(pdf_sign.sign(self.signed(), self.KEY, self.CERT))
+        self.assertTrue(first["intact"])
+        self.assertFalse(first["covers_whole"])
+        self.assertTrue(first["changes_unchecked"])
+        self.assertFalse(first["modified"])
+        self.assertFalse(second["changes_unchecked"])
+
+    def test_changed_content_is_still_broken(self):
+        signed = self.signed()
+        at = signed.index(b"/MediaBox")
+        found = pdf_sign.signatures(signed[:at] + b"/MediaBoy" + signed[at + 9:])[0]
+        self.assertFalse(found["intact"])
+        self.assertFalse(found["changes_unchecked"])
+
+    def test_ordinary_field_is_analysed(self):
+        document = pdf_sign.sign(pdf_sign.sign((ROOT / "samples-pdf/zadost.pdf").read_bytes(), self.KEY, self.CERT), self.KEY, self.CERT)
+        self.assertFalse(any(found["changes_unchecked"] for found in pdf_sign.signatures(document)))
 
 
 if __name__ == "__main__":
