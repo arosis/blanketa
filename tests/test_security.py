@@ -2,10 +2,12 @@
 
     python -I tests/test_security.py
 """
+import base64
 import copy
 import http.client
 import json
 import os
+import re
 import sys
 import tempfile
 import threading
@@ -106,6 +108,17 @@ class DamagedSignatures(unittest.TestCase):
         def change(info, _):
             info.getparent().remove(info)
         self.assertFalse(self.damaged(change)[0]["intact"])
+
+    def test_certificate_with_an_unreadable_name_refuses_the_form(self):
+        def change(_, root):
+            element = root.find(f".//{{{zfo_verify.DS}}}X509Certificate")
+            der = base64.b64decode(element.text)
+            # The string type of each common name becomes one a name cannot have, which is noticed only when it is read.
+            damaged = re.sub(rb"(\x06\x03\x55\x04\x03)[\x0c\x13]", lambda found: found[1] + b"\x01", der)
+            self.assertNotEqual(damaged, der)
+            element.text = base64.b64encode(damaged).decode()
+        with self.assertRaisesRegex(ValueError, "readable certificate"):
+            self.damaged(change)
 
     def test_unreadable_certificate_refuses_the_form(self):
         def change(_, root):
