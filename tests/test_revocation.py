@@ -183,6 +183,11 @@ class Revocation(unittest.TestCase):
         path.write_bytes(crl(last=NOW - timedelta(days=9), following=NOW - timedelta(days=1)))
         self.assertEqual(self.check()["status"], "unknown")
 
+    def test_list_that_cannot_be_stored_is_still_used(self):
+        self.pages[URL] = crl([(77, NOW - timedelta(days=3), None)])
+        with mock.patch.object(trustlist, "store", side_effect=OSError("disk full")):
+            self.assertEqual(self.check()["status"], "revoked")
+
     def test_dead_server_is_not_asked_again_for_the_next_signature(self):
         calls = []
         with mock.patch.object(trustlist, "download", side_effect=lambda url: calls.append(url) or (_ for _ in ()).throw(OSError())):

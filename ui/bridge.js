@@ -181,11 +181,12 @@ window.zfoRevocation = (() => {
     revoked: sig => of(sig)?.status === 'revoked',
     revokedBeforeSigning(sig) {
       const state = of(sig);
-      return state?.status === 'revoked' && (!sig.signed_at || new Date(state.revoked_at) <= new Date(sig.signed_at));
+      return state?.status === 'revoked' && !!sig.signed_at && new Date(state.revoked_at) <= new Date(sig.signed_at);
     },
     state(sig) {
       const state = of(sig), what = state?.suspended ? 'pozastaven' : 'zrušen';
       if (state?.status !== 'revoked') return '';
+      if (!sig.signed_at) return `Certifikát byl ${what} ${date(state.revoked_at)}; čas podpisu není uvedený`;
       return this.revokedBeforeSigning(sig)
         ? `Certifikát byl ${what} ${date(state.revoked_at)}, před uvedeným časem podpisu`
         : `Certifikát byl ${what} ${date(state.revoked_at)}; čas podpisu uvádí podepisující a není potvrzený`;

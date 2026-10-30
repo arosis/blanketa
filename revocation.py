@@ -81,7 +81,10 @@ def _load(addresses, authority, folder, now):
             continue
         crl = _read(data, authority, now)
         if crl is not None:
-            trustlist.store(path, data)
+            try:
+                trustlist.store(path, data)
+            except OSError:  # a full or read-only disk only costs the next download
+                pass
             break
     _memory[key] = (time.monotonic() + REMEMBER, crl)
     return crl
