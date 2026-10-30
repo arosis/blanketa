@@ -31,18 +31,18 @@ that evaluation of events list is ended after current event (i.e. after user
 clicks No in message dialog with question or in case of exception in processed event).  
 '''
 
-from . import tools
-
-from . import evaluate
-from . import expr_quoting
 import logging
+
+from . import evaluate, expr_quoting, tools
+
 log = logging.getLogger("zfo.events")
 
-from . import msg_types as mt
-from . import msg_class as mc
-from . import msgs
-from . import global_var
 import json
+
+from . import global_var, msgs
+from . import msg_class as mc
+from . import msg_types as mt
+
 
 class Event():  
   break_processing = False

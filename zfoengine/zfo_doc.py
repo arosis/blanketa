@@ -23,20 +23,22 @@
 Module containing class that represents ZFO document with
 actions that could be performed with it.
 '''
-import lxml.etree as etree
-from . import ns
 import copy
-import re 
-import os
-      
 import logging
+import os
+import re
+
+import lxml.etree as etree
+
+from . import ns
+
 log = logging.getLogger("zfo.zfo_doc")
 
-from . import tools
-from . import evaluate as ev
-from . import msg_types
 import base64
-  
+
+from . import evaluate as ev
+from . import msg_types, tools
+
 
 class ZFO_document:
   
@@ -82,7 +84,7 @@ class ZFO_document:
       self.form_creation_date = str(cd[0])
       
     # register extended xpath functions and allow them to use our document
-    from . import xpath_ext 
+    from . import xpath_ext
     self._ext_xpath_evaluator = xpath_ext.ExtendedXpathEvaluator(self) 
     self._register_xpath_extensions()
     
@@ -244,7 +246,7 @@ class ZFO_document:
       # if there are some elements missing, crete them and then
       # fill them
       if diff != 0:
-        for i in range(diff):
+        for _ in range(diff):
           # child with no namespace gets the parent's ns
           child_ns = __get_ns(child.tag)
           child_tag = child.tag
@@ -1727,8 +1729,8 @@ class ZFO_document:
     filename_binds = [input.get("filenamebind") for input in inputs]
     mediatype_binds = [input.get("mediatypebind") for input in inputs]
     
-    filenames_map = dict(zip(bind_ids, filename_binds))
-    mediatypes_map = dict(zip(bind_ids, mediatype_binds))
+    filenames_map = dict(zip(bind_ids, filename_binds, strict=True))
+    mediatypes_map = dict(zip(bind_ids, mediatype_binds, strict=True))
     
     self.filenames_binds_map = filenames_map
     self.mediatypes_bind_map = mediatypes_map

@@ -23,8 +23,9 @@
 Module used to quote an xpath expressions.
 '''
 
-import re 
 import logging
+import re
+
 log = logging.getLogger("zfo.expr_quoting")
 
 def quote_expression(expr):

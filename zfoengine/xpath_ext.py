@@ -22,22 +22,19 @@
 '''
 Module with implementation of XPath extension used in ZFO by 602.
 '''
+import copy
+import datetime
+import getpass
+import hashlib
+import logging
 import os
 import os.path
-import datetime
-import lxml.etree as etree
-import hashlib
-import getpass
 from functools import reduce
 
-from . import ns
-from . import tools
-from . import msg_types
-from . import tags
-import copy
+import lxml.etree as etree
 
-from . import app_events
-import logging
+from . import app_events, msg_types, ns, tags, tools
+
 log = logging.getLogger("zfo.xpath_ext")
 
 

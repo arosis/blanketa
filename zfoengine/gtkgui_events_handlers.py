@@ -30,19 +30,16 @@ The "gtk" responses were shown in the side panes of the desktop app; the caller
 decides what to do with them. Dialogs (file chooser, message boxes) do not exist.
 '''
 
-import json
-import lxml.etree as etree
-from . import msgs
-from . import tools
-from . import msg_types
-from . import msg_class as mc
-from . import tags
-from . import app_events
-from . import evaluate as ev
-from . import ns
-
 import html
+import json
 import logging
+
+import lxml.etree as etree
+
+from . import app_events, msg_types, msgs, ns, tags, tools
+from . import evaluate as ev
+from . import msg_class as mc
+
 log = logging.getLogger("zfo.gtkgui_events_handlers")
 
 LOG_MSG_MAX_LEN = 160
