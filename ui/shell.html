@@ -532,8 +532,8 @@
     }
     gtk_handler_finished();
   };
-  // Everything else on the page is cheap next to going through every field, so nothing is done when the answer and the
-  // page are the same as last time.
+  // This pass goes through every field of the page and runs after every stored value, so it is skipped when the answer
+  // and the page are the same as last time.
   const applyReadonly = window.set_readonly_inputs_callback;
   let readonlyApplied = null;
   window.set_readonly_inputs_callback = data => {
