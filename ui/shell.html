@@ -544,16 +544,19 @@
     elementsNamed('');
     readonlyApplied = {names, page: named};
   };
+  // That pass also takes the red off a field whose value was refused, so the next one has to run in full.
+  const refuseValue = window.field_changed_error_callback;
+  window.field_changed_error_callback = data => { readonlyApplied = null; refuseValue(data); };
   // The engine only keeps a repeating section's HTML to hand it back, and with code lists it runs to megabytes each way.
   // It keeps the section's name instead, and the page swaps that for the HTML in the answers.
-  const sectionHtml = {};
+  const sectionHtml = new Map();
   window.send_rep_sections_originals = () => {
     const references = {};
     for (const section of page.querySelectorAll('[class^="602-repetition-"]')) {
       const name = section.getAttribute('name');
       if (!name) continue;
       const reference = name.slice(0, name.lastIndexOf('-rep-'));
-      sectionHtml[reference] = section.outerHTML;
+      sectionHtml.set(reference, section.outerHTML);
       references[name] = reference;
     }
     gtk_handler_start();
@@ -561,11 +564,11 @@
   };
   const startSections = window.init_rep_sections_callback;
   window.init_rep_sections_callback = data => {
-    for (const name of Object.keys(data.templates)) data.templates[name] = sectionHtml[data.templates[name]];
+    for (const name of Object.keys(data.templates)) data.templates[name] = sectionHtml.get(data.templates[name]);
     startSections(data);
   };
   const addSection = window.server_add_section_callback;
-  window.server_add_section_callback = data => addSection({...data, repe_html: sectionHtml[data.repe_html]});
+  window.server_add_section_callback = data => addSection({...data, repe_html: sectionHtml.get(data.repe_html)});
   // Each section copied while opening would bind these two to every field of the page again; once at the end is enough.
   for (const name of ['set_field_info_request_handler', 'set_date_inputs_clear_func']) {
     const original = window[name];

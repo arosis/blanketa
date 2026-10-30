@@ -243,7 +243,7 @@ class OpeningForms(unittest.TestCase):
         for fix in ("window.get_html_elem =", "window.fill_inputs =", "window.set_multiswitch_controls_callback =",
                     "window.populate_repeating_sections =", "REFRESHES.has(type)", "classList.add('zfo-opening')",
                     "AVAILABLE_WHILE_OPENING.has(name)", "window.send_rep_sections_originals =",
-                    "window.set_readonly_inputs_callback ="):
+                    "window.set_readonly_inputs_callback =", "window.field_changed_error_callback ="):
             self.assertIn(fix, app.SHELL)
 
     def test_page_lays_out_only_after_opening(self):
