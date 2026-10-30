@@ -9,6 +9,7 @@ PORT 0 picks a free port; the chosen one is printed as "PORT <n>".
 """
 import base64
 import copy
+import hashlib
 import io
 import json
 import os
@@ -45,6 +46,7 @@ XSLT = etree.XSLT(etree.parse(str(RESOURCES / "ui/fo2html.xsl")))
 FORMS = {}
 SINGLE_FILE = False
 SESSIONS = {}
+CERTIFICATES = {}  # certificates of the signatures shown, by id; pages only ever name them
 IMPORTS = {}
 LOCK = threading.Lock()
 # Sessions hold a whole document each; a window only ever uses its newest few (reload, reset, import).
@@ -108,11 +110,19 @@ def render_empty():
     return SHELL.replace("__SESSION__", "").replace("__FILE__", '""').replace("__FONTS__", "").replace("__EMPTY__", "true")
 
 
+def judged(found):
+    """Adds trust verdicts to signatures; each keeps a certificate id the page can ask about revocation with."""
+    ders = [sig.pop("der") for sig in found]
+    for sig, der, verdict in zip(found, ders, certstore.trust(ders), strict=True):
+        sig.update(trusted=verdict["trusted"], reason=verdict.get("reason", ""), trust_source=verdict["source"],
+                   unverifiable=verdict["unverifiable"], certificate=hashlib.sha256(der).hexdigest())
+        CERTIFICATES[sig["certificate"]] = der
+    return found
+
+
 def pdf_signatures(pdf):
     found = pdf_sign.signatures(pdf)
-    for sig, verdict in zip(found, certstore.trust([sig.pop("der") for sig in found]), strict=True):
-        sig.update(trusted=verdict["trusted"], reason=verdict.get("reason", ""), trust_source=verdict["source"], unverifiable=verdict["unverifiable"])
-    return found
+    return judged(found)
 
 
 def pdf_xfa(reader, fields):
@@ -250,9 +260,7 @@ def page_geometry(doc):
 def signatures(fo):
     """Signature layers of a form.fo with integrity and trust verdicts, outermost first."""
     found = zfo_verify.describe(etree.fromstring(fo, etree.XMLParser(huge_tree=True)))
-    for sig, verdict in zip(found, certstore.trust([sig.pop("der") for sig in found]), strict=True):
-        sig.update(trusted=verdict["trusted"], reason=verdict.get("reason", ""), trust_source=verdict["source"], unverifiable=verdict["unverifiable"])
-    return found
+    return judged(found)
 
 
 def signer(identity_id, password=None):
@@ -426,6 +434,13 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, str(e).encode(), "text/plain; charset=utf-8")
             return self._send(200, json.dumps(certstore.identities(), ensure_ascii=False).encode(), "application/json")
         body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        if url.path == "/revocation":  # outside the lock: it may wait for a download, the form must stay usable
+            try:
+                ids = [i for i in json.loads(body or b"[]") if isinstance(i, str) and i in CERTIFICATES]
+            except (ValueError, TypeError):
+                return self._send(400, b"bad request", "text/plain")
+            result = {i: certstore.revocation_status(CERTIFICATES[i]) for i in ids}
+            return self._send(200, json.dumps(result, ensure_ascii=False).encode(), "application/json")
         with LOCK:
             if url.path == "/ipc":
                 msg = json.loads(body)

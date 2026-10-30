@@ -187,7 +187,7 @@ def pointers(lotl):
     return result
 
 
-def _download(url):
+def download(url):
     if os.environ.get("ZFO_OFFLINE"):
         raise OSError("offline")
     if urlparse(url).scheme not in ("http", "https"):  # some lists are on plain HTTP; their signature is what counts
@@ -203,7 +203,7 @@ def _download(url):
     return data
 
 
-def _store(path, data):
+def store(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     handle, temporary = tempfile.mkstemp(dir=path.parent)
     with os.fdopen(handle, "wb") as out:
@@ -223,15 +223,15 @@ def _read_cached(path, territory, signers):
 
 def _refresh(path, territory, url, signers, cached):
     """Downloads, authenticates and stores a list; never replaces a cached list with an older one."""
-    data = _download(url)
+    data = download(url)
     root = _parse(data)
     verify(root, signers)
     _check_current(root, territory)
     if cached is not None and _sequence(root) < _sequence(cached):
         raise ValueError("list older than the cached one")
-    _store(path, data)
+    store(path, data)
     if territory == "EU":
-        _store(path.with_name(SIGNERS_FILE), "\n".join(sorted(pointers(root).get("EU", ("", set()))[1])).encode())
+        store(path.with_name(SIGNERS_FILE), "\n".join(sorted(pointers(root).get("EU", ("", set()))[1])).encode())
     return root
 
 
@@ -320,10 +320,10 @@ def _usable_for_signing(certificate):
 
 
 def _standing(root, certificate):
-    """How the list sees the certificate's issuer: "listed", "withdrawn" (supervised at issue, no longer) or None."""
+    """(standing, authority) of the certificate's issuer: "listed", "withdrawn" (supervised at issue, no longer) or None."""
     moment = certificate.not_valid_before_utc
     now = datetime.now(timezone.utc)
-    standing = None
+    standing, issuer_found = None, None
     providers = root.findall(f"{TSL}TrustServiceProviderList/{TSL}TrustServiceProvider")  # never .iter(): the signature's objects are not covered
     for service in (s for p in providers for s in p.findall(f"{TSL}TSPServices/{TSL}TSPService")):
         information = service.find(f"{TSL}ServiceInformation")
@@ -344,9 +344,28 @@ def _standing(root, certificate):
                 # The date of issue comes from the certificate. A withdrawn authority's key may be out of anyone's
                 # control, and with revocation unchecked (#9) a backdated certificate would pass, so it only warns.
                 if _status_at(service, now) in SUPERVISED:
-                    return "listed"
-                standing = "withdrawn"
-    return standing
+                    return "listed", authority
+                standing, issuer_found = "withdrawn", authority
+    return standing, issuer_found
+
+
+def issuer(der, folder):
+    """The authority of the trusted lists that issued a DER certificate; None when none did or the lists are unavailable."""
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            certificate = x509.load_der_x509_certificate(der)
+        country = certificate.issuer.get_attributes_for_oid(x509.NameOID.COUNTRY_NAME)[0].value.upper()
+        territory = TERRITORIES.get(country, country)
+        if not re.fullmatch(r"[A-Z]{2}", territory) or territory in ("EU", "UK"):
+            return None
+        with _lock:
+            if territory not in pointers(_lotl(folder)):
+                return None
+            root = _national(folder, territory)
+        return _standing(root, certificate)[1]
+    except (Unavailable, IndexError, ValueError, TypeError, AttributeError, UnsupportedAlgorithm):
+        return None
 
 
 def check(der, folder):
@@ -376,7 +395,7 @@ def _judge(certificate, folder):
                 "reason": "Důvěryhodný seznam EU se nepodařilo načíst, certifikát proto nelze ověřit. Zkontrolujte připojení k internetu."}
     usable = _usable_for_signing(certificate)
     try:
-        standing = _standing(root, certificate) if usable else None
+        standing = _standing(root, certificate)[0] if usable else None
     except (AttributeError, ValueError, TypeError):  # the list is authentic but not as expected; not the certificate's fault
         return {"trusted": False, "unverifiable": True, "reason": "Důvěryhodný seznam EU má neočekávaný obsah, certifikát proto nelze ověřit."}
     if standing == "listed":

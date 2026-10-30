@@ -127,6 +127,16 @@ class LocalServer(unittest.TestCase):
         self.assertEqual(self.request("POST", f"/export-data?s={session}", origin=f"http://127.0.0.1:{self.port}")[0], 200)
         self.assertEqual(self.request("POST", f"/export-data?s={session}", origin="https://attacker.example")[0], 403)
 
+    def test_revocation_answers_only_about_signatures_shown(self):
+        session = self.request("GET", "/?form=cuzk-test")[1].decode().split("const SESSION = '")[1].split("'")[0]
+        known = next(iter(app.CERTIFICATES))
+        self.assertEqual(self.request("POST", "/revocation", body=json.dumps([known]))[0], 404)
+        status, answer = self.request("POST", f"/revocation?s={session}", body=json.dumps([known, "unknown-id", 5]))
+        self.assertEqual(status, 200)
+        self.assertEqual(list(json.loads(answer)), [known])
+        self.assertEqual(self.request("POST", f"/revocation?s={session}", body="not json")[0], 400)
+        self.assertEqual(self.request("POST", f"/revocation?s={session}", origin="https://attacker.example", body="[]")[0], 403)
+
     def test_static_files_stay_in_their_folders(self):
         self.assertEqual(self.request("GET", "/static/scripts/zfo_script.js")[0], 200)
         for path in ("/static/../../../../app.py", "/pdfjs/../../app.py", "/static/..%2f..%2fapp.py", "/pdfjs//etc/passwd"):

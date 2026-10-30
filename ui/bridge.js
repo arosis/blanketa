@@ -156,3 +156,47 @@ document.addEventListener('click', e => {
   e.stopImmediatePropagation();
   if (/^https?:\/\//i.test(link.href)) window.zfoOpenUrl(link.href);
 }, true);
+
+// Whether issuers revoked the certificates of the signatures on a page. Asked after the page is up, because the answer
+// may need a download: render(sigs) draws what is known and is called again when more arrives.
+window.zfoRevocation = (() => {
+  const known = new Map();
+  const date = iso => new Date(iso).toLocaleDateString('cs-CZ');
+  const escape = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+  const of = sig => known.get(sig.certificate);
+  return {
+    // Fills in what is missing for these signatures and calls redraw once it has arrived.
+    ask(session, signatures, redraw) {
+      const missing = [...new Set(signatures.map(s => s.certificate))].filter(id => id && !known.has(id));
+      if (!missing.length) return;
+      missing.forEach(id => known.set(id, {status: 'pending'}));
+      redraw();
+      const failed = {status: 'unknown', reason: 'Stav certifikátu se nepodařilo ověřit.'};
+      fetch(`/revocation?s=${session}`, {method: 'POST', body: JSON.stringify(missing)})
+        .then(res => res.ok ? res.json() : {}).catch(() => ({}))
+        .then(answer => { missing.forEach(id => known.set(id, answer[id] || failed)); redraw(); });
+    },
+    // A signature made after the certificate was revoked is not valid. The signing time comes from the signer,
+    // so an earlier time is no proof either: only the first case is a broken signature, the second is a warning.
+    revoked: sig => of(sig)?.status === 'revoked',
+    revokedBeforeSigning(sig) {
+      const state = of(sig);
+      return state?.status === 'revoked' && (!sig.signed_at || new Date(state.revoked_at) <= new Date(sig.signed_at));
+    },
+    state(sig) {
+      const state = of(sig), what = state?.suspended ? 'pozastaven' : 'zrušen';
+      if (state?.status !== 'revoked') return '';
+      return this.revokedBeforeSigning(sig)
+        ? `Certifikát byl ${what} ${date(state.revoked_at)}, před uvedeným časem podpisu`
+        : `Certifikát byl ${what} ${date(state.revoked_at)}; čas podpisu uvádí podepisující a není potvrzený`;
+    },
+    line(sig) {
+      const state = of(sig);
+      if (!state) return '';
+      const text = state.status === 'pending' ? 'Ověřuje se, zda certifikát nebyl zrušen…'
+        : state.status === 'good' ? 'Certifikát není zrušený.'
+        : state.status === 'unknown' ? `Zda je certifikát zrušený, se nepodařilo ověřit. ${escape(state.reason || '')}` : '';
+      return text ? `<div class="meta">${text}</div>` : '';
+    },
+  };
+})();

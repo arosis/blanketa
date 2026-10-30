@@ -22,6 +22,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.serialization import pkcs12
 
 import keychain
+import revocation
 import trustlist
 
 ROOT = Path(__file__).resolve().parent
@@ -213,6 +214,11 @@ def trust(certificates):
         # The system's own reason is in English and technical; the list's says what the reader can do about it.
         result.append({**listed, "source": "eu" if listed["trusted"] else "system"})
     return result
+
+
+def revocation_status(der):
+    """Whether the issuer revoked a DER certificate; may download its list, so never call it while rendering a page."""
+    return revocation.check(der, config_dir() / "trustlists", config_dir() / "crl")
 
 
 def _system_trust(certificates):
