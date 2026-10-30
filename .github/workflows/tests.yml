@@ -37,6 +37,7 @@ jobs:
           # Renders forms, which asks macsign for trust verdicts: it runs once macsign is built.
           .venv/bin/python -I tests/test_security.py
           .venv/bin/python -I tests/test_app.py
+          .venv/bin/python -I tests/test_trustlist.py
 
   windows:
     name: Test on Windows
@@ -57,6 +58,7 @@ jobs:
           # Without UTF-8 mode on purpose: the built app has the system code page, and so must the code it runs.
           python -I tests/test_security.py
           python -I tests/test_app.py
+          python -I tests/test_trustlist.py
       - name: Signing selftest (Windows certificate store and PFX file)
         shell: pwsh
         run: |
@@ -84,10 +86,11 @@ jobs:
           python -I tests/test_engine.py
           python -I tests/test_security.py
           python -I tests/test_app.py
+          python -I tests/test_trustlist.py
       - name: Test coverage (informational)
         run: |
           python -m pip install -q --require-hashes --only-binary :all: -r requirements-ci.txt
-          for t in tests/test_engine.py tests/test_security.py tests/test_app.py; do
+          for t in tests/test_engine.py tests/test_security.py tests/test_app.py tests/test_trustlist.py; do
             python -m coverage run --append --source=. --omit="tests/*,tools/*,vendor/*" "$t" > /dev/null
           done
           python -m coverage report --sort=cover

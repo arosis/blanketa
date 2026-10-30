@@ -111,7 +111,7 @@ def render_empty():
 def pdf_signatures(pdf):
     found = pdf_sign.signatures(pdf)
     for sig, verdict in zip(found, certstore.trust([sig.pop("der") for sig in found]), strict=True):
-        sig.update(trusted=verdict["trusted"], reason=verdict.get("reason", ""))
+        sig.update(trusted=verdict["trusted"], reason=verdict.get("reason", ""), trust_source=verdict["source"], unverifiable=verdict["unverifiable"])
     return found
 
 
@@ -248,10 +248,10 @@ def page_geometry(doc):
 
 
 def signatures(fo):
-    """Signature layers of a form.fo with integrity and the system's trust verdicts, outermost first."""
+    """Signature layers of a form.fo with integrity and trust verdicts, outermost first."""
     found = zfo_verify.describe(etree.fromstring(fo, etree.XMLParser(huge_tree=True)))
     for sig, verdict in zip(found, certstore.trust([sig.pop("der") for sig in found]), strict=True):
-        sig.update(trusted=verdict["trusted"], reason=verdict.get("reason", ""))
+        sig.update(trusted=verdict["trusted"], reason=verdict.get("reason", ""), trust_source=verdict["source"], unverifiable=verdict["unverifiable"])
     return found
 
 
