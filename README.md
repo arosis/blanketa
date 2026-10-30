@@ -186,7 +186,7 @@ Kontrola podpisu bez okna (používá ji i CI):
 
 ## Důvěryhodnost podpisů
 
-Systémy české kvalifikované autority (PostSignum, I.CA, eIdentity) většinou neznají. Když systém certifikátu nevěří, Blanketa ho dohledá v důvěryhodných seznamech EU: stáhne seznam EU z `ec.europa.eu` a národní seznam země vydavatele, ověří jejich podpisy a uloží je v nastavení. O otevřeném formuláři ani certifikátu se tím nikam nic neposílá. Bez internetu a bez uloženého seznamu panel podpisů řekne, že důvěryhodnost nešlo ověřit. Zneplatnění certifikátu se zatím nekontroluje.
+Systémy české kvalifikované autority (PostSignum, I.CA, eIdentity) většinou neznají. Když systém certifikátu nevěří, Blanketa ho dohledá v důvěryhodných seznamech EU: stáhne seznam EU z `ec.europa.eu` a národní seznam země vydavatele, ověří jejich podpisy a uloží je v nastavení. O otevřeném formuláři ani certifikátu se tím nikam nic neposílá. Bez internetu a bez uloženého seznamu panel podpisů řekne, že důvěryhodnost nešlo ověřit. Zda vydavatel certifikát nezrušil, zjistí Blanketa až po otevření formuláře ze seznamu zrušených certifikátů vydavatele: stáhne celý seznam, takže vydavatel nepozná, čí podpis si prohlížíte. Platí to jen pro vydavatele z důvěryhodných seznamů EU. Čas podpisu uvádí podepisující a časová razítka se zatím neověřují, takže u zrušeného certifikátu nelze potvrdit, že podpis vznikl před zrušením.
 
 ## Bezpečnost
 

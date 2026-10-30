@@ -572,8 +572,11 @@
   const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
   function card(sig) {
     const expired = new Date(sig.not_after) < new Date();
-    const level = !sig.intact ? 'bad' : (sig.trusted && !expired) ? 'ok' : 'warn';
+    const revocation = window.zfoRevocation;
+    const level = !sig.intact || revocation.revokedBeforeSigning(sig) ? 'bad'
+      : (sig.trusted && !expired && !revocation.revoked(sig)) ? 'ok' : 'warn';
     const state = !sig.intact ? 'Podpis je porušen – obsah byl po podpisu změněn'
+      : revocation.state(sig) ? revocation.state(sig)
       : sig.trusted ? 'Podpis je platný, certifikát je důvěryhodný'
       : sig.unverifiable ? 'Obsah je neporušený, důvěryhodnost certifikátu se nepodařilo ověřit'
       : 'Obsah je neporušený, certifikát není hodnocen jako důvěryhodný';
@@ -582,6 +585,7 @@
       <div class="state">${state}</div>
       ${sig.trust_source === 'eu' ? '<div class="meta">Vydavatel je v důvěryhodném seznamu EU.</div>' : ''}
       ${sig.unverifiable ? `<div class="meta">${esc(sig.reason)}</div>` : ''}
+      ${revocation.line(sig)}
       <div class="meta">Podepsáno: ${fmt(sig.signed_at)}<br>Vystavil: ${esc(sig.issuer)}<br>
         ${expired ? 'Platnost certifikátu skončila' : 'Certifikát platí do'} ${new Date(sig.not_after).toLocaleDateString('cs-CZ')}</div>
     </div>`;
@@ -598,6 +602,7 @@
       publication ? card(publication) : '<div class="zfo-empty">Formulář nebyl dosud publikován – nemá podpis vydavatele.</div>';
     $q('[data-license-head]').hidden = !license;
     $q('[data-signatures="license"]').innerHTML = license ? card(license) : '';
+    window.zfoRevocation.ask(SESSION, signatures, renderSignatures);
   }
   renderSignatures();
 

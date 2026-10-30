@@ -126,7 +126,7 @@ class TrustLists(unittest.TestCase):
         self.folder = Path(temporary.name)
         self.pages = {trustlist.LOTL_URL: self.default_lotl(), CZ_URL: national([service(AUTHORITY)], CZ_SIGNER)}
         for patcher in (mock.patch.object(trustlist, "PINNED_SIGNERS", frozenset({fingerprint(LOTL_SIGNER)})),
-                        mock.patch.object(trustlist, "_download", self.download)):
+                        mock.patch.object(trustlist, "download", self.download)):
             patcher.start()
             self.addCleanup(patcher.stop)
 

@@ -38,6 +38,7 @@ jobs:
           .venv/bin/python -I tests/test_security.py
           .venv/bin/python -I tests/test_app.py
           .venv/bin/python -I tests/test_trustlist.py
+          .venv/bin/python -I tests/test_revocation.py
 
   windows:
     name: Test on Windows
@@ -59,6 +60,7 @@ jobs:
           python -I tests/test_security.py
           python -I tests/test_app.py
           python -I tests/test_trustlist.py
+          python -I tests/test_revocation.py
       - name: Signing selftest (Windows certificate store and PFX file)
         shell: pwsh
         run: |
@@ -87,10 +89,11 @@ jobs:
           python -I tests/test_security.py
           python -I tests/test_app.py
           python -I tests/test_trustlist.py
+          python -I tests/test_revocation.py
       - name: Test coverage (informational)
         run: |
           python -m pip install -q --require-hashes --only-binary :all: -r requirements-ci.txt
-          for t in tests/test_engine.py tests/test_security.py tests/test_app.py tests/test_trustlist.py; do
+          for t in tests/test_engine.py tests/test_security.py tests/test_app.py tests/test_trustlist.py tests/test_revocation.py; do
             python -m coverage run --append --source=. --omit="tests/*,tools/*,vendor/*" "$t" > /dev/null
           done
           python -m coverage report --sort=cover
