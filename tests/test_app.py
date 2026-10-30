@@ -3,6 +3,7 @@
     python -I tests/test_app.py
 """
 import io
+import re
 import sys
 import tempfile
 import time
@@ -94,6 +95,11 @@ class UnsupportedForms(unittest.TestCase):
     @staticmethod
     def parsed(xml):
         return etree.fromstring(f'<f xmlns:fm="http://software602.cz/forms">{xml}</f>')
+
+    def test_notice_stays_outside_the_zoomed_page(self):
+        # Whatever is not listed as chrome moves into .zfo-page and would scale with the page zoom.
+        chrome = re.search(r"const chrome = \[\.\.\.document\.querySelectorAll\('([^']+)'\)", app.SHELL).group(1)
+        self.assertIn(".zfo-notice", chrome)
 
     def test_javascript_calculations_are_reported(self):
         doc = etree.fromstring(zipfile.ZipFile(ROOT / "samples/cuzk/form.zfo").read("form.fo"), etree.XMLParser(huge_tree=True))

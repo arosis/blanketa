@@ -636,11 +636,11 @@
     info.created && `Vytvořen: ${day(info.created)}`,
     info.modified && `Modifikován: ${day(info.modified)}`,
     __BLANK__ && 'Zobrazeny výchozí hodnoty – vyplněná data nejsou načtena.',
-    info.scripts && 'Formulář obsahuje výpočty v JavaScriptu 602, které Blanketa nevyhodnocuje.',
+    info.scripts && 'Formulář obsahuje výpočty v JavaScriptu 602, které Blanketa nevyhodnocuje.',
   ].filter(Boolean).join('<br>');
   if (info.scripts) {
     const notice = $q('[data-notice]');
-    notice.querySelector('span').textContent = 'Tento formulář obsahuje výpočty v JavaScriptu 602, které Blanketa neumí '
+    notice.querySelector('span').textContent = 'Tento formulář obsahuje výpočty v JavaScriptu 602, které Blanketa neumí '
       + 'vyhodnotit. Některá pole nebo části formuláře proto mohou zůstat prázdné nebo neaktuální. Před odesláním formulář '
       + 'zkontrolujte, spolehlivý výsledek dá Software602 Form Filler.';
     notice.querySelector('button').addEventListener('click', () => { notice.hidden = true; });

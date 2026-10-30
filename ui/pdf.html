@@ -181,9 +181,9 @@ __SHELL_STYLE__
     const notice = $q('[data-notice]');
     notice.querySelector('span').textContent = info.xfa === 'dynamic'
       ? 'Toto je dynamický formulář XFA (Adobe LiveCycle), který Blanketa neumí zobrazit ani vyplnit. Otevřete ho '
-        + 'v Adobe Acrobat Readeru, nebo si u úřadu vyžádejte jinou verzi formuláře.'
-      : 'Tento PDF formulář obsahuje i verzi XFA, kterou Blanketa nepodporuje. Vyplní jen běžná pole, takže programy '
-        + 'pracující s XFA (například Adobe Acrobat Reader) mohou ukázat jiné hodnoty. Před odesláním soubor zkontrolujte.';
+        + 'v Adobe Acrobat Readeru, nebo si u úřadu vyžádejte jinou verzi formuláře.'
+      : 'Tento PDF formulář obsahuje i verzi XFA, kterou Blanketa nepodporuje. Vyplní jen běžná pole, takže programy '
+        + 'pracující s XFA (například Adobe Acrobat Reader) mohou ukázat jiné hodnoty. Před odesláním soubor zkontrolujte.';
     notice.querySelector('button').addEventListener('click', () => { notice.hidden = true; });
     notice.hidden = false;
   }
