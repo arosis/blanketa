@@ -10,6 +10,7 @@ tools/webkit-probe
 
 # local working files
 out/
+fuzz-findings/
 render/
 
 # third-party documents and downloads kept only locally (Software602 manuals, raw downloads)

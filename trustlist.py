@@ -217,7 +217,7 @@ def _read_cached(path, territory, signers):
         verify(root, signers)
         _check_current(root, territory)
         return root
-    except (OSError, ValueError, KeyError, TypeError, AttributeError, InvalidSignature, etree.XMLSyntaxError):
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, InvalidSignature, UnsupportedAlgorithm, x509.InvalidVersion, etree.LxmlError):
         return None
 
 
@@ -364,7 +364,7 @@ def issuer(der, folder):
                 return None
             root = _national(folder, territory)
         return _standing(root, certificate)[1]
-    except (Unavailable, IndexError, ValueError, TypeError, AttributeError, UnsupportedAlgorithm):
+    except (Unavailable, IndexError, ValueError, TypeError, AttributeError, UnsupportedAlgorithm, x509.InvalidVersion):
         return None
 
 
@@ -375,7 +375,7 @@ def check(der, folder):
             warnings.simplefilter("ignore")  # old certificates in forms break minor encoding rules
             certificate = x509.load_der_x509_certificate(der)
         return _judge(certificate, folder)
-    except (ValueError, TypeError, UnsupportedAlgorithm):  # a hostile form's certificate must not stop the form opening
+    except (ValueError, TypeError, UnsupportedAlgorithm, x509.InvalidVersion):  # a hostile form's certificate must not stop the form opening
         return {"trusted": False, "unverifiable": False, "reason": "Certifikát je poškozený, nelze ho ověřit."}
 
 

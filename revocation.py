@@ -56,7 +56,7 @@ def _read(data, authority, now):
     try:
         crl = x509.load_der_x509_crl(data)
         return crl if _usable(crl, authority, now) else None
-    except (ValueError, TypeError, UnsupportedAlgorithm):
+    except (ValueError, TypeError, UnsupportedAlgorithm, x509.InvalidVersion):
         return None
 
 
@@ -128,5 +128,5 @@ def check(der, trust_folder, folder):
                             if certificate.not_valid_after_utc < now else
                             "Seznam zrušených certifikátů se nepodařilo načíst. Zkontrolujte připojení k internetu.")
         return _status(certificate, crl, now)
-    except (ValueError, TypeError, UnsupportedAlgorithm):  # a hostile form's certificate must not break the panel
+    except (ValueError, TypeError, UnsupportedAlgorithm, x509.InvalidVersion):  # a hostile form's certificate must not break the panel
         return _unknown("Certifikát je poškozený, nelze ho ověřit.")

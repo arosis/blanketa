@@ -28,6 +28,7 @@ Novou závislost přidejte do `deps/*.in` a spusťte `tools/lock-requirements.sh
 .venv/bin/python -I tests/test_app.py
 .venv/bin/python -I tests/test_trustlist.py
 .venv/bin/python -I tests/test_revocation.py
+.venv/bin/python -I tools/fuzz.py pdf 60      # damaged files; targets are listed in the script
 .venv/bin/python -I tools/selftest.py test      # jednou předtím tools/make-test-pki.sh
 ruff check .
 ```
