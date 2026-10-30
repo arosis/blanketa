@@ -156,12 +156,46 @@ class TrustLists(unittest.TestCase):
         forged = certificate("Test Qualified CA", ec.generate_private_key(ec.SECP256R1()))
         self.assertFalse(self.check(certificate("X", EC_KEY, forged, EC_KEY, start=ISSUED, ca=False))["trusted"])
 
-    def test_status_at_the_time_of_issue_decides(self):
+    def test_authority_must_be_supervised_at_issue(self):
+        restored = NOW - timedelta(days=10)
+        self.pages[CZ_URL] = national([service(AUTHORITY, "granted", restored, [("withdrawn", NOW - timedelta(days=3000))])], CZ_SIGNER)
+        self.assertFalse(self.check()["trusted"])
+        recent = certificate("Recent", EC_KEY, AUTHORITY, RSA_KEY, start=NOW - timedelta(days=2), ca=False)
+        self.assertTrue(self.check(recent)["trusted"])
+
+    def test_withdrawn_authority_cannot_be_confirmed(self):
         withdrawn = NOW - timedelta(days=10)
         self.pages[CZ_URL] = national([service(AUTHORITY, "withdrawn", withdrawn, [("granted", NOW - timedelta(days=3000))])], CZ_SIGNER)
+        verdict = self.check()
+        self.assertFalse(verdict["trusted"])
+        self.assertTrue(verdict["unverifiable"])
+        self.assertIn("pod dohledem", verdict["reason"])
+
+    def test_damaged_certificate_gives_a_verdict(self):
+        builder = (x509.CertificateBuilder().subject_name(LEAF.subject).issuer_name(AUTHORITY.subject).public_key(EC_KEY.public_key())
+                   .serial_number(5).not_valid_before(ISSUED).not_valid_after(NOW + timedelta(days=9))
+                   .add_extension(x509.UnrecognizedExtension(x509.oid.ExtensionOID.KEY_USAGE, b"junk"), critical=False))
+        for damaged in (der(builder.sign(RSA_KEY, hashes.SHA256())), b"\x30\x03abc"):
+            self.assertFalse(trustlist.check(damaged, self.folder)["trusted"])
+
+    def test_unreadable_authority_does_not_hide_the_others(self):
+        odd = service(AUTHORITY).replace(b64(AUTHORITY), base64.b64encode(b"junk").decode())
+        self.pages[CZ_URL] = national([odd, service(AUTHORITY)], CZ_SIGNER)
         self.assertTrue(self.check()["trusted"])
-        late = certificate("Late", EC_KEY, AUTHORITY, RSA_KEY, start=NOW - timedelta(days=2), ca=False)
-        self.assertFalse(self.check(late)["trusted"])
+
+    def test_comment_cannot_shorten_a_signed_value(self):
+        signed = national([service(AUTHORITY, "grantedNot")], CZ_SIGNER)
+        self.pages[CZ_URL] = signed.replace(b"Svcstatus/grantedNot", b"Svcstatus/granted<!-- -->Not")
+        self.assertFalse(self.check()["trusted"])
+
+    def test_cached_lotl_cannot_vouch_for_itself(self):
+        self.assertTrue(self.check()["trusted"])
+        stranger = certificate("Stranger", RSA_KEY)
+        (self.folder / "EU.xml").write_bytes(self.default_lotl(sequence=9, signer=stranger, eu_signers=(stranger,)))
+        trustlist._memory.clear()
+        self.assertNotIn(fingerprint(stranger), trustlist._lotl_signers(self.folder))
+        self.assertTrue(self.check()["trusted"])  # the bad file is ignored and the list downloaded again
+        self.assertEqual(trustlist._sequence(trustlist._parse((self.folder / "EU.xml").read_bytes())), 5)
 
     def test_authority_for_websites_only_is_not_trusted(self):
         self.pages[CZ_URL] = national([service(AUTHORITY, uses=("ForWebSiteAuthentication",))], CZ_SIGNER)

@@ -22,7 +22,7 @@ from urllib.parse import urlparse
 
 import certifi
 from cryptography import x509
-from cryptography.exceptions import InvalidSignature
+from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
@@ -62,6 +62,7 @@ TERRITORIES = {"GR": "EL", "GB": "UK"}
 MAX_SIZE = 32 * 1024 * 1024
 TIMEOUT = 8
 REFRESH_AFTER = 24 * 3600  # lists often change long before their NextUpdate
+SIGNERS_FILE = "EU-signers.txt"
 REMEMBER = 600  # one form asks for each layer; a dead network must not cost a timeout every time
 
 _lock = threading.Lock()
@@ -73,7 +74,9 @@ class Unavailable(Exception):
 
 
 def _parse(data):
-    root = etree.fromstring(data, etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False))
+    root = etree.fromstring(data, etree.XMLParser(
+        # A comment is outside the signature, and .text would stop at it: it could shorten what the list says.
+        resolve_entities=False, no_network=True, load_dtd=False, remove_comments=True))
     if root.getroottree().docinfo.doctype:
         raise ValueError("list with a DOCTYPE")
     return root
@@ -189,7 +192,9 @@ def _download(url):
         raise OSError("offline")
     if urlparse(url).scheme not in ("http", "https"):  # some lists are on plain HTTP; their signature is what counts
         raise OSError(f"list location {url}")
-    context = ssl.create_default_context(cafile=certifi.where())
+    # The system's certificates too: offices with a TLS-inspecting proxy have its authority only there.
+    context = ssl.create_default_context()
+    context.load_verify_locations(cafile=certifi.where())
     request = urllib.request.Request(url, headers={"User-Agent": "Blanketa"})
     with urllib.request.urlopen(request, timeout=TIMEOUT, context=context) as response:  # noqa: S310 - scheme checked above
         data = response.read(MAX_SIZE + 1)
@@ -225,6 +230,8 @@ def _refresh(path, territory, url, signers, cached):
     if cached is not None and _sequence(root) < _sequence(cached):
         raise ValueError("list older than the cached one")
     _store(path, data)
+    if territory == "EU":
+        _store(path.with_name(SIGNERS_FILE), "\n".join(sorted(pointers(root).get("EU", ("", set()))[1])).encode())
     return root
 
 
@@ -268,11 +275,12 @@ def _lotl(folder):
 
 
 def _lotl_signers(folder):
-    """The pinned signers and those the cached LOTL announces, which is how they change without a new release."""
+    """The pinned signers and those a verified LOTL announced, which is how they change without a new release."""
     try:
-        return set(PINNED_SIGNERS) | pointers(_parse((Path(folder) / "EU.xml").read_bytes())).get("EU", ("", set()))[1]
-    except (OSError, ValueError, KeyError, TypeError, AttributeError, etree.XMLSyntaxError):
-        return set(PINNED_SIGNERS)
+        announced = (Path(folder) / SIGNERS_FILE).read_text(encoding="ascii").split()
+    except (OSError, ValueError):
+        announced = []
+    return set(PINNED_SIGNERS) | {a for a in announced if re.fullmatch(r"[0-9a-f]{64}", a)}
 
 
 def _national(folder, territory):
@@ -311,36 +319,52 @@ def _usable_for_signing(certificate):
     return usage.content_commitment or usage.digital_signature
 
 
-def _listed(root, certificate):
-    """True when a service of the list issued the certificate, supervised at the time of issue."""
+def _standing(root, certificate):
+    """How the list sees the certificate's issuer: "listed", "withdrawn" (supervised at issue, no longer) or None."""
     moment = certificate.not_valid_before_utc
+    now = datetime.now(timezone.utc)
+    standing = None
     providers = root.findall(f"{TSL}TrustServiceProviderList/{TSL}TrustServiceProvider")  # never .iter(): the signature's objects are not covered
     for service in (s for p in providers for s in p.findall(f"{TSL}TSPServices/{TSL}TSPService")):
         information = service.find(f"{TSL}ServiceInformation")
         if information.findtext(f"{TSL}ServiceTypeIdentifier") != CA_QC or not _for_signing(information):
             continue
         for element in information.findall(f"{TSL}ServiceDigitalIdentity/{TSL}DigitalId/{TSL}X509Certificate"):
-            authority = x509.load_der_x509_certificate(base64.b64decode(element.text))
+            try:
+                authority = x509.load_der_x509_certificate(base64.b64decode(element.text))
+            except ValueError:  # one odd entry must not cost the other services of the list
+                continue
             if authority.subject != certificate.issuer or not authority.not_valid_before_utc <= moment <= authority.not_valid_after_utc:
                 continue
             try:
                 certificate.verify_directly_issued_by(authority)
-            except (ValueError, TypeError, InvalidSignature):
+            except (ValueError, TypeError, InvalidSignature, UnsupportedAlgorithm):
                 continue
             if _status_at(service, moment) in SUPERVISED:
-                return True
-    return False
+                # The date of issue comes from the certificate. A withdrawn authority's key may be out of anyone's
+                # control, and with revocation unchecked (#9) a backdated certificate would pass, so it only warns.
+                if _status_at(service, now) in SUPERVISED:
+                    return "listed"
+                standing = "withdrawn"
+    return standing
 
 
 def check(der, folder):
     """Verdict for one DER certificate: {"trusted": bool, "unverifiable": bool, "reason": str}."""
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")  # old certificates in forms break minor encoding rules
-        certificate = x509.load_der_x509_certificate(der)
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")  # old certificates in forms break minor encoding rules
+            certificate = x509.load_der_x509_certificate(der)
+        return _judge(certificate, folder)
+    except (ValueError, TypeError, UnsupportedAlgorithm):  # a hostile form's certificate must not stop the form opening
+        return {"trusted": False, "unverifiable": False, "reason": "Certifikát je poškozený, nelze ho ověřit."}
+
+
+def _judge(certificate, folder):
     countries = certificate.issuer.get_attributes_for_oid(x509.NameOID.COUNTRY_NAME)
     country = countries[0].value.upper() if countries else ""
     if not re.fullmatch(r"[A-Z]{2}", country):  # it also names a file, and it comes from the signed document
-        return {"trusted": False, "unverifiable": False, "reason": "Vydavatel certifikátu neuvádí zemi z EU."}
+        return {"trusted": False, "unverifiable": False, "reason": "Vydavatel certifikátu neuvádí zemi z EU."}
     territory = TERRITORIES.get(country, country)
     try:
         with _lock:
@@ -349,7 +373,11 @@ def check(der, folder):
             root = _national(folder, territory)
     except Unavailable:
         return {"trusted": False, "unverifiable": True,
-                "reason": "Důvěryhodný seznam EU se nepodařilo načíst, certifikát proto nelze ověřit. Zkontrolujte připojení k internetu."}
-    if _usable_for_signing(certificate) and _listed(root, certificate):
+                "reason": "Důvěryhodný seznam EU se nepodařilo načíst, certifikát proto nelze ověřit. Zkontrolujte připojení k internetu."}
+    standing = _standing(root, certificate) if _usable_for_signing(certificate) else None
+    if standing == "listed":
         return {"trusted": True, "unverifiable": False, "reason": ""}
-    return {"trusted": False, "unverifiable": False, "reason": "Vydavatel certifikátu není v důvěryhodném seznamu EU."}
+    if standing == "withdrawn":
+        return {"trusted": False, "unverifiable": True,
+                "reason": "Vydavatel certifikátu už není pod dohledem, důvěryhodnost proto nelze potvrdit."}
+    return {"trusted": False, "unverifiable": False, "reason": "Vydavatel certifikátu není v důvěryhodném seznamu EU."}
