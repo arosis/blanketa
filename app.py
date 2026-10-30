@@ -47,7 +47,8 @@ FORMS = {}
 SINGLE_FILE = False
 DAMAGED_PAGE = ("<!doctype html><meta charset=utf-8><title>Soubor nelze otevřít</title>"
                 "<body style='font:14px system-ui,sans-serif;padding:24px'><h1 style='font-size:18px'>Soubor nelze otevřít</h1>"
-                "<p>Soubor je poškozený, nebo nejde o\u00a0formulář, který Blanketa umí přečíst.</p>")
+                "<p>Soubor může být poškozený nebo nejde o\u00a0formulář, který Blanketa umí přečíst. Může jít i\u00a0o\u00a0chybu Blankety; "
+                "pokud ho jiná aplikace otevře, dejte nám prosím vědět.</p>")
 SESSIONS = {}
 CERTIFICATES = {}  # certificates of the signatures shown, by id; pages only ever name them
 IMPORTS = {}

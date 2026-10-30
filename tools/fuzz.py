@@ -2,6 +2,7 @@
 
     python -I tools/fuzz.py <target> [seconds] [libFuzzer options]
     python -I tools/fuzz.py --replay <target> <file>
+    python -I tools/fuzz.py --check <target>
 
 Atheris guides the search where it is installed (Linux in CI, see .github/workflows/fuzz.yml). Without it the target
 runs on random mutations of the same seeds, which is enough to try a target locally. Exit status 1 means a finding.
@@ -217,6 +218,11 @@ def run_atheris(atheris, target, seeds, seconds, options):
 
 
 def main(arguments):
+    if arguments[:1] == ["--check"]:  # the target runs on its unchanged seeds: nothing random, so it cannot fail by chance
+        target, seeds = TARGETS[arguments[1]]
+        for seed in seeds():
+            target(seed)
+        return 0
     if arguments[:1] == ["--replay"]:
         TARGETS[arguments[1]][0](Path(arguments[2]).read_bytes())
         print("no failure")
