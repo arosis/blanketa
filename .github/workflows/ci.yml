@@ -1,5 +1,5 @@
-# Code quality checks for every pull request into main. The tests and packages of all three platforms run in
-# build.yml, code scanning in codeql.yml; main's ruleset requires all of them before a merge.
+# Code quality checks for every pull request into main. The tests of all three platforms run in tests.yml, code
+# scanning in codeql.yml; main's ruleset requires all of them before a merge. Packages are built in build.yml.
 name: Code quality
 
 on:

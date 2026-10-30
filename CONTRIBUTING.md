@@ -9,9 +9,13 @@ chyby soukromě podle [SECURITY.md](SECURITY.md).
 2. Otevřete pull request do `main`.
 3. Pull request musí projít všemi kontrolami CI:
    - **Code quality** – `ruff`, syntaxe JavaScriptu a XSLT, kontrola workflow (`actionlint`);
-   - **Build, test and release** – testy, podpisový selftest, sestavení a spuštění aplikace na macOS, Windows a Linuxu;
+   - **Tests** – testy a podpisový selftest na macOS, Windows a Linuxu;
    - **Code scanning (CodeQL)** – bez nových bezpečnostních nálezů.
 4. Změnu musí schválit vlastník kódu (`.github/CODEOWNERS`). Po schválení se pull request sloučí metodou squash.
+
+Sestavení balíčků a spuštění hotové aplikace (**Build and release**) není povinná kontrola pull requestu. Běží po každém
+sloučení do `main`, v pull requestech, které mění balení, okna aplikace nebo závislosti, a vždy před vydáním. Když
+selže, vydání nevznikne.
 
 ## Než otevřete pull request
 
