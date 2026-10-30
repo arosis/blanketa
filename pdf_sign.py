@@ -230,20 +230,33 @@ def sign(pdf, key, cert, reason=None, location=None, placement=None):
     return out.sign_pdf(writer).getvalue()
 
 
+def _evaluate(sig):
+    """(intact, coverage name, modified, changes_unchecked) of one signature."""
+    unchecked = False
+    try:
+        status = validate_pdf_signature(sig, skip_diff=False)
+    except Exception:
+        # pyHanko's analysis of later revisions gives up on documents it cannot read, such as a field named "El.podpis":
+        # that says nothing about the signed bytes. A hostile file can provoke it too, so later changes stay a warning.
+        unchecked = True
+        try:
+            status = validate_pdf_signature(sig, skip_diff=True)
+        except Exception:
+            return False, None, False, False
+    intact = status.intact and status.valid
+    covers = status.coverage.name
+    modified = status.modification_level is not None and status.modification_level.name not in (
+        "NONE", "LTA_UPDATES", "FORM_FILLING")
+    return intact, covers, modified, unchecked and intact and covers != "ENTIRE_FILE"
+
+
 def signatures(pdf):
     """One dict per signature, in signing order, shaped like zfo_verify.describe."""
     reader = _open(pdf)
     result = []
     for sig in reader.embedded_signatures:
         cert = sig.signer_cert
-        try:
-            status = validate_pdf_signature(sig, skip_diff=False)
-            intact = status.intact and status.valid
-            covers = status.coverage.name
-            modified = status.modification_level is not None and status.modification_level.name not in (
-                "NONE", "LTA_UPDATES", "FORM_FILLING")
-        except Exception:
-            intact, covers, modified = False, None, False
+        intact, covers, modified, unchecked = _evaluate(sig)
         signed_at = sig.self_reported_timestamp
         result.append({
             "subject": cert.subject.native.get("common_name") or cert.subject.human_friendly,
@@ -253,6 +266,7 @@ def signatures(pdf):
             # Later revisions change more than form fields, signatures and appearances. pyHanko also reports this
             # when a field with several widgets is filled after signing, so it is a warning, not a broken signature.
             "modified": modified,
+            "changes_unchecked": unchecked,
             "not_after": cert["tbs_certificate"]["validity"]["not_after"].native.isoformat(),
             "signed_at": signed_at.astimezone(timezone.utc).isoformat() if signed_at else None,
             "field": sig.field_name,
