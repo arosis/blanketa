@@ -176,10 +176,10 @@ Kontrola podpisu bez okna (používá ji i CI):
 
 ## Omezení
 
-- Výpočty psané v JavaScriptu 602 se nevyhodnocují (výpočty XPath ano).
+- Výpočty psané v JavaScriptu 602 se nevyhodnocují (výpočty XPath ano); Blanketa na ně při otevření formuláře upozorní.
 - Odesílání na portály (submit) není podporované.
 - Formuláře s mnoha opakováními se otevírají pomalu (desítky sekund).
-- PDF formuláře XFA nejsou podporované.
+- PDF formuláře XFA nejsou podporované; Blanketa na ně při otevření upozorní.
 - Aplikace není notarizovaná (macOS) ani podepsaná certifikátem vydavatele (Windows SmartScreen ji při prvním spuštění může varovat).
 - Na Linuxu se důvěryhodnost certifikátů hodnotí podle systémové sady kořenových CA; tokeny přes PKCS#11 zatím nejsou podporované (jen soubory `.pfx`).
 - Na Windows a Linuxu se PDF tiskne přes výchozí prohlížeč PDF v systému.

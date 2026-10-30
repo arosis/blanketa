@@ -115,12 +115,22 @@ def pdf_signatures(pdf):
     return found
 
 
+def pdf_xfa(reader, fields):
+    """How the PDF uses XFA: "" not at all, "hybrid" besides ordinary fields, "dynamic" with nothing to fill here."""
+    acroform = reader.trailer["/Root"].get_object().get("/AcroForm")
+    acroform = acroform.get_object() if acroform is not None else None
+    if not isinstance(acroform, dict) or "/XFA" not in acroform:
+        return ""
+    return "hybrid" if fields else "dynamic"
+
+
 def pdf_info(pdf):
     reader = pdf_sign.PdfReader(io.BytesIO(pdf))
     meta = reader.metadata or {}
+    fields = pdf_sign.form_fields(pdf)
     return {"title": meta.get("/Title") or "", "author": meta.get("/Author") or "", "pages": len(reader.pages),
-            "fields": len(pdf_sign.form_fields(pdf)), "producer": meta.get("/Producer") or "",
-            "signature_field": pdf_sign.empty_signature_field(pdf)}
+            "fields": len(fields), "producer": meta.get("/Producer") or "",
+            "signature_field": pdf_sign.empty_signature_field(pdf), "xfa": pdf_xfa(reader, fields)}
 
 
 def render_pdf(name):
@@ -249,6 +259,13 @@ def signer(identity_id, password=None):
     return certstore.load(identity_id, password)
 
 
+def script_binds(doc):
+    """Binds whose expressions are 602 JavaScript, which the engine cannot evaluate. Braces alone also quote XPath."""
+    is_script = lambda value: value.lstrip().startswith("{") and re.search(r"\bvar\s|\bGetDocument\s*\(", value)
+    return [bind.get("Id") for bind in doc.iter("{http://software602.cz/forms}bind")
+            if any(is_script(value) for value in bind.attrib.values())]
+
+
 def form_info(name):
     """Form description as Form Filler shows it under "Popis formuláře"."""
     with zipfile.ZipFile(form_path(name)) as z:
@@ -261,7 +278,7 @@ def form_info(name):
     return {"title": get(summary, "title"), "subject": get(summary, "subject"), "author": get(summary, "author"),
             "keywords": get(summary, "keywords"), "comment": get(summary, "comment"), "code": get(summary, "formcode"),
             "form_id": get(params, "form-id") or get(summary, "form-id"), "created": get(params, "creationdate"),
-            "modified": modified, "version": get(params, "xmlcore-version")}
+            "modified": modified, "version": get(params, "xmlcore-version"), "scripts": len(script_binds(fo))}
 
 
 def filled_form(session, key=None, cert=None):

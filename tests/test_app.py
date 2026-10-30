@@ -2,6 +2,8 @@
 
     python -I tests/test_app.py
 """
+import io
+import re
 import sys
 import tempfile
 import time
@@ -9,6 +11,10 @@ import unittest
 import zipfile
 from datetime import datetime
 from pathlib import Path
+
+from lxml import etree
+from pypdf import PdfWriter
+from pypdf.generic import ArrayObject, NameObject, TextStringObject
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -83,6 +89,53 @@ class FormDescription(unittest.TestCase):
                 other = [n for n in original.namelist() if n != "form.fo"][0]
                 self.assertEqual(saved.getinfo(other).date_time, original.getinfo(other).date_time)
                 self.assertEqual(saved.read("form.fo"), original.read("form.fo"))
+
+
+class UnsupportedForms(unittest.TestCase):
+    @staticmethod
+    def parsed(xml):
+        return etree.fromstring(f'<f xmlns:fm="http://software602.cz/forms">{xml}</f>')
+
+    def test_notice_stays_outside_the_zoomed_page(self):
+        # Whatever is not listed as chrome moves into .zfo-page and would scale with the page zoom.
+        chrome = re.search(r"const chrome = \[\.\.\.document\.querySelectorAll\('([^']+)'\)", app.SHELL).group(1)
+        self.assertIn(".zfo-notice", chrome)
+
+    def test_javascript_calculations_are_reported(self):
+        doc = etree.fromstring(zipfile.ZipFile(ROOT / "samples/cuzk/form.zfo").read("form.fo"), etree.XMLParser(huge_tree=True))
+        self.assertEqual(app.script_binds(doc), ["s2a_vyplnene2", "s2a_vyplnene", "s2b_vyplnene"])
+
+    def test_form_without_javascript_is_not_reported(self):
+        for sample in ("cssz-onz", "olk-dotace"):
+            doc = etree.fromstring(zipfile.ZipFile(ROOT / f"samples/{sample}/form.zfo").read("form.fo"), etree.XMLParser(huge_tree=True))
+            self.assertEqual(app.script_binds(doc), [])
+
+    def test_braces_alone_are_not_javascript(self):
+        doc = self.parsed('<fm:bind Id="x" calculate="{../d:a}"/><fm:bind Id="y" calculate="  { var a = 1; }"/>'
+                          '<fm:bind Id="z" constraint="{GetDocument().GetElement()}"/>')
+        self.assertEqual(app.script_binds(doc), ["y", "z"])
+
+    @staticmethod
+    def pdf_with(xfa, source):
+        writer = PdfWriter(clone_from=source)
+        writer.root_object[NameObject("/AcroForm")][NameObject("/XFA")] = TextStringObject("<xdp/>")
+        if xfa == "dynamic":
+            writer.root_object[NameObject("/AcroForm")][NameObject("/Fields")] = ArrayObject()
+        out = io.BytesIO()
+        writer.write(out)
+        return out.getvalue()
+
+    def test_xfa_is_recognised(self):
+        source = ROOT / "samples-pdf/zadost.pdf"
+        self.assertEqual(app.pdf_info(source.read_bytes())["xfa"], "")
+        self.assertEqual(app.pdf_info(self.pdf_with("hybrid", source))["xfa"], "hybrid")
+        self.assertEqual(app.pdf_info(self.pdf_with("dynamic", source))["xfa"], "dynamic")
+
+    def test_pdf_without_acroform_has_no_xfa(self):
+        writer, out = PdfWriter(), io.BytesIO()
+        writer.add_blank_page(100, 100)
+        writer.write(out)
+        self.assertEqual(app.pdf_info(out.getvalue())["xfa"], "")
 
 
 if __name__ == "__main__":
