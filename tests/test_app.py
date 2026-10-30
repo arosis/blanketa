@@ -229,7 +229,7 @@ class OpeningForms(unittest.TestCase):
         for message in ("document.ready", "init_rep_sections", "get_readonly_binds", "get_selected_listboxes",
                         "get_multiswitch_list", "get_repeatable"):
             answer = app.engine.handle(session["doc"], message, "")
-        # Usually about two seconds; generous for a loaded CI runner, yet far below the old minutes of opening.
+        # The engine's share only, usually about two seconds; generous for a loaded CI runner.
         self.assertLess(time.monotonic() - started, 20)
         self.assertEqual(answer[0]["data"].count('"o1_porad_cislo"'), self.SECTIONS)
 
@@ -241,7 +241,8 @@ class OpeningForms(unittest.TestCase):
     def test_page_keeps_its_opening_fixes(self):
         # Removing one breaks nothing else, the form just opens slowly again.
         for fix in ("window.get_html_elem =", "window.fill_inputs =", "window.set_multiswitch_controls_callback =",
-                    "window.populate_repeating_sections =", "REFRESHES.has(type)", "classList.add('zfo-opening')"):
+                    "window.populate_repeating_sections =", "REFRESHES.has(type)", "classList.add('zfo-opening')",
+                    "AVAILABLE_WHILE_OPENING.has(name)"):
             self.assertIn(fix, app.SHELL)
 
     def test_page_lays_out_only_after_opening(self):

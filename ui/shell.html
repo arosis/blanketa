@@ -86,6 +86,7 @@
   }
   .zfo-stage { grid-column: 2; grid-row: 2; overflow: auto; position: relative; }
   body.zfo-opening .zfo-page { display: none; }
+  body.zfo-opening .zfo-bar button:not([data-action="open"], [data-action="help"], [data-action="panel"]) { opacity: .35; pointer-events: none; }
   body.zfo-opening .zfo-stage::before { content: "Otevírám formulář…"; display: block; margin-top: 18vh; text-align: center; color: var(--muted); font-size: 14px; }
   .zfo-page {
     position: relative; margin: 28px auto 40px; box-sizing: border-box; width: 21cm; background: #fff; padding: 36px 40px;
@@ -627,8 +628,9 @@
   // Each answer sends the next message before its task ends, so an empty queue means opening is over. That holds when a
   // step failed too: the user then gets the form as far as it got rather than an empty page.
   const enqueue = task => {
-    const tail = queue = queue.then(task).catch(e => console.error('zfo', e))
-      .then(() => { if (queue === tail && !ready) finishOpening(); });
+    const log = e => console.error('zfo', e);
+    const tail = queue = queue.then(task).catch(log)
+      .then(() => { if (queue === tail && !ready) finishOpening(); }).catch(log);
   };
   // These only read the current state back into the page, and every stored value asks for all of them. A request still
   // waiting behind no newer change gives the same answer, so a form storing 50 values refreshes once, not 50 times.
@@ -889,6 +891,7 @@
     await queue;
   };
   async function runExpress(express) {
+    if (!ready) return;
     const top = parseCall(express);
     const steps = top?.name === 'LastParam' ? splitArgs(top.args) : [express];
     for (const step of steps) {
@@ -1122,11 +1125,14 @@
       savedStatus('Podepsáno a uloženo jako', result.saved);
     },
   };
+  // A hidden page has no visible fields: until it is shown, a check would find nothing wrong and the zoom nothing to fit.
+  const AVAILABLE_WHILE_OPENING = new Set(['open', 'support', 'help', 'panel']);
+  const act = name => { if (ready || AVAILABLE_WHILE_OPENING.has(name)) actions[name]?.(); };
   for (const button of document.querySelectorAll('.zfo-bar [data-action], .zfo-close[data-action]')) {
-    button.addEventListener('click', () => actions[button.dataset.action]());
+    button.addEventListener('click', () => act(button.dataset.action));
   }
   // Native menus call into the page through this.
-  window.zfoAction = name => actions[name]?.();
+  window.zfoAction = act;
   document.addEventListener('keydown', e => {
     const shortcut = e.key === 'F9' ? (e.shiftKey ? 'check' : 'recalc')
       : !window.zfoShortcut(e) ? null
@@ -1139,7 +1145,7 @@
       : e.key === 'Backspace' && e.shiftKey ? 'reset-field' : null;
     if (!shortcut) return;
     e.preventDefault();
-    actions[shortcut]();
+    act(shortcut);
   });
 })(/* __zfo_shell__ */);
 </script>
