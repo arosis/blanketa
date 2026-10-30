@@ -1,0 +1,7 @@
+# Direct dependencies of requirements-desktop.txt: the Windows and Linux app (desktop.py), on top of runtime.in.
+-r runtime.in
+pywebview
+pythonnet; sys_platform == "win32"
+PyQt6; sys_platform == "linux"
+PyQt6-WebEngine; sys_platform == "linux"
+qtpy; sys_platform == "linux"
