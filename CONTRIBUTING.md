@@ -17,6 +17,9 @@ Sestavení balíčků a spuštění hotové aplikace (**Build and release**) nen
 sloučení do `main`, v pull requestech, které mění balení, okna aplikace nebo závislosti, a vždy před vydáním. Když
 selže, vydání nevznikne.
 
+Novou závislost přidejte do `deps/*.in` a spusťte `tools/lock-requirements.sh` (potřebuje `uv`). Soubory
+`requirements*.txt` jsou generované a obsahují kontrolní součty, ručně je neupravujte.
+
 ## Než otevřete pull request
 
 ```bash

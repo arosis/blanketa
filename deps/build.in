@@ -1,0 +1,3 @@
+# Direct dependencies of requirements-build.txt: what builds the only package without a wheel (proxy-tools, needed by
+# pywebview). pip fetches build tools without checking hashes, so they are installed from here and isolation is off.
+setuptools

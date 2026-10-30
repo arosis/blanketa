@@ -1,6 +1,8 @@
 # Weekly update pull requests for the Python dependencies, the pinned GitHub Actions and the Docker image; they go
 # through the same CI and review as any other change. Minor and patch updates come grouped in one pull request per
-# ecosystem. Python versions and hashes change in requirements*.txt, which tools/lock-requirements.sh generated.
+# ecosystem. Python versions and hashes change in requirements*.txt, which tools/lock-requirements.sh generated. When
+# an update brings a new indirect dependency, pip refuses it for a missing hash: run that script on the update's branch.
+# Docker updates are checked by the image build in build.yml.
 version: 2
 updates:
   - package-ecosystem: pip
