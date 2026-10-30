@@ -209,6 +209,7 @@ certifi==2026.10.23 \
     --hash=sha256:e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1
     # via
     #   -c requirements.txt
+    #   -r deps/runtime.in
     #   pyhanko-certvalidator
 cffi==2.1.1 ; platform_python_implementation != 'PyPy' or sys_platform == 'win32' \
     --hash=sha256:046bfc24911b37851ee1b51aab8bffe713d89c68c6a057b09484ce9fd5f69b4e \

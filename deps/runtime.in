@@ -9,6 +9,8 @@ pyhanko-certvalidator
 # pyHanko 0.38 (its opentype extra) accepts uharfbuzz below 0.56 only; lift this with the next pyHanko.
 uharfbuzz<0.56
 fonttools
+# CA bundle for downloading EU trusted lists from the frozen app, which has no system one on every platform
+certifi
 # time zones for pyHanko where the system has none (Windows, minimal Linux)
 tzdata
 

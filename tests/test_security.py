@@ -5,6 +5,7 @@
 import copy
 import http.client
 import json
+import os
 import sys
 import tempfile
 import threading
@@ -15,6 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+os.environ["ZFO_OFFLINE"] = "1"  # tests never download trusted lists
 
 from cryptography import x509  # noqa: E402
 from cryptography.hazmat.primitives import serialization  # noqa: E402

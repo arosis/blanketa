@@ -10,7 +10,7 @@ APP="build/Blanketa.app"
   --distpath build/dist --workpath build/work --specpath build \
   --add-data "$PWD/$V/xslt:$V/xslt" --add-data "$PWD/$V/scripts:$V/scripts" --add-data "$PWD/$V/styles:$V/styles" \
   --add-data "$PWD/ui:ui" --add-data "$PWD/vendor/pdfjs:vendor/pdfjs" \
-  --collect-all pyhanko --collect-all pyhanko_certvalidator --collect-all uharfbuzz --collect-submodules fontTools --collect-data tzdata \
+  --collect-all pyhanko --collect-all pyhanko_certvalidator --collect-all uharfbuzz --collect-submodules fontTools --collect-data tzdata --collect-data certifi \
   --collect-submodules zfoengine --hidden-import lxml._elementpath app.py
 
 # The Swift parts target the oldest macOS Info.plist promises; otherwise swiftc targets the build machine's own.

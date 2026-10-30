@@ -34,7 +34,7 @@ def pyinstaller():
             *data(f"{EDITOR}/styles", f"{EDITOR}/styles"), *data("ui", "ui"), *data("vendor/pdfjs", "vendor/pdfjs"),
             *data("assets/blanketa.png", "assets"),
             "--collect-all", "pyhanko", "--collect-all", "pyhanko_certvalidator", "--collect-all", "uharfbuzz",
-            "--collect-submodules", "fontTools", "--collect-data", "tzdata", "--collect-submodules", "zfoengine",
+            "--collect-submodules", "fontTools", "--collect-data", "tzdata", "--collect-data", "certifi", "--collect-submodules", "zfoengine",
             "--hidden-import", "app", "--hidden-import", "lxml._elementpath", "--collect-all", "webview"]
     if IS_WINDOWS:
         args += ["--windowed", *data("winsign.ps1", ".")]

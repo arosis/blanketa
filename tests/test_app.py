@@ -3,6 +3,7 @@
     python -I tests/test_app.py
 """
 import io
+import os
 import re
 import sys
 import tempfile
@@ -27,6 +28,7 @@ from pypdf.generic import (
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+os.environ["ZFO_OFFLINE"] = "1"  # tests never download trusted lists
 
 import app  # noqa: E402
 import barcode  # noqa: E402

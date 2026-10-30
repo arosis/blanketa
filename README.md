@@ -55,7 +55,7 @@ Windows potřebují Microsoft Edge WebView2 (Windows 10/11 ho mají; instalátor
   - najít;
   - obnovit výchozí hodnoty pole nebo celého formuláře;
   - import a export dat (XML).
-- Panel podpisů: neporušenost každé vrstvy a důvěryhodnost certifikátu podle macOS.
+- Panel podpisů: neporušenost každé vrstvy a důvěryhodnost certifikátu podle systému a důvěryhodných seznamů EU.
 
 **PDF**
 - Vyplňování přes PDF.js:
@@ -181,8 +181,12 @@ Kontrola podpisu bez okna (používá ji i CI):
 - Formuláře s mnoha opakováními se otevírají pomalu (desítky sekund).
 - PDF formuláře XFA nejsou podporované; Blanketa na ně při otevření upozorní.
 - Aplikace není notarizovaná (macOS) ani podepsaná certifikátem vydavatele (Windows SmartScreen ji při prvním spuštění může varovat).
-- Na Linuxu se důvěryhodnost certifikátů hodnotí podle systémové sady kořenových CA; tokeny přes PKCS#11 zatím nejsou podporované (jen soubory `.pfx`).
+- Tokeny přes PKCS#11 zatím nejsou podporované (jen soubory `.pfx`).
 - Na Windows a Linuxu se PDF tiskne přes výchozí prohlížeč PDF v systému.
+
+## Důvěryhodnost podpisů
+
+Systémy české kvalifikované autority (PostSignum, I.CA, eIdentity) většinou neznají. Když systém certifikátu nevěří, Blanketa ho dohledá v důvěryhodných seznamech EU: stáhne seznam EU z `ec.europa.eu` a národní seznam země vydavatele, ověří jejich podpisy a uloží je v nastavení. O otevřeném formuláři ani certifikátu se tím nikam nic neposílá. Bez internetu a bez uloženého seznamu panel podpisů řekne, že důvěryhodnost nešlo ověřit. Zneplatnění certifikátu se zatím nekontroluje.
 
 ## Bezpečnost
 

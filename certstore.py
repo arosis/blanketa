@@ -22,6 +22,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.serialization import pkcs12
 
 import keychain
+import trustlist
 
 ROOT = Path(__file__).resolve().parent
 RESOURCES = Path(getattr(sys, "_MEIPASS", ROOT))
@@ -199,7 +200,22 @@ def _system_roots():
 
 
 def trust(certificates):
-    """Trust verdict ({"trusted": bool, "reason": str}) for each DER certificate, judged by the system."""
+    """Trust verdict for each DER certificate: the system's, or the EU trusted lists' when the system does not trust it.
+
+    {"trusted": bool, "reason": str, "source": "system" | "eu", "unverifiable": bool}
+    """
+    result = []
+    for der, verdict in zip(certificates, _system_trust(certificates), strict=True):
+        if verdict["trusted"]:
+            result.append({**verdict, "source": "system", "unverifiable": False})
+            continue
+        listed = trustlist.check(der, config_dir() / "trustlists")
+        # The system's own reason is in English and technical; the list's says what the reader can do about it.
+        result.append({**listed, "source": "eu" if listed["trusted"] else "system"})
+    return result
+
+
+def _system_trust(certificates):
     if not certificates:
         return []
     if IS_MAC:

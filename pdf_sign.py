@@ -26,7 +26,7 @@ from pypdf.generic import (
     StreamObject,
 )
 
-# Trust is judged by macOS (keychain.trust); pyHanko's own path building only logs noise about it.
+# Trust is judged by certstore.trust; pyHanko's own path building only logs noise about it.
 logging.getLogger("pyhanko").setLevel(logging.CRITICAL)
 logging.getLogger("pyhanko_certvalidator").setLevel(logging.CRITICAL)
 STAMP_FONT = Path("/System/Library/Fonts/Supplemental/Arial.ttf")
