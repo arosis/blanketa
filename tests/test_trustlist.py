@@ -5,6 +5,7 @@
 import base64
 import hashlib
 import os
+import re
 import sys
 import tempfile
 import threading
@@ -182,6 +183,14 @@ class TrustLists(unittest.TestCase):
         odd = service(AUTHORITY).replace(b64(AUTHORITY), base64.b64encode(b"junk").decode())
         self.pages[CZ_URL] = national([odd, service(AUTHORITY)], CZ_SIGNER)
         self.assertTrue(self.check()["trusted"])
+
+    def test_incomplete_list_entry_gives_a_verdict(self):
+        incomplete = re.sub(r"<StatusStartingTime>[^<]*</StatusStartingTime>", "", service(AUTHORITY))
+        self.pages[CZ_URL] = national([incomplete], CZ_SIGNER)
+        verdict = self.check()
+        self.assertFalse(verdict["trusted"])
+        self.assertTrue(verdict["unverifiable"])
+        self.assertIn("neočekávaný", verdict["reason"])
 
     def test_comment_cannot_shorten_a_signed_value(self):
         signed = national([service(AUTHORITY, "grantedNot")], CZ_SIGNER)

@@ -374,7 +374,11 @@ def _judge(certificate, folder):
     except Unavailable:
         return {"trusted": False, "unverifiable": True,
                 "reason": "Důvěryhodný seznam EU se nepodařilo načíst, certifikát proto nelze ověřit. Zkontrolujte připojení k internetu."}
-    standing = _standing(root, certificate) if _usable_for_signing(certificate) else None
+    usable = _usable_for_signing(certificate)
+    try:
+        standing = _standing(root, certificate) if usable else None
+    except (AttributeError, ValueError, TypeError):  # the list is authentic but not as expected; not the certificate's fault
+        return {"trusted": False, "unverifiable": True, "reason": "Důvěryhodný seznam EU má neočekávaný obsah, certifikát proto nelze ověřit."}
     if standing == "listed":
         return {"trusted": True, "unverifiable": False, "reason": ""}
     if standing == "withdrawn":
