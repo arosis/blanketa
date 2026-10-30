@@ -58,6 +58,8 @@ def check(sig):
     """Returns ([(reference URI, digest ok)], signature status, certificate) for one layer."""
     try:
         cert = x509.load_der_x509_certificate(base64.b64decode(sig.findtext(f"{{{DS}}}KeyInfo//{{{DS}}}X509Certificate").replace("\n", "")))
+        # The names are only parsed when first read, and describe() needs them.
+        cert.subject.rfc4514_string(), cert.issuer.rfc4514_string()
     except (AttributeError, ValueError, x509.InvalidVersion) as e:
         # Nothing can be said about who signed; the form is refused rather than shown with an anonymous signature.
         raise ValueError("signature without a readable certificate") from e
