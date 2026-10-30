@@ -117,7 +117,7 @@ Výsledek je `build/Blanketa.app` a `dist/Blanketa-<verze>-macos.dmg` / `.zip`, 
 **Windows** (Python 3.12+, pro instalátor Inno Setup 6):
 
 ```bash
-python -m pip install -r requirements-desktop.txt pyinstaller
+python -m pip install -r requirements-desktop.txt
 ```
 
 ```bash

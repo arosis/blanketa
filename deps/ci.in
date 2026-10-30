@@ -1,0 +1,4 @@
+# Direct dependencies of requirements-ci.txt: tools CI uses besides the app's own dependencies.
+ruff
+coverage
+lxml

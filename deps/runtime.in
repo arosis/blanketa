@@ -1,0 +1,19 @@
+# Direct dependencies of requirements.txt, locked with hashes by tools/lock-requirements.sh.
+# Runtime (app.py, zfoengine, signing)
+lxml
+cryptography
+asn1crypto
+pypdf
+pyHanko[opentype]
+pyhanko-certvalidator
+# pyHanko 0.38 (its opentype extra) accepts uharfbuzz below 0.56 only; lift this with the next pyHanko.
+uharfbuzz<0.56
+fonttools
+# time zones for pyHanko where the system has none (Windows, minimal Linux)
+tzdata
+
+# Build (build.sh, tools/build_desktop.py)
+pyinstaller
+
+# Tools (tools/make-test-pdf.py)
+reportlab

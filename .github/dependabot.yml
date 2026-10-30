@@ -1,5 +1,6 @@
-# Weekly update pull requests for the Python dependencies and the pinned GitHub Actions; they go through the same CI
-# and review as any other change. Minor and patch updates come grouped in one pull request per ecosystem.
+# Weekly update pull requests for the Python dependencies, the pinned GitHub Actions and the Docker image; they go
+# through the same CI and review as any other change. Minor and patch updates come grouped in one pull request per
+# ecosystem. Python versions and hashes change in requirements*.txt, which tools/lock-requirements.sh generated.
 version: 2
 updates:
   - package-ecosystem: pip
@@ -19,3 +20,6 @@ updates:
     groups:
       actions-minor-and-patch:
         update-types: [minor, patch]
+  - package-ecosystem: docker
+    directory: /
+    schedule: {interval: weekly, day: monday}
