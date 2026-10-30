@@ -90,6 +90,8 @@ jobs:
           python -I tests/test_app.py
           python -I tests/test_trustlist.py
           python -I tests/test_revocation.py
+      - name: Fuzz targets still run
+        run: for t in zfo-signatures zfo-description pdf certificate trust-list revocation-list; do python -I tools/fuzz.py --check "$t"; done
       - name: Test coverage (informational)
         run: |
           python -m pip install -q --require-hashes --only-binary :all: -r requirements-ci.txt

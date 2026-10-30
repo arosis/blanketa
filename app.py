@@ -45,6 +45,10 @@ etree.FunctionNamespace("urn:blanketa")["barcode"] = lambda _context, *args: bar
 XSLT = etree.XSLT(etree.parse(str(RESOURCES / "ui/fo2html.xsl")))
 FORMS = {}
 SINGLE_FILE = False
+DAMAGED_PAGE = ("<!doctype html><meta charset=utf-8><title>Soubor nelze otevřít</title>"
+                "<body style='font:14px system-ui,sans-serif;padding:24px'><h1 style='font-size:18px'>Soubor nelze otevřít</h1>"
+                "<p>Soubor může být poškozený nebo nejde o\u00a0formulář, který Blanketa umí přečíst. Může jít i\u00a0o\u00a0chybu Blankety; "
+                "pokud ho jiná aplikace otevře, dejte nám prosím vědět.</p>")
 SESSIONS = {}
 CERTIFICATES = {}  # certificates of the signatures shown, by id; pages only ever name them
 IMPORTS = {}
@@ -418,6 +422,10 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, page.encode(), "text/html; charset=utf-8")
         except FileNotFoundError:
             self._send(404, b"form not found", "text/plain")
+        except Exception as error:  # noqa: BLE001 - a damaged or hostile file must end in a message, not an empty window
+            # Quoted with %r: the text can carry pieces of the file, which must not forge log lines.
+            self.log_message("cannot open %r: %r", name, str(error)[:200])
+            self._send(422, DAMAGED_PAGE.encode(), "text/html; charset=utf-8")
 
     def do_POST(self):
         if self._foreign():

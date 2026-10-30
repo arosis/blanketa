@@ -179,6 +179,11 @@ class TrustLists(unittest.TestCase):
         for damaged in (der(builder.sign(RSA_KEY, hashes.SHA256())), b"\x30\x03abc"):
             self.assertFalse(trustlist.check(damaged, self.folder)["trusted"])
 
+    def test_certificate_with_an_impossible_version_gives_a_verdict(self):
+        damaged = der(LEAF).replace(b"\xa0\x03\x02\x01\x02", b"\xa0\x03\x02\x01\x06", 1)
+        self.assertFalse(trustlist.check(damaged, self.folder)["trusted"])
+        self.assertIsNone(trustlist.issuer(damaged, self.folder))
+
     def test_unreadable_authority_does_not_hide_the_others(self):
         odd = service(AUTHORITY).replace(b64(AUTHORITY), base64.b64encode(b"junk").decode())
         self.pages[CZ_URL] = national([odd, service(AUTHORITY)], CZ_SIGNER)
@@ -257,6 +262,12 @@ class TrustLists(unittest.TestCase):
     def test_list_past_its_next_update_is_rejected(self):
         self.pages[CZ_URL] = national([service(AUTHORITY)], CZ_SIGNER, next_update=NOW - timedelta(days=1))
         self.assert_list_rejected()
+
+    def test_damaged_cached_list_is_downloaded_again(self):
+        self.assertTrue(self.check()["trusted"])
+        (self.folder / "CZ.xml").write_bytes(b"<broken")
+        self.assertTrue(self.check()["trusted"])
+        self.assertIn(b"TrustServiceStatusList", (self.folder / "CZ.xml").read_bytes())
 
     def test_list_of_another_country_is_rejected(self):
         self.pages[CZ_URL] = national([service(AUTHORITY)], CZ_SIGNER, territory="SK")

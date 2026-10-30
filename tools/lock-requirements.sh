@@ -11,4 +11,5 @@ compile() {
 compile deps/runtime.in -o requirements.txt "$@"
 compile deps/desktop.in -c requirements.txt -o requirements-desktop.txt "$@"
 compile deps/ci.in -c requirements.txt -o requirements-ci.txt "$@"
+compile deps/fuzz.in -c requirements.txt -o requirements-fuzz.txt "$@"
 compile deps/build.in -c requirements-desktop.txt -o requirements-build.txt "$@"

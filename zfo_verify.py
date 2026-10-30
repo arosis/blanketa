@@ -41,21 +41,32 @@ def signed_object(sig, uri):
     return found[0]
 
 
-def check(sig):
-    """Returns ([(reference URI, digest ok)], signature status, certificate) for one layer."""
-    si = sig.find(f"{{{DS}}}SignedInfo")
-    digests = []
-    for ref in si.findall(f"{{{DS}}}Reference"):
+def _digest_matches(sig, ref):
+    """Whether one reference holds; damage or an algorithm this code does not know means it does not."""
+    try:
         target = signed_object(sig, ref.get("URI"))
         if target is None:
-            digests.append((ref.get("URI"), False))
-            continue
+            return False
         algs = [t.get("Algorithm") for t in ref.iter(f"{{{DS}}}Transform")]
         digest = DIG[ref.find(f"{{{DS}}}DigestMethod").get("Algorithm")](c14n(target, algs[-1] if algs else C14N)).digest()
-        digests.append((ref.get("URI"), digest == base64.b64decode(ref.findtext(f"{{{DS}}}DigestValue"))))
-    cert = x509.load_der_x509_certificate(base64.b64decode(sig.findtext(f"{{{DS}}}KeyInfo//{{{DS}}}X509Certificate").replace("\n", "")))
-    alg = si.find(f"{{{DS}}}CanonicalizationMethod").get("Algorithm")
+        return digest == base64.b64decode(ref.findtext(f"{{{DS}}}DigestValue"))
+    except (AttributeError, KeyError, TypeError, ValueError, etree.LxmlError):
+        return False
+
+
+def check(sig):
+    """Returns ([(reference URI, digest ok)], signature status, certificate) for one layer."""
     try:
+        cert = x509.load_der_x509_certificate(base64.b64decode(sig.findtext(f"{{{DS}}}KeyInfo//{{{DS}}}X509Certificate").replace("\n", "")))
+    except (AttributeError, ValueError, x509.InvalidVersion) as e:
+        # Nothing can be said about who signed; the form is refused rather than shown with an anonymous signature.
+        raise ValueError("signature without a readable certificate") from e
+    si = sig.find(f"{{{DS}}}SignedInfo")
+    digests = []
+    for ref in si.findall(f"{{{DS}}}Reference") if si is not None else ():
+        digests.append((ref.get("URI"), _digest_matches(sig, ref)))
+    try:
+        alg = si.find(f"{{{DS}}}CanonicalizationMethod").get("Algorithm")
         cert.public_key().verify(base64.b64decode(sig.findtext(f"{{{DS}}}SignatureValue")), c14n(si, alg),
                                  padding.PKCS1v15(), SIG[si.find(f"{{{DS}}}SignatureMethod").get("Algorithm")])
         status = "OK"

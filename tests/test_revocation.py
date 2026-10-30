@@ -136,6 +136,10 @@ class Revocation(unittest.TestCase):
     def test_delta_list_is_not_believed(self):
         self.assert_not_believed(crl(extensions=[x509.DeltaCRLIndicator(4)]))
 
+    def test_list_with_an_impossible_version_is_not_believed(self):
+        good = crl()
+        self.assert_not_believed(good.replace(b"\x02\x01\x01", b"\x02\x01\x00", 1))
+
     def test_garbage_is_not_believed(self):
         self.assert_not_believed(b"not a list")
 

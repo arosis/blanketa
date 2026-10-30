@@ -1,0 +1,3 @@
+# Direct dependencies of requirements-fuzz.txt: the coverage-guided fuzzer for tools/fuzz.py, on top of runtime.in.
+-r runtime.in
+atheris; sys_platform == "linux"

@@ -89,6 +89,31 @@ class SignatureWrapping(unittest.TestCase):
         self.assertIsNone(zfo_verify.signed_object(inner, "#" + obj.get("Id")))
 
 
+class DamagedSignatures(unittest.TestCase):
+    """A form whose signature layer is damaged shows a broken signature or is refused; nothing else may happen."""
+
+    def damaged(self, change):
+        root = form_root(SIGNED)
+        change(root.find(f".//{{{zfo_verify.DS}}}SignedInfo"), root)
+        return zfo_verify.describe(root)
+
+    def test_unknown_digest_algorithm_is_a_broken_signature(self):
+        def change(info, _):
+            info.find(f".//{{{zfo_verify.DS}}}DigestMethod").set("Algorithm", "urn:unknown")
+        self.assertFalse(self.damaged(change)[0]["intact"])
+
+    def test_missing_signed_info_is_a_broken_signature(self):
+        def change(info, _):
+            info.getparent().remove(info)
+        self.assertFalse(self.damaged(change)[0]["intact"])
+
+    def test_unreadable_certificate_refuses_the_form(self):
+        def change(_, root):
+            root.find(f".//{{{zfo_verify.DS}}}X509Certificate").text = "not base64"
+        with self.assertRaises(ValueError):
+            self.damaged(change)
+
+
 class LocalServer(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -136,6 +161,18 @@ class LocalServer(unittest.TestCase):
         self.assertEqual(list(json.loads(answer)), [known])
         self.assertEqual(self.request("POST", f"/revocation?s={session}", body="not json")[0], 400)
         self.assertEqual(self.request("POST", f"/revocation?s={session}", origin="https://attacker.example", body="[]")[0], 403)
+
+    def test_damaged_file_gets_a_message(self):
+        with tempfile.TemporaryDirectory() as folder:
+            damaged = Path(folder) / "poskozeny.pdf"
+            damaged.write_bytes(b"%PDF-1.7\nnot a document")
+            app.FORMS["damaged-test"] = damaged
+            try:
+                status, page = self.request("GET", "/?form=damaged-test")
+            finally:
+                del app.FORMS["damaged-test"]
+        self.assertEqual(status, 422)
+        self.assertIn("nelze otevřít", page.decode())
 
     def test_static_files_stay_in_their_folders(self):
         self.assertEqual(self.request("GET", "/static/scripts/zfo_script.js")[0], 200)
