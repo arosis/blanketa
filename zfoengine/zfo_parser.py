@@ -22,11 +22,15 @@
 Used to xml-parse zfo forms.
 '''
 import logging
+
 log = logging.getLogger("zfo.zfo_parser")
 
 import io
+
 import lxml.etree as etree
+
 from . import zfo_doc
+
 DOCTYPE = '''
 <!DOCTYPE xsl:stylesheet [
   <!ENTITY anchor "<xsl:apply-templates select='@id' xmlns:xsl='http://www.w3.org/1999/XSL/Transform'/>">

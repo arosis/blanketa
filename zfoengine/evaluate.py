@@ -23,12 +23,13 @@
 Module that handles evaluation of calculate/readonly/relevant and other attributes.
 '''
 import logging
+
 log = logging.getLogger("zfo.evaluate")
-from . import expr_quoting
 import math
-from . import tools
+
 import lxml.etree as etree
 
+from . import expr_quoting, tools
 from .xpath_ext import StopEvalException
 
 

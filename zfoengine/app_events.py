@@ -29,14 +29,15 @@ of arguments of SendAppEvent.
 Each method takes as its '0th' parameter reference to the underlying zfo document 
 '''
 import logging
+
 log = logging.getLogger("zfo.app_events")
+
+import itertools
+import threading
 
 import lxml.etree as etree
 
 from . import events
-
-import itertools
-import threading
 
 # zfoengine: the original pickled the event objects, base64-encoded them into
 # the element text and unpickled them in gtkgui_events_handlers.perform_click.

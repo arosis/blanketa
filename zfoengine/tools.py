@@ -30,12 +30,13 @@ create_open_dialog, create_save_dialog, open_window_with_html_source,
 show_form_data, start_page_uri. The engine gets form.fo bytes from its caller.
 '''
 import datetime
+import logging
 import tempfile
+
 import lxml.etree as etree
 
 from . import msgs
 
-import logging
 log = logging.getLogger("zfo.tools")
 
 
@@ -157,7 +158,7 @@ def parse_filefilter_string(filter_str):
   chunks = filter_str.split("|")
   names = chunks[::2]
   patterns = chunks[1::2]
-  res = list(zip(names, patterns))
+  res = list(zip(names, patterns, strict=False))
   return res
 
 def create_relative_path(from_path, to_path):
@@ -171,7 +172,7 @@ def create_relative_path(from_path, to_path):
   chunks_patha = from_path.split("/")
   chunks_pathb = to_path.split("/")
 
-  tuples = zip(chunks_patha, chunks_pathb)
+  tuples = zip(chunks_patha, chunks_pathb, strict=False)
   cnt = 0
   for t in tuples:
     if t[0] == t[1]:
@@ -186,7 +187,7 @@ def create_relative_path(from_path, to_path):
 
   num_hops_after_common_in_a = len(from_path.split("/")[cnt:])
   buff = ""
-  for i in range(num_hops_after_common_in_a):
+  for _ in range(num_hops_after_common_in_a):
     buff = buff + "../"
   path_from_a_to_b =  buff + relative_b_path
 
