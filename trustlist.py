@@ -1,10 +1,6 @@
-"""EU trusted lists: was a certificate issued by a qualified trust service under national supervision?
-
-System root stores do not carry the Czech qualified authorities, so a certificate the system does not trust is looked
-up here. The list of trusted lists (LOTL) is authenticated by the certificates published in the Official Journal; it
-names the signers of each national list, and only the list of the issuer's country is downloaded. Lists are cached in
-the configuration folder, which has the same standing as the rest of the user's Blanketa data.
-"""
+# System root stores do not carry the Czech qualified authorities, so a certificate the system does not trust is looked
+# up here. The LOTL is authenticated by certificates published in the Official Journal; it names the signers of each
+# national list, and only the list of the issuer's country is downloaded.
 import base64
 import copy
 import hashlib
@@ -42,39 +38,40 @@ PINNED_SIGNERS = frozenset({
 TSL = "{http://uri.etsi.org/02231/v2#}"
 DS = "{http://www.w3.org/2000/09/xmldsig#}"
 C14N = "http://www.w3.org/TR/2001/REC-xml-c14n-20010315"
-EXC = "http://www.w3.org/2001/10/xml-exc-c14n#"
+EXCLUSIVE_C14N = "http://www.w3.org/2001/10/xml-exc-c14n#"
 ENVELOPED = "http://www.w3.org/2000/09/xmldsig#enveloped-signature"
 DIGESTS = {"http://www.w3.org/2001/04/xmlenc#sha256": hashlib.sha256,
            "http://www.w3.org/2001/04/xmldsig-more#sha384": hashlib.sha384,
            "http://www.w3.org/2001/04/xmlenc#sha512": hashlib.sha512}
-MORE = "http://www.w3.org/2001/04/xmldsig-more#"
-RSA_METHODS = {MORE + "rsa-sha256": hashes.SHA256(), MORE + "rsa-sha384": hashes.SHA384(), MORE + "rsa-sha512": hashes.SHA512()}
+XMLDSIG_MORE = "http://www.w3.org/2001/04/xmldsig-more#"
+RSA_METHODS = {XMLDSIG_MORE + "rsa-sha256": hashes.SHA256(), XMLDSIG_MORE + "rsa-sha384": hashes.SHA384(), XMLDSIG_MORE + "rsa-sha512": hashes.SHA512()}
 PSS_METHODS = {f"http://www.w3.org/2007/05/xmldsig-more#{n}-rsa-MGF1": h
                for n, h in (("sha256", hashes.SHA256()), ("sha384", hashes.SHA384()), ("sha512", hashes.SHA512()))}
-EC_METHODS = {MORE + "ecdsa-sha256": hashes.SHA256(), MORE + "ecdsa-sha384": hashes.SHA384(), MORE + "ecdsa-sha512": hashes.SHA512()}
+EC_METHODS = {XMLDSIG_MORE + "ecdsa-sha256": hashes.SHA256(), XMLDSIG_MORE + "ecdsa-sha384": hashes.SHA384(), XMLDSIG_MORE + "ecdsa-sha512": hashes.SHA512()}
 
 CA_QC = "http://uri.etsi.org/TrstSvc/Svctype/CA/QC"
 TSA_QTST = "http://uri.etsi.org/TrstSvc/Svctype/TSA/QTST"
 SUPERVISED = {"granted", "recognisedatnationallevel", "setbynationallaw", "accredited", "undersupervision", "supervisionincessation"}
 SIGNING_USES = {"ForeSignatures", "ForeSeals"}
-# Certificates carry ISO country codes, the lists name two countries differently. The UK list is closed, without updates.
-TERRITORIES = {"GR": "EL", "GB": "UK"}
+LIST_TERRITORY_BY_ISO_COUNTRY = {"GR": "EL", "GB": "UK"}
+# EU is the list of lists itself; the UK list is closed, without updates.
+TERRITORIES_WITHOUT_LIST = ("EU", "UK")
 
-MAX_SIZE = 32 * 1024 * 1024
-TIMEOUT = 8
-REFRESH_AFTER = 24 * 3600  # lists often change long before their NextUpdate
+MAX_DOWNLOAD_BYTES = 32 * 1024 * 1024
+DOWNLOAD_TIMEOUT_SECONDS = 8
+REFRESH_AFTER_SECONDS = 24 * 3600  # lists often change long before their NextUpdate
 SIGNERS_FILE = "EU-signers.txt"
-REMEMBER = 600  # one form asks for each layer; a dead network must not cost a timeout every time
+REMEMBER_SECONDS = 600  # one form asks for each layer; a dead network must not cost a timeout every time
 
 _lock = threading.Lock()
-_memory = {}
+_lists_in_memory = {}
 
 
 class Unavailable(Exception):
-    """No current, authentic list could be obtained."""
+    pass
 
 
-def _parse(data):
+def _parse_list_xml(data):
     root = etree.fromstring(data, etree.XMLParser(
         # A comment is outside the signature, and .text would stop at it: it could shorten what the list says.
         resolve_entities=False, no_network=True, load_dtd=False, remove_comments=True))
@@ -83,14 +80,14 @@ def _parse(data):
     return root
 
 
-def _c14n(element, algorithm):
-    if algorithm not in (C14N, EXC):
+def _canonicalize(element, algorithm):
+    if algorithm not in (C14N, EXCLUSIVE_C14N):
         raise ValueError(f"canonicalization {algorithm}")
-    return etree.tostring(element, method="c14n", exclusive=algorithm == EXC, with_comments=False)
+    return etree.tostring(element, method="c14n", exclusive=algorithm == EXCLUSIVE_C14N, with_comments=False)
 
 
 def _without_signature(root, signature):
-    """The whole document as an enveloped-signature transform sees it; lxml's remove() would drop the tail too."""
+    # As an enveloped-signature transform sees the document; lxml's remove() would drop the tail too.
     clone = copy.deepcopy(root)
     node = clone[root.index(signature)]
     if node.tail:
@@ -105,14 +102,14 @@ def _without_signature(root, signature):
 
 def _check_reference(root, signature, reference):
     uri = reference.get("URI")
-    algorithms = [t.get("Algorithm") for t in reference.findall(f"{DS}Transforms/{DS}Transform")]
+    algorithms = [transform.get("Algorithm") for transform in reference.findall(f"{DS}Transforms/{DS}Transform")]
     if uri == "":
         # Everything the list says comes from this reference, so only the expected transforms are acceptable.
         if len(algorithms) != 2 or algorithms[0] != ENVELOPED:
             raise ValueError("unexpected transforms")
         target = _without_signature(root, signature)
     elif uri and uri.startswith("#") and len(algorithms) <= 1:
-        found = [e for e in signature.iter() if e.get("Id") == uri[1:]]
+        found = [element for element in signature.iter() if element.get("Id") == uri[1:]]
         if len(found) != 1:
             raise ValueError(f"reference {uri}")
         target = found[0]
@@ -120,29 +117,12 @@ def _check_reference(root, signature, reference):
         raise ValueError(f"reference {uri}")
     digest = DIGESTS[reference.find(f"{DS}DigestMethod").get("Algorithm")]
     value = base64.b64decode(reference.findtext(f"{DS}DigestValue"))
-    if digest(_c14n(target, algorithms[-1] if algorithms else C14N)).digest() != value:
+    if digest(_canonicalize(target, algorithms[-1] if algorithms else C14N)).digest() != value:
         raise ValueError(f"digest of {uri!r} does not match")
     return uri
 
 
-def verify(root, signers):
-    """Raises unless the document is signed as a whole by a certificate whose SHA-256 is in signers."""
-    signatures = root.findall(f"{DS}Signature")
-    if len(signatures) != 1:
-        raise ValueError("expected one signature")
-    signature = signatures[0]
-    info = signature.find(f"{DS}SignedInfo")
-    uris = [_check_reference(root, signature, r) for r in info.findall(f"{DS}Reference")]
-    if "" not in uris:
-        raise ValueError("the signature does not cover the list")
-    certificates = [base64.b64decode(e.text) for e in signature.findall(f"{DS}KeyInfo//{DS}X509Certificate")]
-    der = next((c for c in certificates if hashlib.sha256(c).hexdigest() in signers), None)
-    if der is None:
-        raise ValueError("signed by an unknown certificate")
-    key = x509.load_der_x509_certificate(der).public_key()
-    method = info.find(f"{DS}SignatureMethod").get("Algorithm")
-    value = base64.b64decode(signature.findtext(f"{DS}SignatureValue"))
-    signed = _c14n(info, info.find(f"{DS}CanonicalizationMethod").get("Algorithm"))
+def _verify_signature_value(key, method, value, signed):
     if method in RSA_METHODS and isinstance(key, rsa.RSAPublicKey):
         key.verify(value, signed, padding.PKCS1v15(), RSA_METHODS[method])
     elif method in PSS_METHODS and isinstance(key, rsa.RSAPublicKey):
@@ -156,39 +136,58 @@ def verify(root, signers):
         raise ValueError(f"signature method {method}")
 
 
-def _scheme(root):
+def verify_list_signature(root, signers):
+    signatures = root.findall(f"{DS}Signature")
+    if len(signatures) != 1:
+        raise ValueError("expected one signature")
+    signature = signatures[0]
+    info = signature.find(f"{DS}SignedInfo")
+    uris = [_check_reference(root, signature, reference) for reference in info.findall(f"{DS}Reference")]
+    if "" not in uris:
+        raise ValueError("the signature does not cover the list")
+    certificates = [base64.b64decode(element.text) for element in signature.findall(f"{DS}KeyInfo//{DS}X509Certificate")]
+    der = next((candidate for candidate in certificates if hashlib.sha256(candidate).hexdigest() in signers), None)
+    if der is None:
+        raise ValueError("signed by an unknown certificate")
+    key = x509.load_der_x509_certificate(der).public_key()
+    method = info.find(f"{DS}SignatureMethod").get("Algorithm")
+    value = base64.b64decode(signature.findtext(f"{DS}SignatureValue"))
+    signed = _canonicalize(info, info.find(f"{DS}CanonicalizationMethod").get("Algorithm"))
+    _verify_signature_value(key, method, value, signed)
+
+
+def _scheme_information(root):
     return root.find(f"{TSL}SchemeInformation")
 
 
-def _when(text):
+def _parse_time(text):
     return datetime.fromisoformat(text.strip().replace("Z", "+00:00"))
 
 
-def _check_current(root, territory, now=None):
-    info = _scheme(root)
+def _check_list_is_current(root, territory, now=None):
+    info = _scheme_information(root)
     if info.findtext(f"{TSL}SchemeTerritory") != territory:
         raise ValueError("list of another country")
-    if _when(info.findtext(f"{TSL}NextUpdate/{TSL}dateTime")) < (now or datetime.now(timezone.utc)):
+    if _parse_time(info.findtext(f"{TSL}NextUpdate/{TSL}dateTime")) < (now or datetime.now(timezone.utc)):
         raise ValueError("list past its next update")
 
 
-def _sequence(root):
-    return int(_scheme(root).findtext(f"{TSL}TSLSequenceNumber"))
+def _sequence_number(root):
+    return int(_scheme_information(root).findtext(f"{TSL}TSLSequenceNumber"))
 
 
-def pointers(lotl):
-    """{territory: (XML list location, SHA-256 of the certificates allowed to sign it)} from an authentic LOTL."""
+def national_list_pointers(lotl):
     result = {}
-    for pointer in _scheme(lotl).findall(f"{TSL}PointersToOtherTSL/{TSL}OtherTSLPointer"):
-        details = {e.tag.rsplit("}")[-1]: e.text for e in pointer.iter() if isinstance(e.tag, str)}
+    for pointer in _scheme_information(lotl).findall(f"{TSL}PointersToOtherTSL/{TSL}OtherTSLPointer"):
+        details = {element.tag.rsplit("}")[-1]: element.text for element in pointer.iter() if isinstance(element.tag, str)}
         if "xml" not in (details.get("MimeType") or ""):
             continue
-        signers = {hashlib.sha256(base64.b64decode(e.text)).hexdigest() for e in pointer.iter(f"{TSL}X509Certificate")}
+        signers = {hashlib.sha256(base64.b64decode(element.text)).hexdigest() for element in pointer.iter(f"{TSL}X509Certificate")}
         result[details["SchemeTerritory"]] = (pointer.findtext(f"{TSL}TSLLocation"), signers)
     return result
 
 
-def download(url):
+def download_file(url):
     if os.environ.get("ZFO_OFFLINE"):
         raise OSError("offline")
     if urlparse(url).scheme not in ("http", "https"):  # some lists are on plain HTTP; their signature is what counts
@@ -197,14 +196,14 @@ def download(url):
     context = ssl.create_default_context()
     context.load_verify_locations(cafile=certifi.where())
     request = urllib.request.Request(url, headers={"User-Agent": "Blanketa"})
-    with urllib.request.urlopen(request, timeout=TIMEOUT, context=context) as response:  # noqa: S310 - scheme checked above
-        data = response.read(MAX_SIZE + 1)
-    if len(data) > MAX_SIZE:
+    with urllib.request.urlopen(request, timeout=DOWNLOAD_TIMEOUT_SECONDS, context=context) as response:  # noqa: S310 - scheme checked above
+        data = response.read(MAX_DOWNLOAD_BYTES + 1)
+    if len(data) > MAX_DOWNLOAD_BYTES:
         raise OSError("list too large")
     return data
 
 
-def store(path, data):
+def store_atomically(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     handle, temporary = tempfile.mkstemp(dir=path.parent)
     with os.fdopen(handle, "wb") as out:
@@ -214,90 +213,87 @@ def store(path, data):
 
 def _read_cached(path, territory, signers):
     try:
-        root = _parse(path.read_bytes())
-        verify(root, signers)
-        _check_current(root, territory)
+        root = _parse_list_xml(path.read_bytes())
+        verify_list_signature(root, signers)
+        _check_list_is_current(root, territory)
         return root
     except (OSError, ValueError, KeyError, TypeError, AttributeError, InvalidSignature, UnsupportedAlgorithm, x509.InvalidVersion, etree.LxmlError):
         return None
 
 
-def _refresh(path, territory, url, signers, cached):
-    """Downloads, authenticates and stores a list; never replaces a cached list with an older one."""
-    data = download(url)
-    root = _parse(data)
-    verify(root, signers)
-    _check_current(root, territory)
-    if cached is not None and _sequence(root) < _sequence(cached):
+def _download_and_store_list(path, territory, url, signers, cached):
+    data = download_file(url)
+    root = _parse_list_xml(data)
+    verify_list_signature(root, signers)
+    _check_list_is_current(root, territory)
+    if cached is not None and _sequence_number(root) < _sequence_number(cached):
         raise ValueError("list older than the cached one")
-    store(path, data)
+    store_atomically(path, data)
     if territory == "EU":
-        store(path.with_name(SIGNERS_FILE), "\n".join(sorted(pointers(root).get("EU", ("", set()))[1])).encode())
+        store_atomically(path.with_name(SIGNERS_FILE), "\n".join(sorted(national_list_pointers(root).get("EU", ("", set()))[1])).encode())
     return root
 
 
-def _refresh_quietly(path, territory, url, signers, cached):
+def _refresh_list_quietly(path, territory, url, signers, cached):
     try:
-        _refresh(path, territory, url, signers, cached)
+        _download_and_store_list(path, territory, url, signers, cached)
     except Exception:  # noqa: BLE001 - the cached list stays in use, the next window tries again
         pass
 
 
-def _load(folder, territory, url, signers):
-    """An authentic current list: the cached one, refreshed behind it when old, otherwise a download."""
+def _load_list(folder, territory, url, signers):
     path = Path(folder) / f"{territory}.xml"
     cached = _read_cached(path, territory, signers)
     if cached is not None:
-        if time.time() - path.stat().st_mtime > REFRESH_AFTER:
+        if time.time() - path.stat().st_mtime > REFRESH_AFTER_SECONDS:
             # Opening a form must not wait for this. A failed try also waits a day, or every form would retry it.
             os.utime(path)
-            threading.Thread(target=_refresh_quietly, args=(path, territory, url, signers, cached), daemon=True).start()
+            threading.Thread(target=_refresh_list_quietly, args=(path, territory, url, signers, cached), daemon=True).start()
         return cached
-    return _refresh(path, territory, url, signers, None)
+    return _download_and_store_list(path, territory, url, signers, None)
 
 
-def _remembered(folder, territory, load):
-    entry = _memory.get((str(folder), territory))
+def _remembered_list(folder, territory, load):
+    entry = _lists_in_memory.get((str(folder), territory))
     if entry and entry[0] > time.monotonic():
         if entry[1] is None:
             raise Unavailable(territory)
         return entry[1]
     try:
         root = load()
-    except Exception as e:  # noqa: BLE001 - network, XML and signature failures all mean the same to the reader
-        _memory[(str(folder), territory)] = (time.monotonic() + REMEMBER, None)
-        raise Unavailable(territory) from e
-    _memory[(str(folder), territory)] = (time.monotonic() + REMEMBER, root)
+    except Exception as error:  # noqa: BLE001 - network, XML and signature failures all mean the same to the reader
+        _lists_in_memory[(str(folder), territory)] = (time.monotonic() + REMEMBER_SECONDS, None)
+        raise Unavailable(territory) from error
+    _lists_in_memory[(str(folder), territory)] = (time.monotonic() + REMEMBER_SECONDS, root)
     return root
 
 
-def _lotl(folder):
-    return _remembered(folder, "EU", lambda: _load(folder, "EU", LOTL_URL, _lotl_signers(folder)))
+def _load_lotl(folder):
+    return _remembered_list(folder, "EU", lambda: _load_list(folder, "EU", LOTL_URL, _lotl_signers(folder)))
 
 
 def _lotl_signers(folder):
-    """The pinned signers and those a verified LOTL announced, which is how they change without a new release."""
+    # A verified LOTL announces its next signers, which is how they change without a new release.
     try:
         announced = (Path(folder) / SIGNERS_FILE).read_text(encoding="ascii").split()
     except (OSError, ValueError):
         announced = []
-    return set(PINNED_SIGNERS) | {a for a in announced if re.fullmatch(r"[0-9a-f]{64}", a)}
+    return set(PINNED_SIGNERS) | {signer for signer in announced if re.fullmatch(r"[0-9a-f]{64}", signer)}
 
 
-def _national(folder, territory):
+def _load_national_list(folder, territory):
     def load():
-        found = pointers(_lotl(folder)).get(territory)
+        found = national_list_pointers(_load_lotl(folder)).get(territory)
         if found is None:
             raise ValueError("no list for this country")
-        return _load(folder, territory, found[0], found[1])
-    return _remembered(folder, territory, load)
+        return _load_list(folder, territory, found[0], found[1])
+    return _remembered_list(folder, territory, load)
 
 
 def _status_at(service, moment):
-    """The service's status at a moment, from the current entry and its history."""
     information = service.find(f"{TSL}ServiceInformation")
     timeline = [information, *service.findall(f"{TSL}ServiceHistory/{TSL}ServiceHistoryInstance")]
-    entries = sorted(((_when(e.findtext(f"{TSL}StatusStartingTime")), e.findtext(f"{TSL}ServiceStatus")) for e in timeline),
+    entries = sorted(((_parse_time(entry.findtext(f"{TSL}StatusStartingTime")), entry.findtext(f"{TSL}ServiceStatus")) for entry in timeline),
                      key=lambda entry: entry[0])
     status = None
     for start, value in entries:
@@ -306,13 +302,13 @@ def _status_at(service, moment):
     return status.rsplit("/", 1)[-1] if status else None
 
 
-def _for_signing(information):
-    uses = {u.text.rsplit("/", 1)[-1] for u in information.findall(
-        f"{TSL}ServiceInformationExtensions/{TSL}Extension/{TSL}AdditionalServiceInformation/{TSL}URI") if "/SvcInfoExt/For" in (u.text or "")}
+def _is_service_for_signing(information):
+    uses = {uri.text.rsplit("/", 1)[-1] for uri in information.findall(
+        f"{TSL}ServiceInformationExtensions/{TSL}Extension/{TSL}AdditionalServiceInformation/{TSL}URI") if "/SvcInfoExt/For" in (uri.text or "")}
     return not uses or bool(uses & SIGNING_USES)
 
 
-def _usable_for_signing(certificate):
+def _can_certificate_sign(certificate):
     try:
         usage = certificate.extensions.get_extension_for_class(x509.KeyUsage).value
     except x509.ExtensionNotFound:
@@ -320,15 +316,19 @@ def _usable_for_signing(certificate):
     return usage.content_commitment or usage.digital_signature
 
 
-def _standing(root, certificate):
-    """(standing, authority) of the certificate's issuer: "listed", "withdrawn" (supervised at issue, no longer) or None."""
+def _trust_services(root):
+    # Never .iter(): the signature's objects are not covered.
+    providers = root.findall(f"{TSL}TrustServiceProviderList/{TSL}TrustServiceProvider")
+    return (service for provider in providers for service in provider.findall(f"{TSL}TSPServices/{TSL}TSPService"))
+
+
+def _issuer_standing(root, certificate):
     moment = certificate.not_valid_before_utc
     now = datetime.now(timezone.utc)
     standing, issuer_found = None, None
-    providers = root.findall(f"{TSL}TrustServiceProviderList/{TSL}TrustServiceProvider")  # never .iter(): the signature's objects are not covered
-    for service in (s for p in providers for s in p.findall(f"{TSL}TSPServices/{TSL}TSPService")):
+    for service in _trust_services(root):
         information = service.find(f"{TSL}ServiceInformation")
-        if information.findtext(f"{TSL}ServiceTypeIdentifier") != CA_QC or not _for_signing(information):
+        if information.findtext(f"{TSL}ServiceTypeIdentifier") != CA_QC or not _is_service_for_signing(information):
             continue
         for element in information.findall(f"{TSL}ServiceDigitalIdentity/{TSL}DigitalId/{TSL}X509Certificate"):
             try:
@@ -350,39 +350,42 @@ def _standing(root, certificate):
     return standing, issuer_found
 
 
-def issuer(der, folder):
-    """The authority of the trusted lists that issued a DER certificate; None when none did or the lists are unavailable."""
-    try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            certificate = x509.load_der_x509_certificate(der)
-        country = certificate.issuer.get_attributes_for_oid(x509.NameOID.COUNTRY_NAME)[0].value.upper()
-        territory = TERRITORIES.get(country, country)
-        if not re.fullmatch(r"[A-Z]{2}", territory) or territory in ("EU", "UK"):
+def load_certificate_leniently(der):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # old certificates in forms break minor encoding rules
+        return x509.load_der_x509_certificate(der)
+
+
+def _national_list_if_any(folder, territory):
+    with _lock:
+        if territory in TERRITORIES_WITHOUT_LIST or territory not in national_list_pointers(_load_lotl(folder)):
             return None
-        with _lock:
-            if territory not in pointers(_lotl(folder)):
-                return None
-            root = _national(folder, territory)
-        return _standing(root, certificate)[1]
+        return _load_national_list(folder, territory)
+
+
+def issuing_authority(der, folder):
+    try:
+        certificate = load_certificate_leniently(der)
+        country = certificate.issuer.get_attributes_for_oid(x509.NameOID.COUNTRY_NAME)[0].value.upper()
+        territory = LIST_TERRITORY_BY_ISO_COUNTRY.get(country, country)
+        if not re.fullmatch(r"[A-Z]{2}", territory):
+            return None
+        root = _national_list_if_any(folder, territory)
+        return None if root is None else _issuer_standing(root, certificate)[1]
     except (Unavailable, IndexError, ValueError, TypeError, AttributeError, UnsupportedAlgorithm, x509.InvalidVersion):
         return None
 
 
-def check(der, folder):
-    """Verdict for one DER certificate: {"trusted": bool, "unverifiable": bool, "reason": str}."""
+def check_certificate(der, folder):
     try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")  # old certificates in forms break minor encoding rules
-            certificate = x509.load_der_x509_certificate(der)
-        return _judge(certificate, folder)
+        return _judge_certificate(load_certificate_leniently(der), folder)
     except (ValueError, TypeError, UnsupportedAlgorithm, x509.InvalidVersion):  # a hostile form's certificate must not stop the form opening
         return {"trusted": False, "unverifiable": False, "reason": "Certifikát je poškozený, nelze ho ověřit."}
 
 
 def _only_for_stamping(certificate):
-    """RFC 3161 demands this of a stamping unit. Authorities listed for stamps can issue people's certificates too, and
-    their holders must not be able to stamp any time they like."""
+    # RFC 3161 demands this of a stamping unit. Authorities listed for stamps can issue people's certificates too, and
+    # their holders must not be able to stamp any time they like.
     try:
         usage = certificate.extensions.get_extension_for_class(x509.ExtendedKeyUsage)
     except x509.ExtensionNotFound:
@@ -390,13 +393,11 @@ def _only_for_stamping(certificate):
     return usage.critical and list(usage.value) == [x509.ExtendedKeyUsageOID.TIME_STAMPING]
 
 
-def _stamps_qualified(root, certificate, moment):
-    """Was this certificate's time stamping unit, or the authority issuing such units, qualified at that moment?
-    Units are retired routinely and their old stamps stay good, so only the status at the stamp's time counts."""
+def _is_stamp_certificate_qualified(root, certificate, moment):
+    # Units are retired routinely and their old stamps stay good, so only the status at the stamp's time counts.
     if not certificate.not_valid_before_utc <= moment <= certificate.not_valid_after_utc:
         return False
-    providers = root.findall(f"{TSL}TrustServiceProviderList/{TSL}TrustServiceProvider")
-    for service in (s for p in providers for s in p.findall(f"{TSL}TSPServices/{TSL}TSPService")):
+    for service in _trust_services(root):
         information = service.find(f"{TSL}ServiceInformation")
         if information.findtext(f"{TSL}ServiceTypeIdentifier") != TSA_QTST or _status_at(service, moment) not in SUPERVISED:
             continue
@@ -413,24 +414,20 @@ def _stamps_qualified(root, certificate, moment):
     return False
 
 
-def check_stamp(der, moment, folder):
-    """Verdict for a time stamp's certificate at the stamp's time: {"qualified": bool, "unverifiable": bool, "reason": str}."""
+def check_stamp_certificate(der, moment, folder):
     refused = {"qualified": False, "unverifiable": False,
                "reason": "Vydavatel časového razítka není kvalifikovaný podle důvěryhodného seznamu EU."}
     try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            certificate = x509.load_der_x509_certificate(der)
+        certificate = load_certificate_leniently(der)
         countries = certificate.issuer.get_attributes_for_oid(x509.NameOID.COUNTRY_NAME)
         country = countries[0].value.upper() if countries else ""
-        territory = TERRITORIES.get(country, country)
-        if not re.fullmatch(r"[A-Z]{2}", territory) or territory in ("EU", "UK"):
+        territory = LIST_TERRITORY_BY_ISO_COUNTRY.get(country, country)
+        if not re.fullmatch(r"[A-Z]{2}", territory):
             return refused
-        with _lock:
-            if territory not in pointers(_lotl(folder)):
-                return refused
-            root = _national(folder, territory)
-        if _stamps_qualified(root, certificate, moment):
+        root = _national_list_if_any(folder, territory)
+        if root is None:
+            return refused
+        if _is_stamp_certificate_qualified(root, certificate, moment):
             return {"qualified": True, "unverifiable": False, "reason": ""}
         return refused
     except Unavailable:
@@ -440,23 +437,22 @@ def check_stamp(der, moment, folder):
         return {**refused, "reason": "Certifikát časového razítka se nepodařilo ověřit."}
 
 
-def _judge(certificate, folder):
+def _judge_certificate(certificate, folder):
     countries = certificate.issuer.get_attributes_for_oid(x509.NameOID.COUNTRY_NAME)
     country = countries[0].value.upper() if countries else ""
     if not re.fullmatch(r"[A-Z]{2}", country):  # it also names a file, and it comes from the signed document
         return {"trusted": False, "unverifiable": False, "reason": "Vydavatel certifikátu neuvádí zemi z EU."}
-    territory = TERRITORIES.get(country, country)
+    territory = LIST_TERRITORY_BY_ISO_COUNTRY.get(country, country)
     try:
-        with _lock:
-            if territory in ("EU", "UK") or territory not in pointers(_lotl(folder)):
-                return {"trusted": False, "unverifiable": False, "reason": "Země vydavatele nemá důvěryhodný seznam EU."}
-            root = _national(folder, territory)
+        root = _national_list_if_any(folder, territory)
+        if root is None:
+            return {"trusted": False, "unverifiable": False, "reason": "Země vydavatele nemá důvěryhodný seznam EU."}
     except Unavailable:
         return {"trusted": False, "unverifiable": True,
                 "reason": "Důvěryhodný seznam EU se nepodařilo načíst, certifikát proto nelze ověřit. Zkontrolujte připojení k internetu."}
-    usable = _usable_for_signing(certificate)
+    usable = _can_certificate_sign(certificate)
     try:
-        standing = _standing(root, certificate)[0] if usable else None
+        standing = _issuer_standing(root, certificate)[0] if usable else None
     except (AttributeError, ValueError, TypeError):  # the list is authentic but not as expected; not the certificate's fault
         return {"trusted": False, "unverifiable": True, "reason": "Důvěryhodný seznam EU má neočekávaný obsah, certifikát proto nelze ověřit."}
     if standing == "listed":

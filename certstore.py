@@ -210,7 +210,7 @@ def trust(certificates):
         if verdict["trusted"]:
             result.append({**verdict, "source": "system", "unverifiable": False})
             continue
-        listed = trustlist.check(der, config_dir() / "trustlists")
+        listed = trustlist.check_certificate(der, config_dir() / "trustlists")
         # The system's own reason is in English and technical; the list's says what the reader can do about it.
         result.append({**listed, "source": "eu" if listed["trusted"] else "system"})
     return result
@@ -218,12 +218,12 @@ def trust(certificates):
 
 def stamp_trust(der, moment):
     """Whether a time stamp's DER certificate was qualified at the stamp's time, by the EU trusted lists."""
-    return trustlist.check_stamp(der, moment, config_dir() / "trustlists")
+    return trustlist.check_stamp_certificate(der, moment, config_dir() / "trustlists")
 
 
 def revocation_status(der):
     """Whether the issuer revoked a DER certificate; may download its list, so never call it while rendering a page."""
-    return revocation.check(der, config_dir() / "trustlists", config_dir() / "crl")
+    return revocation.check_certificate_revocation(der, config_dir() / "trustlists", config_dir() / "crl")
 
 
 def _system_trust(certificates):
