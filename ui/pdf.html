@@ -108,7 +108,8 @@ __SHELL_STYLE__
   const native = window.zfoNative;
   const queryOne = selector => document.querySelector(selector);
   const status = queryOne('[data-status]');
-  const setStatus = (text, html) => { html ? (status.innerHTML = text) : (status.textContent = text); };
+  const setStatus = text => { status.textContent = text; };
+  const setStatusMarkup = markup => { status.innerHTML = markup; };
   const escapeHtml = text => String(text).replace(/[&<>"]/g, character => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[character]));
   queryOne('[data-file]').textContent = __FILE__;
   if (native) queryOne('[data-native]').hidden = false;
@@ -245,7 +246,7 @@ __SHELL_STYLE__
 
   const savedStatus = (verb, path) => {
     const reveal = native ? ` <a data-reveal>${window.zfoIsMac ? 'Zobrazit ve Finderu' : 'Zobrazit ve složce'}</a>` : '';
-    setStatus(`${verb} <b title="${escapeHtml(path)}">${escapeHtml(path.split('/').pop())}</b>${reveal}`, true);
+    setStatusMarkup(`${verb} <b title="${escapeHtml(path)}">${escapeHtml(path.split('/').pop())}</b>${reveal}`);
     queryOne('[data-reveal]')?.addEventListener('click', () => native.postMessage({action: 'reveal', path}));
   };
   const postChangedValues = async (path, extra = '', more = {}) => {

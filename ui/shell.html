@@ -402,7 +402,8 @@
   const native = window.zfoNative;
   const queryOne = selector => document.querySelector(selector);
   const status = queryOne('[data-status]');
-  const setStatus = (text, html) => { html ? (status.innerHTML = text) : (status.textContent = text); };
+  const setStatus = text => { status.textContent = text; };
+  const setStatusMarkup = markup => { status.innerHTML = markup; };
 
   const chrome = [...document.querySelectorAll('.zfo-bar, .zfo-help-panel, .zfo-stage, .zfo-panel, .zfo-status, .zfo-dialog, .zfo-notice')];
   const page = queryOne('.zfo-page');
@@ -855,7 +856,7 @@
 
   const savedStatus = (verb, path) => {
     const reveal = native ? ` <a data-reveal>${window.zfoIsMac ? 'Zobrazit ve Finderu' : 'Zobrazit ve složce'}</a>` : '';
-    setStatus(`${verb} <b title="${escapeHtml(path)}">${escapeHtml(path.split('/').pop())}</b>${reveal}`, true);
+    setStatusMarkup(`${verb} <b title="${escapeHtml(path)}">${escapeHtml(path.split('/').pop())}</b>${reveal}`);
     queryOne('[data-reveal]')?.addEventListener('click', () => native.postMessage({action: 'reveal', path}));
   };
   const exportData = async () => {
@@ -872,7 +873,7 @@
     link.download = data.name;
     link.click();
     URL.revokeObjectURL(link.href);
-    setStatus(`Data stažena jako <b>${escapeHtml(data.name)}</b>`, true);
+    setStatusMarkup(`Data stažena jako <b>${escapeHtml(data.name)}</b>`);
   };
   window.zfoDataSaved = path => savedStatus('Data uložena do', path);
   const importData = () => {
