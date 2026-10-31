@@ -71,7 +71,7 @@ def fuzz_zfo_signatures(data):
     root = is_form(data)
     if root is not None:
         try:
-            zfo_verify.describe(root)
+            zfo_verify.describe_signature_layers(root)
         except ValueError as error:  # the one way a form is refused: no readable certificate
             if "readable certificate" not in str(error):
                 raise
@@ -109,7 +109,7 @@ def script_seeds():
 def fuzz_pdf(data):
     """What opening a PDF reads. A damaged file may be refused, the server then answers with a message and libraries
     fail in many ways doing so. The finding here is a hang or running out of memory or stack."""
-    for read in (pdf_sign.signatures, pdf_sign.form_fields, app.pdf_info):
+    for read in (pdf_sign.describe_signatures, pdf_sign.form_fields, app.pdf_info):
         try:
             read(data)
         except (TimeoutError, MemoryError, RecursionError):

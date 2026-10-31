@@ -1,12 +1,3 @@
-"""Signing identities on every platform.
-
-- macOS: login keychain and CryptoTokenKit tokens, through macsign (keychain.py).
-- Windows: the user's certificate store (Cert:\\CurrentUser\\My, including smart cards), through winsign.ps1.
-- Everywhere: PKCS#12 files (.pfx/.p12) the user added; the password is asked for at signing and never stored.
-- A test identity: the macOS test keychain, or test.pfx in the config folder elsewhere.
-
-Every key duck-types cryptography's RSAPrivateKey.sign(data, padding, algorithm), which zfo_sign and pdf_sign use.
-"""
 import base64
 import hashlib
 import json
@@ -48,9 +39,7 @@ TEST_KEYCHAIN = Path(os.environ.get("ZFO_TEST_KEYCHAIN", config_dir() / "test.ke
 TEST_PFX = Path(os.environ.get("ZFO_TEST_PFX", config_dir() / "test.pfx" if FROZEN else ROOT / "pki/user.pfx"))
 
 
-# --- Windows certificate store ---------------------------------------------------------------------------------
-
-def _winsign(args, data=None):
+def _run_winsign(args, data=None):
     script = RESOURCES / "winsign.ps1"
     result = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
                              "-File", str(script), *args], input=data, capture_output=True,
@@ -60,29 +49,28 @@ def _winsign(args, data=None):
     return result.stdout
 
 
+# Every key duck-types cryptography's RSAPrivateKey.sign(data, padding, algorithm), which zfo_sign and pdf_sign use.
 class WindowsKey:
     def __init__(self, sha1):
         self.sha1 = sha1
 
     def sign(self, data, _padding, algorithm):
         # Data goes through a file: PowerShell has no binary stdin.
-        with tempfile.NamedTemporaryFile(delete=False) as f:
-            f.write(data)
+        with tempfile.NamedTemporaryFile(delete=False) as data_file:
+            data_file.write(data)
         try:
-            alg = "sha1" if algorithm.name == "sha1" else "sha256"
-            return base64.b64decode(_winsign(["sign", self.sha1, alg, f.name]).strip())
+            algorithm_name = "sha1" if algorithm.name == "sha1" else "sha256"
+            return base64.b64decode(_run_winsign(["sign", self.sha1, algorithm_name, data_file.name]).strip())
         finally:
-            os.unlink(f.name)
+            os.unlink(data_file.name)
 
 
 def _windows_identities():
-    found = json.loads(_winsign(["list"]) or b"[]")
+    found = json.loads(_run_winsign(["list"]) or b"[]")
     for item in found if isinstance(found, list) else [found]:
         item["cert"] = x509.load_der_x509_certificate(base64.b64decode(item.pop("certificate")))
         yield item
 
-
-# --- PKCS#12 files ---------------------------------------------------------------------------------------------
 
 def _files_index():
     path = config_dir() / "certificates.json"
@@ -90,7 +78,7 @@ def _files_index():
 
 
 def add_pfx(data, password):
-    """Keeps a copy of the (still encrypted) file in the config folder; the password only checks it opens."""
+    # Keeps a copy of the still encrypted file; the password only checks it opens.
     key, cert, _ = pkcs12.load_key_and_certificates(data, password.encode() if password else None)
     if key is None or cert is None:
         raise ValueError("Soubor neobsahuje certifikát se soukromým klíčem")
@@ -101,16 +89,16 @@ def add_pfx(data, password):
     folder.mkdir(exist_ok=True)
     (folder / f"{sha1}.p12").write_bytes(data)
     index_path, index = _files_index()
-    index = [e for e in index if e["sha1"] != sha1] + [
+    index = [entry for entry in index if entry["sha1"] != sha1] + [
         {"sha1": sha1, "subject": _common_name(cert), "not_after": f"{cert.not_valid_after_utc:%d. %m. %Y}"}]
     index_path.write_text(json.dumps(index), encoding="utf-8")
     return sha1
 
 
 def remove_pfx(sha1):
-    sha1 = _sha1(sha1)
+    sha1 = _validated_sha1(sha1)
     index_path, index = _files_index()
-    index_path.write_text(json.dumps([e for e in index if e["sha1"] != sha1]), encoding="utf-8")
+    index_path.write_text(json.dumps([entry for entry in index if entry["sha1"] != sha1]), encoding="utf-8")
     (config_dir() / "certificates" / f"{sha1}.p12").unlink(missing_ok=True)
 
 
@@ -122,9 +110,7 @@ def _load_pfx(path, password):
     return key, cert
 
 
-# --- common ----------------------------------------------------------------------------------------------------
-
-def _describe(source, sha1, subject, cert, token=False, needs_password=False):
+def _identity_entry(source, sha1, subject, cert, token=False, needs_password=False):
     return {"id": f"{source}:{sha1}", "subject": subject, "token": token, "source": source,
             "needs_password": needs_password, "not_after": f"{cert.not_valid_after_utc:%d. %m. %Y}", "cert": cert}
 
@@ -142,22 +128,21 @@ def _can_sign(cert):
         return True
 
 
-def identities():
-    """Identities usable for signing, each {id, subject, token, source, needs_password, not_after}."""
+def signing_identities():
     found = []
     if IS_MAC:
-        found += [_describe("system", i["sha1"], i["subject"], i["cert"], i["token"]) for i in keychain.identities()]
+        found += [_identity_entry("system", identity["sha1"], identity["subject"], identity["cert"], identity["token"]) for identity in keychain.signing_identities()]
         if TEST_KEYCHAIN.exists():
-            found += [_describe("test", i["sha1"], i["subject"], i["cert"])
-                      for i in keychain.identities(TEST_KEYCHAIN, TEST_PASSWORD)]
+            found += [_identity_entry("test", identity["sha1"], identity["subject"], identity["cert"])
+                      for identity in keychain.signing_identities(TEST_KEYCHAIN, TEST_PASSWORD)]
     else:
         if IS_WINDOWS:
-            found += [_describe("system", i["sha1"], i["subject"], i["cert"], i["token"]) for i in _windows_identities()]
+            found += [_identity_entry("system", identity["sha1"], identity["subject"], identity["cert"], identity["token"]) for identity in _windows_identities()]
         if TEST_PFX.exists():
             _, cert = _load_pfx(TEST_PFX, TEST_PASSWORD)
             sha1 = hashlib.sha1(cert.public_bytes(serialization.Encoding.DER)).hexdigest()
-            found.append(_describe("test", sha1, _common_name(cert), cert))
-    found = [i for i in found if _can_sign(i.pop("cert"))]
+            found.append(_identity_entry("test", sha1, _common_name(cert), cert))
+    found = [identity for identity in found if _can_sign(identity.pop("cert"))]
     # Added files are listed from the index: their certificate is usually encrypted together with the key.
     for entry in _files_index()[1]:
         if (config_dir() / "certificates" / f"{entry['sha1']}.p12").exists():
@@ -166,33 +151,31 @@ def identities():
     return found
 
 
-def _sha1(value):
-    """An identity's SHA-1 thumbprint; ids come from requests and name files, so nothing else is accepted."""
+def _validated_sha1(value):
+    # Ids come from requests and name files, so nothing but a SHA-1 thumbprint is accepted.
     if not re.fullmatch(r"[0-9a-f]{40}", value or ""):
         raise LookupError(f"neplatný certifikát {value!r}")
     return value
 
 
-def load(identity_id, password=None):
-    """(key, certificate) for an identity id from identities()."""
+def load_identity(identity_id, password=None):
     source, sha1 = identity_id.split(":", 1)
-    sha1 = _sha1(sha1.lower())
+    sha1 = _validated_sha1(sha1.lower())
     if source == "file":
         return _load_pfx(config_dir() / "certificates" / f"{sha1}.p12", password)
     if source == "test" and not IS_MAC:
         return _load_pfx(TEST_PFX, TEST_PASSWORD)
     if IS_MAC:
-        return keychain.load(sha1, *((TEST_KEYCHAIN, TEST_PASSWORD) if source == "test" else ()))
+        return keychain.load_identity(sha1, *((TEST_KEYCHAIN, TEST_PASSWORD) if source == "test" else ()))
     if IS_WINDOWS:
-        match = next((i for i in _windows_identities() if i["sha1"] == sha1), None)
+        match = next((identity for identity in _windows_identities() if identity["sha1"] == sha1), None)
         if match is None:
             raise LookupError(f"certifikát {sha1} nebyl nalezen")
         return WindowsKey(sha1), match["cert"]
     raise LookupError(f"certifikát {identity_id} nebyl nalezen")
 
 
-def _system_roots():
-    """Trusted roots for platforms without a trust API of their own (Linux): the distribution's CA bundle."""
+def _linux_system_roots():
     for bundle in ("/etc/ssl/certs/ca-certificates.crt", "/etc/pki/tls/certs/ca-bundle.crt", "/etc/ssl/ca-bundle.pem",
                    "/etc/ssl/cert.pem"):
         if Path(bundle).exists():
@@ -200,11 +183,7 @@ def _system_roots():
     return []
 
 
-def trust(certificates):
-    """Trust verdict for each DER certificate: the system's, or the EU trusted lists' when the system does not trust it.
-
-    {"trusted": bool, "reason": str, "source": "system" | "eu", "unverifiable": bool}
-    """
+def trust_verdicts(certificates):
     result = []
     for der, verdict in zip(certificates, _system_trust(certificates), strict=True):
         if verdict["trusted"]:
@@ -216,13 +195,12 @@ def trust(certificates):
     return result
 
 
-def stamp_trust(der, moment):
-    """Whether a time stamp's DER certificate was qualified at the stamp's time, by the EU trusted lists."""
+def stamp_trust_verdict(der, moment):
     return trustlist.check_stamp_certificate(der, moment, config_dir() / "trustlists")
 
 
 def revocation_status(der):
-    """Whether the issuer revoked a DER certificate; may download its list, so never call it while rendering a page."""
+    # May download the issuer's list, so never call it while rendering a page.
     return revocation.check_certificate_revocation(der, config_dir() / "trustlists", config_dir() / "crl")
 
 
@@ -230,15 +208,15 @@ def _system_trust(certificates):
     if not certificates:
         return []
     if IS_MAC:
-        return keychain.trust(certificates)
+        return keychain.trust_verdicts(certificates)
     if IS_WINDOWS:
         lines = "\n".join(base64.b64encode(der).decode() for der in certificates).encode()
-        return [json.loads(line) for line in _winsign(["trust"], lines).splitlines() if line.strip()]
+        return [json.loads(line) for line in _run_winsign(["trust"], lines).splitlines() if line.strip()]
     import asyncio
 
     from asn1crypto import x509 as asn1_x509
     from pyhanko_certvalidator import CertificateValidator, ValidationContext
-    roots = [asn1_x509.Certificate.load(c.public_bytes(serialization.Encoding.DER)) for c in _system_roots()]
+    roots = [asn1_x509.Certificate.load(root.public_bytes(serialization.Encoding.DER)) for root in _linux_system_roots()]
     others = [asn1_x509.Certificate.load(der) for der in certificates]
     result = []
     for cert in others:
@@ -246,7 +224,7 @@ def _system_trust(certificates):
         try:
             asyncio.run(CertificateValidator(cert, validation_context=context).async_validate_usage(set()))
             result.append({"trusted": True, "reason": ""})
-        except Exception as e:  # noqa: BLE001 - any failure means "not trusted", with the reason shown
-            result.append({"trusted": False, "reason": str(e).splitlines()[0][:200]})
+        except Exception as error:  # noqa: BLE001 - any failure means "not trusted", with the reason shown
+            result.append({"trusted": False, "reason": str(error).splitlines()[0][:200]})
     return result
 

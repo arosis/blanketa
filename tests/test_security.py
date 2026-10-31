@@ -70,7 +70,7 @@ class PageInjection(unittest.TestCase):
 
 class SignatureWrapping(unittest.TestCase):
     def test_untouched_form_verifies(self):
-        self.assertTrue(all(layer["intact"] for layer in zfo_verify.describe(form_root(SIGNED))))
+        self.assertTrue(all(layer["intact"] for layer in zfo_verify.describe_signature_layers(form_root(SIGNED))))
 
     def test_pristine_copy_in_keyinfo_does_not_hide_a_change(self):
         root = form_root(SIGNED)
@@ -79,7 +79,7 @@ class SignatureWrapping(unittest.TestCase):
         self.assertTrue(changed)
         for e in changed:
             e.text = "Podvrženo"
-        self.assertFalse(zfo_verify.describe(root)[0]["intact"])
+        self.assertFalse(zfo_verify.describe_signature_layers(root)[0]["intact"])
 
     def test_reference_outside_the_layer_is_refused(self):
         root = form_root(SIGNED)
@@ -97,7 +97,7 @@ class DamagedSignatures(unittest.TestCase):
     def damaged(self, change):
         root = form_root(SIGNED)
         change(root.find(f".//{{{zfo_verify.DS}}}SignedInfo"), root)
-        return zfo_verify.describe(root)
+        return zfo_verify.describe_signature_layers(root)
 
     def test_unknown_digest_algorithm_is_a_broken_signature(self):
         def change(info, _):
@@ -201,7 +201,7 @@ class CertificateIds(unittest.TestCase):
     def test_identity_id_cannot_name_another_file(self):
         for bad in ("file:../../../etc/passwd", "file:" + "a" * 39, "test:../user", "file:"):
             with self.assertRaises(LookupError, msg=bad):
-                certstore.load(bad, "x")
+                certstore.load_identity(bad, "x")
         with self.assertRaises(LookupError):
             certstore.remove_pfx("../certificates")
 
@@ -236,7 +236,7 @@ class LinuxTrust(unittest.TestCase):
     """The Linux verdict comes from pyhanko-certvalidator and the distribution's CA bundle; it runs anywhere one exists."""
 
     def setUp(self):
-        self.roots = certstore._system_roots()
+        self.roots = certstore._linux_system_roots()
         if not self.roots:
             self.skipTest("no system CA bundle")
         self.saved = certstore.IS_MAC, certstore.IS_WINDOWS
@@ -248,7 +248,7 @@ class LinuxTrust(unittest.TestCase):
     def test_system_root_is_trusted_and_test_certificate_is_not(self):
         root = next(c for c in self.roots if c.signature_hash_algorithm and c.serial_number > 0)
         test = x509.load_pem_x509_certificate((ROOT / "pki/user.crt").read_bytes())
-        verdicts = certstore.trust([root.public_bytes(serialization.Encoding.DER),
+        verdicts = certstore.trust_verdicts([root.public_bytes(serialization.Encoding.DER),
                                     test.public_bytes(serialization.Encoding.DER)])
         self.assertTrue(verdicts[0]["trusted"], verdicts[0])
         self.assertFalse(verdicts[1]["trusted"])

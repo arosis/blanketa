@@ -1,11 +1,3 @@
-// Signs data with a private key held by macOS: login keychain, a given keychain file,
-// or a smart card / token exposed through CryptoTokenKit. The key never leaves macOS;
-// a token asks for its PIN through the system dialog.
-//
-// usage:
-//   macsign list [--keychain PATH]
-//   macsign sign --cert SHA1HEX [--alg sha256|sha1] [--keychain PATH] < data > signature.b64
-//   macsign trust < base64 DER certificates, one per line   (prints one JSON verdict per line)
 import Foundation
 import Security
 import CryptoKit
@@ -15,15 +7,15 @@ func fail(_ message: String) -> Never {
     exit(1)
 }
 
-func option(_ name: String) -> String? {
-    guard let i = CommandLine.arguments.firstIndex(of: name), i + 1 < CommandLine.arguments.count else { return nil }
-    return CommandLine.arguments[i + 1]
+func commandLineOption(_ name: String) -> String? {
+    guard let index = CommandLine.arguments.firstIndex(of: name), index + 1 < CommandLine.arguments.count else { return nil }
+    return CommandLine.arguments[index + 1]
 }
 
 // A keychain given by --keychain is unlocked with ZFO_KEYCHAIN_PASSWORD when set,
 // so a separate test keychain does not raise the system password dialog.
-func searchList() -> [SecKeychain]? {
-    guard let path = option("--keychain") else { return nil }
+func keychainSearchList() -> [SecKeychain]? {
+    guard let path = commandLineOption("--keychain") else { return nil }
     var keychain: SecKeychain?
     guard SecKeychainOpen(path, &keychain) == errSecSuccess, let keychain else { fail("cannot open keychain \(path)") }
     if let password = ProcessInfo.processInfo.environment["ZFO_KEYCHAIN_PASSWORD"] {
@@ -33,22 +25,22 @@ func searchList() -> [SecKeychain]? {
     return [keychain]
 }
 
-func identities() -> [(SecIdentity, Bool)] {
+func signingIdentities() -> [(SecIdentity, Bool)] {
     var found: [(SecIdentity, Bool)] = []
     var queries: [([String: Any], Bool)] = []
-    var base: [String: Any] = [
+    var baseQuery: [String: Any] = [
         kSecClass as String: kSecClassIdentity,
         kSecMatchLimit as String: kSecMatchLimitAll,
         kSecReturnRef as String: true,
     ]
-    if let list = searchList() {
-        base[kSecMatchSearchList as String] = list
-        queries.append((base, false))
+    if let searchList = keychainSearchList() {
+        baseQuery[kSecMatchSearchList as String] = searchList
+        queries.append((baseQuery, false))
     } else {
-        queries.append((base, false))
-        var token = base
-        token[kSecAttrAccessGroup as String] = kSecAttrAccessGroupToken
-        queries.append((token, true))
+        queries.append((baseQuery, false))
+        var tokenQuery = baseQuery
+        tokenQuery[kSecAttrAccessGroup as String] = kSecAttrAccessGroupToken
+        queries.append((tokenQuery, true))
     }
     var seen = Set<Data>()
     for (query, onToken) in queries {
@@ -73,28 +65,28 @@ func sha1Hex(_ data: Data) -> String {
     Insecure.SHA1.hash(data: data).map { String(format: "%02x", $0) }.joined()
 }
 
-let command = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : ""
-switch command {
-case "list":
-    var out: [[String: Any]] = []
-    for (identity, onToken) in identities() {
+func listIdentities() {
+    var entries: [[String: Any]] = []
+    for (identity, onToken) in signingIdentities() {
         var cert: SecCertificate?
         SecIdentityCopyCertificate(identity, &cert)
         let der = SecCertificateCopyData(cert!) as Data
-        out.append([
+        entries.append([
             "sha1": sha1Hex(der),
             "subject": SecCertificateCopySubjectSummary(cert!) as String? ?? "",
             "token": onToken,
             "certificate": der.base64EncodedString(),
         ])
     }
-    let json = try! JSONSerialization.data(withJSONObject: out, options: [.prettyPrinted, .sortedKeys])
+    let json = try! JSONSerialization.data(withJSONObject: entries, options: [.prettyPrinted, .sortedKeys])
     FileHandle.standardOutput.write(json)
-case "sign":
-    guard let wanted = option("--cert")?.lowercased() else { fail("missing --cert SHA1HEX") }
-    let algorithm: SecKeyAlgorithm = option("--alg") == "sha1"
+}
+
+func signStandardInput() {
+    guard let wanted = commandLineOption("--cert")?.lowercased() else { fail("missing --cert SHA1HEX") }
+    let algorithm: SecKeyAlgorithm = commandLineOption("--alg") == "sha1"
         ? .rsaSignatureMessagePKCS1v15SHA1 : .rsaSignatureMessagePKCS1v15SHA256
-    guard let (identity, _) = identities().first(where: { sha1Hex(certificateDER($0.0)) == wanted }) else {
+    guard let (identity, _) = signingIdentities().first(where: { sha1Hex(certificateDER($0.0)) == wanted }) else {
         fail("certificate \(wanted) not found")
     }
     var key: SecKey?
@@ -105,7 +97,9 @@ case "sign":
         fail("signing failed: \(error!.takeRetainedValue())")
     }
     FileHandle.standardOutput.write(signature.base64EncodedString().data(using: .utf8)!)
-case "trust":
+}
+
+func printTrustVerdicts() {
     let input = String(data: FileHandle.standardInput.readDataToEndOfFile(), encoding: .utf8) ?? ""
     for line in input.split(separator: "\n") {
         var verdict: [String: Any] = ["trusted": false]
@@ -119,6 +113,12 @@ case "trust":
         let json = try! JSONSerialization.data(withJSONObject: verdict)
         FileHandle.standardOutput.write(json + "\n".data(using: .utf8)!)
     }
-default:
-    fail("usage: macsign list|sign|trust …")
+}
+
+let command = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : ""
+switch command {
+case "list": listIdentities()
+case "sign": signStandardInput()
+case "trust": printTrustVerdicts()
+default: fail("usage: macsign list|sign|trust …")
 }

@@ -184,16 +184,16 @@ class SignatureFieldNames(unittest.TestCase):
         writer.pages[0][NameObject("/Annots")] = ArrayObject([field])
         writer.root_object[NameObject("/AcroForm")] = writer._add_object(DictionaryObject({NameObject("/Fields"): ArrayObject([field])}))
         writer.write(out)
-        return pdf_sign.sign(out.getvalue(), self.KEY, self.CERT)
+        return pdf_sign.sign_pdf(out.getvalue(), self.KEY, self.CERT)
 
     def test_last_signature_covering_the_file_is_intact(self):
-        found = pdf_sign.signatures(self.signed())[0]
+        found = pdf_sign.describe_signatures(self.signed())[0]
         self.assertTrue(found["intact"])
         self.assertTrue(found["covers_whole"])
         self.assertFalse(found["changes_unchecked"])
 
     def test_later_changes_that_cannot_be_analysed_are_reported(self):
-        first, second = pdf_sign.signatures(pdf_sign.sign(self.signed(), self.KEY, self.CERT))
+        first, second = pdf_sign.describe_signatures(pdf_sign.sign_pdf(self.signed(), self.KEY, self.CERT))
         self.assertTrue(first["intact"])
         self.assertFalse(first["covers_whole"])
         self.assertTrue(first["changes_unchecked"])
@@ -203,13 +203,13 @@ class SignatureFieldNames(unittest.TestCase):
     def test_changed_content_is_still_broken(self):
         signed = self.signed()
         at = signed.index(b"/MediaBox")
-        found = pdf_sign.signatures(signed[:at] + b"/MediaBoy" + signed[at + 9:])[0]
+        found = pdf_sign.describe_signatures(signed[:at] + b"/MediaBoy" + signed[at + 9:])[0]
         self.assertFalse(found["intact"])
         self.assertFalse(found["changes_unchecked"])
 
     def test_ordinary_field_is_analysed(self):
-        document = pdf_sign.sign(pdf_sign.sign((ROOT / "samples-pdf/zadost.pdf").read_bytes(), self.KEY, self.CERT), self.KEY, self.CERT)
-        self.assertFalse(any(found["changes_unchecked"] for found in pdf_sign.signatures(document)))
+        document = pdf_sign.sign_pdf(pdf_sign.sign_pdf((ROOT / "samples-pdf/zadost.pdf").read_bytes(), self.KEY, self.CERT), self.KEY, self.CERT)
+        self.assertFalse(any(found["changes_unchecked"] for found in pdf_sign.describe_signatures(document)))
 
 
 class OpeningForms(unittest.TestCase):
@@ -308,7 +308,7 @@ class TimeStamps(unittest.TestCase):
     FOLDER = ROOT / "samples-pdf/razitka"
 
     def read(self, name):
-        return pdf_sign.signatures((self.FOLDER / f"{name}.pdf").read_bytes())
+        return pdf_sign.describe_signatures((self.FOLDER / f"{name}.pdf").read_bytes())
 
     @staticmethod
     def stamp(kind="signature", at="2026-01-15T10:00:00+00:00", intact=True):
@@ -316,7 +316,7 @@ class TimeStamps(unittest.TestCase):
 
     def judge(self, stamps, verdict):
         sig = {"stamps": stamps}
-        with mock.patch.object(app.certstore, "stamp_trust", return_value=verdict) as asked:
+        with mock.patch.object(app.certstore, "stamp_trust_verdict", return_value=verdict) as asked:
             app.judge_time_stamps(sig)
         return sig, asked
 
@@ -348,8 +348,8 @@ class TimeStamps(unittest.TestCase):
     def test_document_stamp_judged_for_its_card_and_its_signature(self):
         data = (self.FOLDER / "razitko-dokumentu.pdf").read_bytes()
         trust = [{"trusted": False, "unverifiable": False, "source": "system"}] * 2
-        with (mock.patch.object(app.certstore, "stamp_trust", return_value={"qualified": True, "unverifiable": False, "reason": ""}),
-              mock.patch.object(app.certstore, "trust", return_value=trust)):
+        with (mock.patch.object(app.certstore, "stamp_trust_verdict", return_value={"qualified": True, "unverifiable": False, "reason": ""}),
+              mock.patch.object(app.certstore, "trust_verdicts", return_value=trust)):
             signature, stamp = app.pdf_signatures(data)
         self.assertEqual(signature["proof"]["kind"], "document")
         self.assertEqual(stamp["proof"]["kind"], "document")
@@ -362,7 +362,7 @@ class TimeStamps(unittest.TestCase):
     def test_damaged_stamp_attribute_keeps_the_panel_working(self):
         data = (self.FOLDER / "razitko-v-podpisu.pdf").read_bytes()
         at = data.lower().index(b"060b2a864886f70d010910020e")  # the attribute's type; a signature does not cover it
-        found = pdf_sign.signatures(data[:at] + b"05" + data[at + 2:])[0]
+        found = pdf_sign.describe_signatures(data[:at] + b"05" + data[at + 2:])[0]
         self.assertFalse(found["stamps"][0]["intact"])
 
     def test_stamp_of_another_document_does_not_break_the_signature(self):
@@ -373,7 +373,7 @@ class TimeStamps(unittest.TestCase):
     def test_changed_content_breaks_a_document_stamp(self):
         data = (self.FOLDER / "razitko-dokumentu.pdf").read_bytes()
         at = data.index(b"/MediaBox")
-        stamp = pdf_sign.signatures(data[:at] + b"/MediaBoy" + data[at + 9:])[1]
+        stamp = pdf_sign.describe_signatures(data[:at] + b"/MediaBoy" + data[at + 9:])[1]
         self.assertFalse(stamp["intact"])
 
     def test_qualified_stamp_is_proof(self):
@@ -559,7 +559,7 @@ class FormScripts(unittest.TestCase):
             layer = etree.tostring(app.publisher_layer(saved).find("{http://www.w3.org/2000/09/xmldsig#}SignatureValue"))
             original = etree.fromstring(fo, etree.XMLParser(huge_tree=True))
             self.assertEqual(layer, etree.tostring(app.publisher_layer(original).find("{http://www.w3.org/2000/09/xmldsig#}SignatureValue")))
-            self.assertEqual(zfo_verify.describe(saved)[0]["intact"], True)
+            self.assertEqual(zfo_verify.describe_signature_layers(saved)[0]["intact"], True)
 
 
 class Interpreter(unittest.TestCase):

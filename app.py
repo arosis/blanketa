@@ -133,7 +133,7 @@ def judge_time_stamps(signature):
         if not stamp["intact"]:
             problem = problem or "Časové razítko je poškozené nebo nepatří k tomuto dokumentu."
             continue
-        verdict = certstore.stamp_trust(der, datetime.fromisoformat(stamp["at"]))
+        verdict = certstore.stamp_trust_verdict(der, datetime.fromisoformat(stamp["at"]))
         if verdict["qualified"]:
             proofs.append(stamp)
         else:
@@ -148,7 +148,7 @@ def add_trust_verdicts(signatures):
     ders = [signature.pop("der") for signature in signatures]
     for signature in signatures:
         judge_time_stamps(signature)
-    for signature, der, verdict in zip(signatures, ders, certstore.trust(ders), strict=True):
+    for signature, der, verdict in zip(signatures, ders, certstore.trust_verdicts(ders), strict=True):
         signature.update(trusted=verdict["trusted"], reason=verdict.get("reason", ""), trust_source=verdict["source"],
                          unverifiable=verdict["unverifiable"], certificate=hashlib.sha256(der).hexdigest())
         SHOWN_CERTIFICATES_BY_ID[signature["certificate"]] = der
@@ -156,7 +156,7 @@ def add_trust_verdicts(signatures):
 
 
 def pdf_signatures(pdf):
-    return add_trust_verdicts(pdf_sign.signatures(pdf))
+    return add_trust_verdicts(pdf_sign.describe_signatures(pdf))
 
 
 def pdf_xfa_usage(reader, fields):
@@ -187,9 +187,9 @@ def render_pdf_page(name):
 
 def save_pdf(session, values, identity_id=None, placement=None, password=None):
     name = session["name"]
-    pdf = pdf_sign.fill(session["pdf"], values) if values else session["pdf"]
+    pdf = pdf_sign.fill_form_fields(session["pdf"], values) if values else session["pdf"]
     if identity_id:
-        pdf = pdf_sign.sign(pdf, *certstore.load(identity_id, password), placement=placement)
+        pdf = pdf_sign.sign_pdf(pdf, *certstore.load_identity(identity_id, password), placement=placement)
         target = output_path(name)
     else:
         target = form_path(name) if SINGLE_FILE else ROOT / "out" / f"{name}-ulozeny.pdf"
@@ -201,7 +201,7 @@ def save_pdf(session, values, identity_id=None, placement=None, password=None):
 
 
 def write_pdf_for_printing(session, values):
-    pdf = pdf_sign.fill(session["pdf"], values) if values else session["pdf"]
+    pdf = pdf_sign.fill_form_fields(session["pdf"], values) if values else session["pdf"]
     target = Path(tempfile.gettempdir()) / f"zfo-tisk-{secrets.token_hex(4)}-{form_path(session['name']).name}"
     target.write_bytes(pdf)
     return {"path": str(target)}
@@ -288,7 +288,7 @@ def page_geometry(doc):
 
 
 def zfo_signatures(fo):
-    return add_trust_verdicts(zfo_verify.describe(parse_fo(fo)))
+    return add_trust_verdicts(zfo_verify.describe_signature_layers(parse_fo(fo)))
 
 
 def binds_with_unsupported_scripts(doc):
@@ -343,7 +343,7 @@ def filled_form(session, key=None, cert=None):
     etree.SubElement(doc, f"{{{DS}}}Object").append(copy.deepcopy(engine.data_element(session["doc"])))
     if key is None:
         return etree.tostring(doc, xml_declaration=True, encoding="UTF-8")
-    return zfo_sign.sign(etree.tostring(doc), key, cert, "sha256")
+    return zfo_sign.sign_form(etree.tostring(doc), key, cert, "sha256")
 
 
 def stamped_with_saving_time(zip_info):
@@ -388,7 +388,7 @@ def import_data(session, xml):
 def save_zfo(session, identity_id=None, password=None):
     name = session["name"]
     if identity_id:
-        fo = filled_form(session, *certstore.load(identity_id, password))
+        fo = filled_form(session, *certstore.load_identity(identity_id, password))
         target = output_path(name)
     else:
         fo = filled_form(session)
@@ -482,7 +482,7 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/pdf":
             return self._serve_session_pdf(url.query)
         if url.path == "/identities":
-            return self._send_json(certstore.identities())
+            return self._send_json(certstore.signing_identities())
         name = first_query_value(url.query, "form", None)
         if not name and SINGLE_FILE and not FORMS:
             return self._send_response(200, render_empty_window().encode(), HTML_UTF8)
@@ -498,7 +498,7 @@ class Handler(BaseHTTPRequestHandler):
             certstore.add_pfx(base64.b64decode(request["data"]), request.get("password") or "")
         except (KeyError, ValueError, OSError) as error:
             return self._send_error_message(error)
-        return self._send_json(certstore.identities())
+        return self._send_json(certstore.signing_identities())
 
     def _report_revocation(self, body):
         try:

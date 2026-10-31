@@ -396,7 +396,7 @@ class Verdicts(unittest.TestCase):
     def verdicts(self, system, listed):
         with mock.patch.object(certstore, "_system_trust", return_value=[system]), \
                 mock.patch.object(certstore.trustlist, "check_certificate", return_value=listed) as check:
-            return certstore.trust([b"certificate"])[0], check
+            return certstore.trust_verdicts([b"certificate"])[0], check
 
     def test_system_trust_needs_no_list(self):
         verdict, check = self.verdicts({"trusted": True, "reason": ""}, None)
