@@ -44,7 +44,7 @@ Windows potřebují Microsoft Edge WebView2 (Windows 10/11 ho mají; instalátor
 - Zobrazení formuláře ve vzhledu Form Filleru:
   - opakované sekce;
   - přepínané části (multiswitch);
-  - výpočty XPath;
+  - výpočty a kontroly v XPath a JavaScriptu 602;
   - nápověda k polím;
   - vložená písma a obrázky;
   - uživatelská tlačítka formuláře.
@@ -55,7 +55,7 @@ Windows potřebují Microsoft Edge WebView2 (Windows 10/11 ho mají; instalátor
   - najít;
   - obnovit výchozí hodnoty pole nebo celého formuláře;
   - import a export dat (XML).
-- Panel podpisů: neporušenost každé vrstvy a důvěryhodnost certifikátu podle systému a důvěryhodných seznamů EU.
+- Panel podpisů: neporušenost každé vrstvy, důvěryhodnost certifikátu podle systému a důvěryhodných seznamů EU a to, zda vydavatel certifikát nezrušil.
 
 **PDF**
 - Vyplňování přes PDF.js:
@@ -65,6 +65,7 @@ Windows potřebují Microsoft Edge WebView2 (Windows 10/11 ho mají; instalátor
   - do připraveného podpisového pole s razítkem;
   - nebo na místo, které uživatel vyznačí tažením myši;
   - nebo neviditelně.
+- Panel podpisů: totéž co u ZFO a navíc časová razítka (viz [Časová razítka](#časová-razítka)).
 - Tisk vyplněného souboru v plné kvalitě.
 
 Technický popis formátu ZFO: [docs/zfo-format.md](docs/zfo-format.md).
@@ -88,13 +89,14 @@ Stránky jsou na všech systémech stejné; s aplikací kolem sebe mluví přes 
 | Soubor | Úloha |
 |---|---|
 | `app.py` | HTTP server: převod FO → HTML (XSLT), relace formuláře, uložení, podpis, PDF |
-| `zfoengine/` | port backendu zfo-editoru (Python 3, bez GTK): model, výpočty, opakované sekce, kontrola |
+| `zfoengine/` | port backendu zfo-editoru (Python 3, bez GTK): model, výpočty, opakované sekce, kontrola; `js602.py` je izolovaný interpret JavaScriptu 602 |
 | `ui/shell.html` | rozhraní ZFO (lišta, panely, dialogy) vkládané do vykreslené stránky formuláře |
 | `ui/pdf.html` | rozhraní PDF nad PDF.js |
 | `ui/fo2html.xsl` | doplněk XSLT zfo-editoru (obrázky, rozměry) |
 | `zfo_sign.py`, `zfo_verify.py` | podpis a ověření vrstev XMLDSig |
 | `pdf_sign.py` | vyplnění a podpis PDF, ověření podpisů |
 | `certstore.py` | podpisové identity na všech systémech: klíčenka (`keychain.py` + `macsign`), úložiště Windows (`winsign.ps1`), soubory `.pfx`; důvěryhodnost certifikátů podle systému |
+| `trustlist.py`, `revocation.py` | důvěryhodné seznamy EU a seznamy zrušených certifikátů |
 | `desktop.py` | okna aplikace pro Windows a Linux |
 | `ui/bridge.js` | spojení stránek s aplikací (macOS / Windows a Linux / prohlížeč), sdílený výběr certifikátu |
 
