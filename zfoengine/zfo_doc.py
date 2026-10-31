@@ -941,6 +941,8 @@ class ZFO_document:
     '''
     Returns dictionary with default values of the form values - values from the data root subtree
     '''
+    # zfoengine: a control with no name at all has an empty id, and the page's selector "#" would stop it loading the rest
+    input_dic.pop("", None)
     for input_id in input_dic:
       type = input_dic[input_id]["type"]
       # zfoengine: JSON.stringify drops an undefined "bind" (input without name)

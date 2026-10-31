@@ -9,6 +9,23 @@
 
   <xsl:import href="../vendor/zfo-editor-src/zfo-editor-0.3.2/xslt/fo2html.xsl"/>
 
+  <!-- Some forms name a radio button or check box only by its bind. zfo-editor reads form602radio and form602chkbx
+       alone. A radio button's empty name then stops the page at the selector "#" while it loads the values,
+       and a check box without a name silently gets none. -->
+  <xsl:template name="radio-input">
+    <xsl:variable name="name" select="(@form602radio[. != ''] | @form602bind[not(../@form602radio != '')])"/>
+    <input title="{@form602tooltip}" type="radio" name="{$name}" id="{concat($name, '-', @form602on)}" value="{@form602on}">
+      <xsl:apply-templates/>
+    </input>
+  </xsl:template>
+
+  <xsl:template name="checkbox-input">
+    <xsl:variable name="name" select="(@form602chkbx[. != ''] | @form602bind[not(../@form602chkbx != '')])"/>
+    <input title="{@form602tooltip}" type="checkbox" id="{$name}" name="{$name}">
+      <xsl:apply-templates/>
+    </input>
+  </xsl:template>
+
   <!-- Barcode the form draws itself (zfo-editor drops it): an SVG from barcode.py; its text when it cannot be drawn. -->
   <xsl:template match="fm:barcode">
     <xsl:variable name="src" select="bl:barcode(string(@symbology), normalize-space(.), string(@barcode-height),
