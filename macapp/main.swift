@@ -1,5 +1,3 @@
-// "Blanketa": opens .zfo (602XML) and PDF forms in a window. Each window runs the bundled zfo-server
-// (Python, see app.py) for its file and shows it in a WKWebView.
 import AppKit
 import PDFKit
 import WebKit
@@ -12,10 +10,8 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
     let file: URL?
     var onClose: (() -> Void)?
     var onOpen: ((URL?) -> Void)?
-    // The form server's port, once it reported one; only pages from it may use the window and talk to the app.
-    var port: Int?
+    var formServerPort: Int?
 
-    // Without a file the window shows the application with only "Otevřít" and the recent files.
     init(file: URL?) {
         self.file = file
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 900),
@@ -38,10 +34,10 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
             webView.loadHTMLString("<p style='font:14px -apple-system;padding:24px'>Otevírám formulář…</p>", baseURL: nil)
         }
         window.makeKeyAndOrderFront(nil)
-        start(file: file)
+        startFormServer(file: file)
     }
 
-    private func start(file: URL?) {
+    private func startFormServer(file: URL?) {
         let resources = Bundle.main.resourceURL!
         server.executableURL = resources.appendingPathComponent("zfo-server/zfo-server")
         server.arguments = file.map { ["--file", $0.path, "0"] } ?? ["--empty", "0"]
@@ -55,7 +51,7 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
                   let port = line.split(separator: "\n").first(where: { $0.hasPrefix("PORT ") })?.dropFirst(5) else { return }
             handle.readabilityHandler = nil
             DispatchQueue.main.async {
-                self?.port = Int(port)
+                self?.formServerPort = Int(port)
                 self?.webView.load(URLRequest(url: URL(string: "http://127.0.0.1:\(port)/")!))
             }
         }
@@ -66,8 +62,8 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
         }
     }
 
-    private func isOwn(_ url: URL?) -> Bool {
-        url?.scheme == "http" && url?.host == "127.0.0.1" && url?.port == port && port != nil
+    private func isFormServerPage(_ url: URL?) -> Bool {
+        url?.scheme == "http" && url?.host == "127.0.0.1" && url?.port == formServerPort && formServerPort != nil
     }
 
     // A link or script must not take the window to another site: that page would reach the app through "app".
@@ -75,7 +71,7 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction,
                  decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         let url = action.request.url
-        if isOwn(url) || url?.absoluteString == "about:blank" {
+        if isFormServerPage(url) || url?.absoluteString == "about:blank" {
             return decisionHandler(.allow)
         }
         if let url, ["http", "https"].contains(url.scheme), action.navigationType == .linkActivated {
@@ -86,7 +82,7 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
 
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         let origin = message.frameInfo.securityOrigin
-        guard message.frameInfo.isMainFrame, origin.protocol == "http", origin.host == "127.0.0.1", origin.port == port,
+        guard message.frameInfo.isMainFrame, origin.protocol == "http", origin.host == "127.0.0.1", origin.port == formServerPort,
               let body = message.body as? [String: Any] else { return }
         switch body["action"] as? String {
         case "open": onOpen?(nil)
@@ -96,9 +92,9 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
             let paths = RecentFiles.urls.map(\.path)
             let json = String(data: try! JSONEncoder().encode(paths), encoding: .utf8)!
             webView.evaluateJavaScript("window.zfoRecent && zfoRecent(\(json))")
-        case "print": print()
+        case "print": printPage()
         case "printPdf":
-            if let path = body["path"] as? String { printPdf(URL(fileURLWithPath: path)) }
+            if let path = body["path"] as? String { printPdfFile(URL(fileURLWithPath: path)) }
         case "reveal":
             if let path = body["path"] as? String {
                 NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath: path)])
@@ -115,11 +111,10 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
         }
     }
 
-    func perform(_ action: String) {
+    func sendActionToPage(_ action: String) {
         webView.evaluateJavaScript("window.zfoAction && zfoAction('\(action)')")
     }
 
-    // Form Filler's "Uložit data do souboru" asks where to put the XML.
     private func saveFile(name: String, folder: String?, content: String) {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = name
@@ -138,8 +133,7 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
         }
     }
 
-    // The system print panel also offers "Save as PDF", which stands in for Form Filler's PDF export.
-    private func print() {
+    private func printPage() {
         let info = NSPrintInfo.shared.copy() as! NSPrintInfo
         info.topMargin = 0; info.bottomMargin = 0; info.leftMargin = 0; info.rightMargin = 0
         info.horizontalPagination = .fit
@@ -148,11 +142,10 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
         let operation = webView.printOperation(with: info)
         operation.view?.frame = webView.bounds
         operation.jobTitle = window.title
-        operation.runModal(for: window, delegate: self, didRun: #selector(printDone(_:success:contextInfo:)), contextInfo: nil)
+        operation.runModal(for: window, delegate: self, didRun: #selector(pagePrintDidFinish(_:success:contextInfo:)), contextInfo: nil)
     }
 
-    // PDF documents print from the filled file itself, at full quality, rather than from the page on screen.
-    private func printPdf(_ url: URL) {
+    private func printPdfFile(_ url: URL) {
         guard let document = PDFDocument(url: url) else { return }
         let info = NSPrintInfo.shared.copy() as! NSPrintInfo
         info.jobDisposition = .spool
@@ -161,11 +154,10 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
         operation.runModal(for: window, delegate: nil, didRun: nil, contextInfo: nil)
     }
 
-    @objc private func printDone(_ operation: NSPrintOperation, success: Bool, contextInfo: UnsafeMutableRawPointer?) {
+    @objc private func pagePrintDidFinish(_ operation: NSPrintOperation, success: Bool, contextInfo: UnsafeMutableRawPointer?) {
         webView.evaluateJavaScript("window.zfoPrinted && zfoPrinted()")
     }
 
-    // File inputs in the page ("Import dat do formuláře", a certificate file for signing) use the system open panel.
     func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters,
                  initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
         let panel = NSOpenPanel()
@@ -234,18 +226,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         buildMenu()
-        DispatchQueue.main.async { if !self.openedFile { self.openEmpty() } }
+        DispatchQueue.main.async { if !self.openedFile { self.openEmptyWindow() } }
     }
 
-    // AppKit would otherwise show its own open panel at launch; the empty window replaces it.
     func applicationShouldOpenUntitledFile(_ sender: NSApplication) -> Bool { false }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !flag { openEmpty() }
+        if !flag { openEmptyWindow() }
         return true
     }
 
-    func openEmpty() { add(FormWindow(file: nil)) }
+    func openEmptyWindow() { track(FormWindow(file: nil)) }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
@@ -254,15 +245,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func open(_ url: URL) {
-        let empty = windows.filter { $0.file == nil }
-        add(FormWindow(file: url))
+        let emptyWindows = windows.filter { $0.file == nil }
+        track(FormWindow(file: url))
         RecentFiles.add(url)
         NSDocumentController.shared.noteNewRecentDocumentURL(url)
         // The request may come from the empty window's own page, so it closes once that call has returned.
-        DispatchQueue.main.async { empty.forEach { $0.window.close() } }
+        DispatchQueue.main.async { emptyWindows.forEach { $0.window.close() } }
     }
 
-    private func add(_ form: FormWindow) {
+    private func track(_ form: FormWindow) {
         form.onClose = { [weak self, weak form] in self?.windows.removeAll { $0 === form } }
         form.onOpen = { [weak self] url in
             if let url { self?.open(url) } else { self?.openDocument(nil) }
@@ -279,11 +270,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    // Menu commands that live in the page (save, print, check…) go to the active form window.
     @objc func formAction(_ sender: NSMenuItem) {
         guard let action = sender.representedObject as? String,
               let form = windows.first(where: { $0.window.isKeyWindow }) ?? windows.last else { return }
-        form.perform(action)
+        form.sendActionToPage(action)
     }
 
     private func formItem(_ title: String, _ action: String, _ key: String = "", _ modifiers: NSEvent.ModifierFlags = .command) -> NSMenuItem {
@@ -293,55 +283,77 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return item
     }
 
+    private func submenuItem(title: String = "", _ entries: [NSMenuItem]) -> NSMenuItem {
+        let item = NSMenuItem()
+        item.submenu = NSMenu(title: title)
+        entries.forEach(item.submenu!.addItem)
+        return item
+    }
+
+    private func applicationMenu() -> NSMenuItem {
+        submenuItem([
+            formItem("Podpořit Blanketu…", "support"),
+            .separator(),
+            NSMenuItem(title: "Ukončit Blanketu", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"),
+        ])
+    }
+
+    private func fileMenu() -> NSMenuItem {
+        submenuItem(title: "Soubor", [
+            NSMenuItem(title: "Otevřít…", action: #selector(openDocument(_:)), keyEquivalent: "o"),
+            .separator(),
+            formItem("Uložit bez podpisu", "save-plain", "s"),
+            formItem("Podepsat a uložit…", "save", "s", [.command, .shift]),
+            .separator(),
+            formItem("Tisk…", "print", "p"),
+            .separator(),
+            NSMenuItem(title: "Zavřít", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"),
+        ])
+    }
+
+    private func editMenu() -> NSMenuItem {
+        submenuItem(title: "Úpravy", [
+            NSMenuItem(title: "Zpět", action: Selector(("undo:")), keyEquivalent: "z"),
+            NSMenuItem(title: "Vyjmout", action: #selector(NSText.cut(_:)), keyEquivalent: "x"),
+            NSMenuItem(title: "Kopírovat", action: #selector(NSText.copy(_:)), keyEquivalent: "c"),
+            NSMenuItem(title: "Vložit", action: #selector(NSText.paste(_:)), keyEquivalent: "v"),
+            NSMenuItem(title: "Vybrat vše", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"),
+            .separator(),
+            formItem("Najít…", "find", "f"),
+            formItem("Najít další", "find-next", "g"),
+            formItem("Najít předchozí", "find-previous", "g", [.command, .shift]),
+        ])
+    }
+
+    private func formMenu() -> NSMenuItem {
+        let f9Key = String(Character(UnicodeScalar(NSF9FunctionKey)!))
+        let backspaceKey = String(Character(UnicodeScalar(NSBackspaceCharacter)!))
+        return submenuItem(title: "Formulář", [
+            formItem("Přepočítat hodnoty", "recalc", f9Key, []),
+            formItem("Zkontrolovat formulář", "check", f9Key, .shift),
+            .separator(),
+            formItem("Obnovit výchozí hodnotu pole", "reset-field", backspaceKey, [.command, .shift]),
+            formItem("Obnovit výchozí hodnoty v celém formuláři…", "reset"),
+            .separator(),
+            formItem("Import dat do formuláře…", "import-data"),
+            formItem("Uložit data do souboru…", "export-data"),
+        ])
+    }
+
+    private func viewMenu() -> NSMenuItem {
+        submenuItem(title: "Zobrazení", [
+            formItem("Zvětšit", "zoom-in", "+"),
+            formItem("Zmenšit", "zoom-out", "-"),
+            formItem("Přizpůsobit šířce okna", "zoom-fit"),
+            .separator(),
+            formItem("Nápověda k poli", "help", "1", [.command, .option]),
+            formItem("Informace o formuláři a certifikátech", "panel", "2", [.command, .option]),
+        ])
+    }
+
     private func buildMenu() {
-        let f9 = String(Character(UnicodeScalar(NSF9FunctionKey)!))
         let main = NSMenu()
-        let appItem = NSMenuItem()
-        appItem.submenu = NSMenu()
-        appItem.submenu!.addItem(formItem("Podpořit Blanketu…", "support"))
-        appItem.submenu!.addItem(.separator())
-        appItem.submenu!.addItem(withTitle: "Ukončit Blanketu", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        let fileItem = NSMenuItem()
-        fileItem.submenu = NSMenu(title: "Soubor")
-        fileItem.submenu!.addItem(withTitle: "Otevřít…", action: #selector(openDocument(_:)), keyEquivalent: "o")
-        fileItem.submenu!.addItem(.separator())
-        fileItem.submenu!.addItem(formItem("Uložit bez podpisu", "save-plain", "s"))
-        fileItem.submenu!.addItem(formItem("Podepsat a uložit…", "save", "s", [.command, .shift]))
-        fileItem.submenu!.addItem(.separator())
-        fileItem.submenu!.addItem(formItem("Tisk…", "print", "p"))
-        fileItem.submenu!.addItem(.separator())
-        fileItem.submenu!.addItem(withTitle: "Zavřít", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
-        let formMenuItem = NSMenuItem()
-        formMenuItem.submenu = NSMenu(title: "Formulář")
-        formMenuItem.submenu!.addItem(formItem("Přepočítat hodnoty", "recalc", f9, []))
-        formMenuItem.submenu!.addItem(formItem("Zkontrolovat formulář", "check", f9, .shift))
-        formMenuItem.submenu!.addItem(.separator())
-        formMenuItem.submenu!.addItem(formItem("Obnovit výchozí hodnotu pole", "reset-field",
-                                               String(Character(UnicodeScalar(NSBackspaceCharacter)!)), [.command, .shift]))
-        formMenuItem.submenu!.addItem(formItem("Obnovit výchozí hodnoty v celém formuláři…", "reset"))
-        formMenuItem.submenu!.addItem(.separator())
-        formMenuItem.submenu!.addItem(formItem("Import dat do formuláře…", "import-data"))
-        formMenuItem.submenu!.addItem(formItem("Uložit data do souboru…", "export-data"))
-        let viewItem = NSMenuItem()
-        viewItem.submenu = NSMenu(title: "Zobrazení")
-        viewItem.submenu!.addItem(formItem("Zvětšit", "zoom-in", "+"))
-        viewItem.submenu!.addItem(formItem("Zmenšit", "zoom-out", "-"))
-        viewItem.submenu!.addItem(formItem("Přizpůsobit šířce okna", "zoom-fit"))
-        viewItem.submenu!.addItem(.separator())
-        viewItem.submenu!.addItem(formItem("Nápověda k poli", "help", "1", [.command, .option]))
-        viewItem.submenu!.addItem(formItem("Informace o formuláři a certifikátech", "panel", "2", [.command, .option]))
-        let editItem = NSMenuItem()
-        editItem.submenu = NSMenu(title: "Úpravy")
-        editItem.submenu!.addItem(withTitle: "Zpět", action: Selector(("undo:")), keyEquivalent: "z")
-        editItem.submenu!.addItem(withTitle: "Vyjmout", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
-        editItem.submenu!.addItem(withTitle: "Kopírovat", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
-        editItem.submenu!.addItem(withTitle: "Vložit", action: #selector(NSText.paste(_:)), keyEquivalent: "v")
-        editItem.submenu!.addItem(withTitle: "Vybrat vše", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
-        editItem.submenu!.addItem(.separator())
-        editItem.submenu!.addItem(formItem("Najít…", "find", "f"))
-        editItem.submenu!.addItem(formItem("Najít další", "find-next", "g"))
-        editItem.submenu!.addItem(formItem("Najít předchozí", "find-previous", "g", [.command, .shift]))
-        [appItem, fileItem, editItem, formMenuItem, viewItem].forEach(main.addItem)
+        [applicationMenu(), fileMenu(), editMenu(), formMenu(), viewMenu()].forEach(main.addItem)
         NSApp.mainMenu = main
     }
 }

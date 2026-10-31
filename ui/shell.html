@@ -1,5 +1,3 @@
-<!-- Application chrome injected into the form page.
-     Placeholders: __SESSION__ __FILE__ __SIGNATURES__ __PAGE__ __COLORS__ __INFO__ __BLANK__ __FONTS__ __BUTTONS__ __CODES__ __EMPTY__ -->
 <style>
   __FONTS__
   :root {
@@ -402,13 +400,12 @@
   const SESSION = '__SESSION__';
   const FILE = __FILE__;
   const native = window.zfoNative;
-  const $q = s => document.querySelector(s);
-  const status = $q('[data-status]');
+  const queryOne = selector => document.querySelector(selector);
+  const status = queryOne('[data-status]');
   const setStatus = (text, html) => { html ? (status.innerHTML = text) : (status.textContent = text); };
 
-  // Move the generated form into the paper page, then show the application chrome around it.
   const chrome = [...document.querySelectorAll('.zfo-bar, .zfo-help-panel, .zfo-stage, .zfo-panel, .zfo-status, .zfo-dialog, .zfo-notice')];
-  const page = $q('.zfo-page');
+  const page = queryOne('.zfo-page');
   for (const node of [...document.body.childNodes]) {
     if (!chrome.includes(node) && node.nodeName !== 'STYLE' && !(node.nodeName === 'SCRIPT' && node.textContent.includes('__zfo_shell__'))) {
       page.append(node);
@@ -416,47 +413,45 @@
   }
   document.body.classList.add('zfo-app');
   document.title = '';
-  $q('[data-file]').textContent = FILE;
-  if (native) $q('[data-native]').hidden = false;
+  queryOne('[data-file]').textContent = FILE;
+  if (native) queryOne('[data-native]').hidden = false;
 
-  // Started without a file: the full window with only "Otevřít" available until a form is opened.
   if (__EMPTY__) {
     document.body.classList.add('zfo-empty', 'help-hidden', 'panel-hidden');
     for (const button of document.querySelectorAll('.zfo-bar button:not([data-action="open"])')) button.disabled = true;
-    $q('.zfo-stage').insertAdjacentHTML('beforeend', `<div class="zfo-empty-state">
+    queryOne('.zfo-stage').insertAdjacentHTML('beforeend', `<div class="zfo-empty-state">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4M9 10h6M9 13h6M9 16h4"/></svg>
       <h1>Žádný formulář není otevřený</h1>
       <div>Otevřete formulář 602XML (.zfo) nebo dokument PDF k vyplnění a podpisu.</div>
       <button class="zfo-btn primary" data-action="open">Otevřít formulář…</button>
       <div class="zfo-recent" data-recent hidden><h2>Naposledy otevřené</h2></div>
       <button class="zfo-link zfo-support-link" data-action="support">Blanketa je zdarma – podpořit její vývoj</button></div>`);
-    const escHtml = s => s.replace(/[&<>]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;'}[c]));
+    const escapeHtmlText = text => text.replace(/[&<>]/g, character => ({'&': '&amp;', '<': '&lt;', '>': '&gt;'}[character]));
     window.zfoRecent = paths => {
-      const list = $q('[data-recent]');
+      const list = queryOne('[data-recent]');
       for (const path of paths) {
         const item = document.createElement('button');
         item.dataset.path = path;
         item.title = path;
-        item.innerHTML = `<b>${escHtml(path.split('/').pop())}</b><span>${escHtml(path.split('/').slice(0, -1).join('/').replace(/^\/Users\/[^/]+/, '~'))}</span>`;
+        item.innerHTML = `<b>${escapeHtmlText(path.split('/').pop())}</b><span>${escapeHtmlText(path.split('/').slice(0, -1).join('/').replace(/^\/Users\/[^/]+/, '~'))}</span>`;
         list.append(item);
       }
       list.hidden = !paths.length;
     };
     native?.postMessage({action: 'recent'});
-    $q('[data-file]').textContent = 'Bez formuláře';
+    queryOne('[data-file]').textContent = 'Bez formuláře';
     setStatus('Připraveno');
     const open = () => native?.postMessage({action: 'open'});
-    document.addEventListener('click', e => {
-      if (e.target.closest('[data-action="open"]')) open();
-      if (e.target.closest('[data-action="support"]')) zfoSupport();
-      const recent = e.target.closest('[data-path]');
+    document.addEventListener('click', event => {
+      if (event.target.closest('[data-action="open"]')) open();
+      if (event.target.closest('[data-action="support"]')) zfoSupport();
+      const recent = event.target.closest('[data-path]');
       if (recent) native?.postMessage({action: 'openFile', path: recent.dataset.path});
     });
     window.zfoAction = name => { if (name === 'open') open(); else if (name === 'support') zfoSupport(); };
     return;
   }
 
-  // Bridge for zfo-editor's page scripts: messages go to the Python engine, its answers run here.
   let queue = Promise.resolve();
   let changed = false;
   let ready = false;
@@ -477,19 +472,19 @@
   // zfo-editor looks every field up with $("*[name=…]"), which walks all elements of the page, and code lists can hold
   // over 100 000 options. Same rules as its get_html_elem, but candidates come from an index of names, rebuilt only when
   // the page changed. takeRecords notices a change made a moment ago, in the same task, too.
-  let named = null;
-  const pageChanges = new MutationObserver(() => { named = null; });
+  let elementsByName = null;
+  const pageChanges = new MutationObserver(() => { elementsByName = null; });
   pageChanges.observe(page, {childList: true, subtree: true, attributes: true, attributeFilter: ['name']});
   const elementsNamed = name => {
-    if (pageChanges.takeRecords().length) named = null;
-    if (!named) {
-      named = new Map();
+    if (pageChanges.takeRecords().length) elementsByName = null;
+    if (!elementsByName) {
+      elementsByName = new Map();
       for (const element of page.querySelectorAll('[name]')) {
         const key = element.getAttribute('name');
-        named.has(key) ? named.get(key).push(element) : named.set(key, [element]);
+        elementsByName.has(key) ? elementsByName.get(key).push(element) : elementsByName.set(key, [element]);
       }
     }
-    return named.get(name) ?? [];
+    return elementsByName.get(name) ?? [];
   };
   const sectionDepth = element => {
     let depth = 0;
@@ -539,10 +534,10 @@
   window.set_readonly_inputs_callback = data => {
     const names = JSON.stringify(data.readonly_names);
     elementsNamed('');
-    if (readonlyApplied?.names === names && readonlyApplied.page === named) { gtk_handler_finished(); return; }
+    if (readonlyApplied?.names === names && readonlyApplied.page === elementsByName) { gtk_handler_finished(); return; }
     applyReadonly(data);
     elementsNamed('');
-    readonlyApplied = {names, page: named};
+    readonlyApplied = {names, page: elementsByName};
   };
   // That pass also takes the red off a field whose value was refused, so the next one has to run in full.
   const refuseValue = window.field_changed_error_callback;
@@ -583,8 +578,6 @@
   };
   const paper = __PAGE__;
   Object.assign(page.style, paper);
-  // Lists the form marks "show the code" (form602displaycode): each item starts with its code, so a narrow field
-  // shows "01" or "CZ" as in Form Filler instead of a cut-off label. The engine may refill a list later.
   const codeLists = new Set(__CODES__);
   const showCodes = select => {
     for (const option of select.options) {
@@ -600,63 +593,57 @@
     showCodes(select);
     new MutationObserver(() => showCodes(select)).observe(select, {childList: true});
   }
-  // The form's own field colours replace zfo-editor's bright yellow.
   const colors = __COLORS__;
   document.documentElement.style.setProperty('--field', colors.field);
   document.documentElement.style.setProperty('--field-readonly', colors.readonly);
   Object.assign(FIELD_COLORS, {editable: colors.field, readonly: colors.readonly});
-  // Paper keeps the form's page size unless a visible table is wider; then it grows to fit it.
-  // A repeating section's trailing column that stays empty in every row is not shown by Form Filler.
-  const trimRepeatingSections = () => {
+  const removeEmptyTrailingRepeatColumns = () => {
     for (const table of page.querySelectorAll('[class~="602-repetition-table"]')) {
-      const col = table.querySelector(':scope > colgroup > col:last-child');
+      const column = table.querySelector(':scope > colgroup > col:last-child');
       const cells = [...table.querySelectorAll(':scope > tbody > tr')]
         .filter(row => !row.querySelector(':scope > td > button[onclick^="clone_table"]'))
         .map(row => row.lastElementChild);
-      if (!col || col.parentElement.children.length < 2 || !cells.length
+      if (!column || column.parentElement.children.length < 2 || !cells.length
           || cells.some(cell => cell.childElementCount || cell.textContent.trim() || cell.parentElement.cells.length < 2)) continue;
       // Removed rather than narrowed: WebKit treats a zero-width column as unsized and splits the width with it.
-      col.remove();
+      column.remove();
       cells.forEach(cell => cell.remove());
     }
   };
   const fitPage = () => {
-    trimRepeatingSections();
+    removeEmptyTrailingRepeatColumns();
     page.style.width = paper.width;
     const style = getComputedStyle(page);
     const contentRight = page.getBoundingClientRect().right - parseFloat(style.paddingRight) * zoom;
     const overflow = Math.max(0, ...[...page.querySelectorAll('table')]
-      .filter(t => t.offsetParent)
-      .map(t => t.getBoundingClientRect().right - contentRight)) / zoom;
+      .filter(table => table.offsetParent)
+      .map(table => table.getBoundingClientRect().right - contentRight)) / zoom;
     if (overflow > 1) page.style.width = `calc(${paper.width} + ${Math.ceil(overflow)}px)`;
   };
   new ResizeObserver(() => ready && fitPage()).observe(page);
 
-  // The form's +/- buttons (602 app events addsect/delsect) drive zfo-editor's working
-  // row or table cloning for the repeating section they sit in.
-  page.addEventListener('click', e => {
-    const button = e.target.closest('button[zfo-app-event]');
-    const event = button?.getAttribute('zfo-app-event') ?? '';
-    const add = event.includes('addsect');
-    if (!add && !event.includes('delsect')) return;
-    e.preventDefault();
-    e.stopPropagation();
-    const starts = prefix => b => (b.getAttribute('onclick') ?? '').startsWith(prefix);
-    let target = [...button.closest('tr').querySelectorAll('button')].find(starts(add ? 'clone_row' : 'del_row'));
+  page.addEventListener('click', event => {
+    const button = event.target.closest('button[zfo-app-event]');
+    const appEvent = button?.getAttribute('zfo-app-event') ?? '';
+    const add = appEvent.includes('addsect');
+    if (!add && !appEvent.includes('delsect')) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const onclickStartsWith = prefix => candidate => (candidate.getAttribute('onclick') ?? '').startsWith(prefix);
+    let target = [...button.closest('tr').querySelectorAll('button')].find(onclickStartsWith(add ? 'clone_row' : 'del_row'));
     if (!target) {
       const section = button.closest('[class~="602-repetition-table"]');
-      target = section && [...section.querySelectorAll(':scope > tbody > tr > td > button')].find(starts(add ? 'clone_table' : 'del_table'));
+      target = section && [...section.querySelectorAll(':scope > tbody > tr > td > button')].find(onclickStartsWith(add ? 'clone_table' : 'del_table'));
     }
     if (!target) {
-      // Buttons placed after their section belong to the nearest repeating section above them.
-      const before = [...page.querySelectorAll(`button[onclick^="${add ? 'clone_' : 'del_'}"]`)]
-        .filter(b => b.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING);
-      target = before.at(-1);
+      const sectionButtonsAbove = [...page.querySelectorAll(`button[onclick^="${add ? 'clone_' : 'del_'}"]`)]
+        .filter(candidate => candidate.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING);
+      target = sectionButtonsAbove.at(-1);
     }
     target?.click();
   }, true);
   // Whether a field would be visible once the page is shown; jQuery's :visible measures, and the page is not laid out yet.
-  const shown = element => {
+  const isShownOnceLaidOut = element => {
     for (let node = element; node && node !== page; node = node.parentElement) {
       if (getComputedStyle(node).display === 'none') return false;
     }
@@ -665,7 +652,7 @@
   // Each answer sends the next message before its task ends, so an empty queue means opening is over. That holds when a
   // step failed too: the user then gets the form as far as it got rather than an empty page.
   const enqueue = task => {
-    const log = e => console.error('zfo', e);
+    const log = error => console.error('zfo', error);
     const tail = queue = queue.then(task).catch(log)
       .then(() => { if (queue === tail && !ready) finishOpening(); }).catch(log);
   };
@@ -674,24 +661,24 @@
   const REFRESHES = new Set(['get_repeatable', 'get_readonly_binds', 'get_multiswitch_list']);
   const newestRefresh = new Map();
   let messages = 0;
-  window.send = msg => {
-    const type = JSON.parse(msg).type;
+  window.send = message => {
+    const type = JSON.parse(message).type;
     const number = ++messages;
     if (REFRESHES.has(type)) newestRefresh.set(type, number);
     enqueue(async () => {
       if (REFRESHES.has(type) && newestRefresh.get(type) !== number) { gtk_handler_finished(); return; }
-      const res = await fetch('/ipc?s=' + SESSION, {method: 'POST', body: msg});
-      if (!res.ok) { setStatus('Chyba: ' + await res.text()); return; }
-      for (const r of await res.json()) {
-        if (r.type === 'check') {
-          showCheck(r.data, r.scripts);
-        } else if (r.type === 'default') {
-          applyDefault(r.data);
-        } else if (r.type === 'javascript') {
-          try { (0, eval)(r.data); } catch (e) { console.error(e, r.data.slice(0, 200)); }
-        } else if (r.type === 'gtk' && r.info_area === 'message_area' && (ready || r.info_type !== INFO_MESSAGE)) {
+      const response = await fetch('/ipc?s=' + SESSION, {method: 'POST', body: message});
+      if (!response.ok) { setStatus('Chyba: ' + await response.text()); return; }
+      for (const answer of await response.json()) {
+        if (answer.type === 'check') {
+          showCheck(answer.data, answer.scripts);
+        } else if (answer.type === 'default') {
+          applyDefault(answer.data);
+        } else if (answer.type === 'javascript') {
+          try { (0, eval)(answer.data); } catch (error) { console.error(error, answer.data.slice(0, 200)); }
+        } else if (answer.type === 'gtk' && answer.info_area === 'message_area' && (ready || answer.info_type !== INFO_MESSAGE)) {
           // The message may carry markup and the form's own texts: parsed inertly, only its text is shown.
-          setStatus(new DOMParser().parseFromString(String(r.data?.to_display ?? ''), 'text/html').body.textContent);
+          setStatus(new DOMParser().parseFromString(String(answer.data?.to_display ?? ''), 'text/html').body.textContent);
         }
       }
       if (GlobalVars.handlers_active < 0) GlobalVars.handlers_active = 0;
@@ -699,66 +686,63 @@
       if (type === 'store_val' && !changed && ready) { changed = true; renderSignatures(); }
       if (type === 'get_multiswitch_list' && !window.selectsSynced) {
         window.selectsSynced = true;
-        $('select[name]').each(function () { if (this.value && shown(this)) $(this).trigger('change'); });
-        $q('[data-cert-slot]').replaceWith(certificates.element);
-        $q('[data-find-slot]').replaceWith(findInput);
+        $('select[name]').each(function () { if (this.value && isShownOnceLaidOut(this)) $(this).trigger('change'); });
+        queryOne('[data-cert-slot]').replaceWith(certificates.element);
+        queryOne('[data-find-slot]').replaceWith(findInput);
       }
     });
   };
 
-  // Signatures panel.
   const icons = {
     ok: '<svg viewBox="0 0 24 24" fill="none" stroke="#1e8e3e" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>',
     warn: '<svg viewBox="0 0 24 24" fill="none" stroke="#b26a00" stroke-width="2"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17v.5"/></svg>',
     bad: '<svg viewBox="0 0 24 24" fill="none" stroke="#c5221f" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/></svg>',
   };
-  const fmt = iso => iso ? new Date(iso).toLocaleString('cs-CZ', {dateStyle: 'medium', timeStyle: 'short'}) : '–';
-  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
-  function card(sig) {
-    const expired = new Date(sig.not_after) < new Date();
+  const formatDateTime = iso => iso ? new Date(iso).toLocaleString('cs-CZ', {dateStyle: 'medium', timeStyle: 'short'}) : '–';
+  const escapeHtml = text => String(text).replace(/[&<>"]/g, character => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[character]));
+  function signatureCard(signature) {
+    const expired = new Date(signature.not_after) < new Date();
     const revocation = window.zfoRevocation;
-    const level = !sig.intact || revocation.revokedBeforeSigning(sig) ? 'bad'
-      : (sig.trusted && !expired && !revocation.revoked(sig)) ? 'ok' : 'warn';
-    const state = !sig.intact ? 'Podpis je porušen – obsah byl po podpisu změněn'
-      : revocation.state(sig) ? revocation.state(sig)
-      : sig.trusted ? 'Podpis je platný, certifikát je důvěryhodný'
-      : sig.unverifiable ? 'Obsah je neporušený, důvěryhodnost certifikátu se nepodařilo ověřit'
+    const level = !signature.intact || revocation.revokedBeforeSigning(signature) ? 'bad'
+      : (signature.trusted && !expired && !revocation.revoked(signature)) ? 'ok' : 'warn';
+    const state = !signature.intact ? 'Podpis je porušen – obsah byl po podpisu změněn'
+      : revocation.state(signature) ? revocation.state(signature)
+      : signature.trusted ? 'Podpis je platný, certifikát je důvěryhodný'
+      : signature.unverifiable ? 'Obsah je neporušený, důvěryhodnost certifikátu se nepodařilo ověřit'
       : 'Obsah je neporušený, certifikát není hodnocen jako důvěryhodný';
-    return `<div class="zfo-card ${level}" title="${esc(sig.reason || '')}">
-      <div class="who">${icons[level]}${esc(sig.subject)}</div>
+    return `<div class="zfo-card ${level}" title="${escapeHtml(signature.reason || '')}">
+      <div class="who">${icons[level]}${escapeHtml(signature.subject)}</div>
       <div class="state">${state}</div>
-      ${sig.trust_source === 'eu' ? '<div class="meta">Vydavatel je v důvěryhodném seznamu EU.</div>' : ''}
-      ${sig.unverifiable ? `<div class="meta">${esc(sig.reason)}</div>` : ''}
-      ${revocation.line(sig)}
-      <div class="meta">Podepsáno: ${fmt(sig.signed_at)}<br>Vystavil: ${esc(sig.issuer)}<br>
-        ${expired ? 'Platnost certifikátu skončila' : 'Certifikát platí do'} ${new Date(sig.not_after).toLocaleDateString('cs-CZ')}</div>
+      ${signature.trust_source === 'eu' ? '<div class="meta">Vydavatel je v důvěryhodném seznamu EU.</div>' : ''}
+      ${signature.unverifiable ? `<div class="meta">${escapeHtml(signature.reason)}</div>` : ''}
+      ${revocation.line(signature)}
+      <div class="meta">Podepsáno: ${formatDateTime(signature.signed_at)}<br>Vystavil: ${escapeHtml(signature.issuer)}<br>
+        ${expired ? 'Platnost certifikátu skončila' : 'Certifikát platí do'} ${new Date(signature.not_after).toLocaleDateString('cs-CZ')}</div>
     </div>`;
   }
   let signatures = __SIGNATURES__;
   function renderSignatures() {
-    const data = signatures.filter(s => !s.publisher);
-    const publication = signatures.find(s => s.role === 'publication');
-    const license = signatures.findLast(s => s.role === 'license');
-    $q('[data-signatures="data"]').innerHTML =
-      (changed && data.length ? '<div class="zfo-note">Formulář byl změněn. Stávající podpis se při uložení nahradí novým.</div>' : '') +
-      (data.length ? data.map(card).join('') : '<div class="zfo-empty">Data formuláře zatím nejsou podepsaná.</div>');
-    $q('[data-signatures="publisher"]').innerHTML =
-      publication ? card(publication) : '<div class="zfo-empty">Formulář nebyl dosud publikován – nemá podpis vydavatele.</div>';
-    $q('[data-license-head]').hidden = !license;
-    $q('[data-signatures="license"]').innerHTML = license ? card(license) : '';
+    const dataSignatures = signatures.filter(signature => !signature.publisher);
+    const publication = signatures.find(signature => signature.role === 'publication');
+    const license = signatures.findLast(signature => signature.role === 'license');
+    queryOne('[data-signatures="data"]').innerHTML =
+      (changed && dataSignatures.length ? '<div class="zfo-note">Formulář byl změněn. Stávající podpis se při uložení nahradí novým.</div>' : '') +
+      (dataSignatures.length ? dataSignatures.map(signatureCard).join('') : '<div class="zfo-empty">Data formuláře zatím nejsou podepsaná.</div>');
+    queryOne('[data-signatures="publisher"]').innerHTML =
+      publication ? signatureCard(publication) : '<div class="zfo-empty">Formulář nebyl dosud publikován – nemá podpis vydavatele.</div>';
+    queryOne('[data-license-head]').hidden = !license;
+    queryOne('[data-signatures="license"]').innerHTML = license ? signatureCard(license) : '';
     window.zfoRevocation.ask(SESSION, signatures, renderSignatures);
   }
   renderSignatures();
 
-  // Form Filler warns when it opens a form its publisher has not signed, or whose publisher signature is broken:
-  // nobody vouches for where such a form came from. Once per file and session, so reloads (import, reset) stay quiet.
-  {
-    const publication = signatures.find(s => s.role === 'publication');
+  const warnAboutUnverifiedPublisherOncePerSession = () => {
+    const publication = signatures.find(signature => signature.role === 'publication');
     const key = 'zfo-publisher-warned:' + FILE;
     let warned = false;
     try { warned = sessionStorage.getItem(key) === '1'; } catch {}
     if (!warned && (!publication || !publication.intact)) {
-      const dialog = $q('[data-publisher-warning]');
+      const dialog = queryOne('[data-publisher-warning]');
       dialog.querySelector('[data-publisher-warning-text]').textContent = publication
         ? 'Podpis vydavatele formuláře je porušen. Formulář mohl být po vydání změněn. Vyplňujte ho, jen pokud důvěřujete jeho zdroji.'
         : 'Formulář nebyl dosud publikován: nemá podpis vydavatele, takže nelze ověřit, kdo ho vydal a zda nebyl změněn. '
@@ -767,32 +751,32 @@
       try { sessionStorage.setItem(key, '1'); } catch {}
       dialog.showModal();
     }
-  }
+  };
+  warnAboutUnverifiedPublisherOncePerSession();
 
   // Certificates for signing. The select joins the toolbar only after the form scripts have
   // wired up their own selects, so they do not treat it as a form field.
   const certificates = window.zfoCertificates(SESSION);
   const certSelect = certificates.select;
 
-  // Form description (Form Filler: Vlastnosti → Popis formuláře).
   const info = __INFO__;
-  const day = iso => new Date(iso).toLocaleDateString('cs-CZ');
-  $q('[data-info]').innerHTML = [
-    info.title && `<b>${esc(info.title)}</b>`,
-    info.subject && `Předmět: ${esc(info.subject)}`,
-    info.author && `Autor: ${esc(info.author)}`,
-    info.keywords && `Klíčová slova: ${esc(info.keywords)}`,
-    info.comment && `Komentář: ${esc(info.comment)}`,
-    info.code && `Kód formuláře: ${esc(info.code)}`,
-    info.form_id && `ID formuláře: ${esc(info.form_id)}`,
-    info.created && `Vytvořen: ${day(info.created)}`,
-    info.modified && `Modifikován: ${day(info.modified)}`,
+  const formatDay = iso => new Date(iso).toLocaleDateString('cs-CZ');
+  queryOne('[data-info]').innerHTML = [
+    info.title && `<b>${escapeHtml(info.title)}</b>`,
+    info.subject && `Předmět: ${escapeHtml(info.subject)}`,
+    info.author && `Autor: ${escapeHtml(info.author)}`,
+    info.keywords && `Klíčová slova: ${escapeHtml(info.keywords)}`,
+    info.comment && `Komentář: ${escapeHtml(info.comment)}`,
+    info.code && `Kód formuláře: ${escapeHtml(info.code)}`,
+    info.form_id && `ID formuláře: ${escapeHtml(info.form_id)}`,
+    info.created && `Vytvořen: ${formatDay(info.created)}`,
+    info.modified && `Modifikován: ${formatDay(info.modified)}`,
     __BLANK__ && 'Zobrazeny výchozí hodnoty – vyplněná data nejsou načtena.',
     info.scripts && 'Některé výpočty nebo kontroly v JavaScriptu 602 Blanketa neumí provést.',
     info.actions && 'Skripty tlačítek a změn polí Blanketa nespouští.',
   ].filter(Boolean).join('<br>');
   if (info.scripts || info.actions) {
-    const notice = $q('[data-notice]');
+    const notice = queryOne('[data-notice]');
     notice.querySelector('span').textContent = (info.scripts
       ? 'Některé výpočty nebo kontroly v tomto formuláři Blanketa neumí provést, pole proto mohou zůstat prázdná nebo neaktuální. '
       : 'Tlačítka a změny polí v tomto formuláři spouštějí skripty, které Blanketa z bezpečnostních důvodů nespouští, '
@@ -802,39 +786,38 @@
     notice.hidden = false;
   }
 
-  // Form check (Form Filler: Zkontrolovat, Shift+F9): required fields and constraints.
-  const labelFor = el => {
-    const td = el.closest('td');
-    for (let cell = td?.previousElementSibling; cell; cell = cell.previousElementSibling) {
-      if (cell.textContent.trim()) return cell.textContent;
+  const labelFor = field => {
+    const cell = field.closest('td');
+    for (let previous = cell?.previousElementSibling; previous; previous = previous.previousElementSibling) {
+      if (previous.textContent.trim()) return previous.textContent;
     }
-    const above = td?.parentElement.previousElementSibling?.cells[[...td.parentElement.cells].indexOf(td)];
-    return above?.textContent.trim() ? above.textContent : el.name;
+    const above = cell?.parentElement.previousElementSibling?.cells[[...cell.parentElement.cells].indexOf(cell)];
+    return above?.textContent.trim() ? above.textContent : field.name;
   };
-  const clean = text => text.replace(/\s+/g, ' ').trim().slice(0, 90);
+  const shortOneLine = text => text.replace(/\s+/g, ' ').trim().slice(0, 90);
   let checkWaiter = null;
   function showCheck(problems, scripts = []) {
-    page.querySelectorAll('.zfo-invalid').forEach(el => el.classList.remove('zfo-invalid'));
+    page.querySelectorAll('.zfo-invalid').forEach(field => field.classList.remove('zfo-invalid'));
     const found = problems
-      .map(p => ({...p, el: document.getElementsByName(p.field)[p.index] ?? document.getElementsByName(p.field)[0]}))
-      .filter(p => p.el?.offsetParent);
-    found.forEach(p => p.el.classList.add('zfo-invalid'));
-    const list = $q('[data-check-list]');
+      .map(problem => ({...problem, element: document.getElementsByName(problem.field)[problem.index] ?? document.getElementsByName(problem.field)[0]}))
+      .filter(problem => problem.element?.offsetParent);
+    found.forEach(problem => problem.element.classList.add('zfo-invalid'));
+    const list = queryOne('[data-check-list]');
     list.innerHTML = found.length || scripts.length ? '' : '<div class="zfo-check-ok">Formulář je vyplněn správně.</div>';
     if (scripts.length) {
       const note = document.createElement('div');
       note.textContent = 'Některé výpočty nebo kontroly tohoto formuláře Blanketa neumí provést, kontrola proto není úplná.';
       list.append(note);
     }
-    for (const p of found) {
+    for (const problem of found) {
       const item = document.createElement('button');
       item.className = 'zfo-check-item';
-      item.innerHTML = `${esc(clean(labelFor(p.el)))}<small>${p.kind === 'required' ? 'Povinná položka není vyplněna'
-        : esc(p.message || 'Hodnota nesplňuje podmínku formuláře')}</small>`;
-      item.addEventListener('click', () => { p.el.scrollIntoView({block: 'center'}); p.el.focus(); });
+      item.innerHTML = `${escapeHtml(shortOneLine(labelFor(problem.element)))}<small>${problem.kind === 'required' ? 'Povinná položka není vyplněna'
+        : escapeHtml(problem.message || 'Hodnota nesplňuje podmínku formuláře')}</small>`;
+      item.addEventListener('click', () => { problem.element.scrollIntoView({block: 'center'}); problem.element.focus(); });
       list.append(item);
     }
-    $q('[data-check]').hidden = false;
+    queryOne('[data-check]').hidden = false;
     togglePanel('panel', true);
     setStatus(found.length ? `Kontrola: ${found.length} ${found.length === 1 ? 'problém' : found.length < 5 ? 'problémy' : 'problémů'}`
       : scripts.length ? 'Kontrola: bez nálezů, ale není úplná' : 'Kontrola: formulář je vyplněn správně');
@@ -842,21 +825,20 @@
     checkWaiter = null;
   }
   const runCheck = () => new Promise(resolve => { checkWaiter = resolve; send(JSON.stringify({type: 'check_form', data: ''})); });
-  page.addEventListener('input', e => e.target.classList?.remove('zfo-invalid'), true);
-  page.addEventListener('change', e => e.target.classList?.remove('zfo-invalid'), true);
+  page.addEventListener('input', event => event.target.classList?.remove('zfo-invalid'), true);
+  page.addEventListener('change', event => event.target.classList?.remove('zfo-invalid'), true);
 
-  // Field help (Form Filler: panel "Nápověda k poli"): the designer's tooltip of the focused field.
-  const helpText = $q('[data-help-text]');
+  const helpText = queryOne('[data-help-text]');
   const helpPlaceholder = page.querySelector('[title]:not([title=""])')
     ? 'Klikněte do pole formuláře a zobrazí se jeho nápověda.'
     : 'Tento formulář nápovědu k polím neobsahuje.';
   helpText.innerHTML = `<span class="zfo-muted">${helpPlaceholder}</span>`;
-  page.addEventListener('focusin', e => {
-    const field = e.target.closest('input, select, textarea');
+  page.addEventListener('focusin', event => {
+    const field = event.target.closest('input, select, textarea');
     if (!field) return;
     const text = field.title.trim();
-    helpText.innerHTML = `<b>${esc(clean(labelFor(field)))}</b>`
-      + (text ? esc(text) : '<span class="zfo-muted">Pole nemá nápovědu.</span>');
+    helpText.innerHTML = `<b>${escapeHtml(shortOneLine(labelFor(field)))}</b>`
+      + (text ? escapeHtml(text) : '<span class="zfo-muted">Pole nemá nápovědu.</span>');
   });
 
   const print = async (fieldsOnly = false) => {
@@ -873,15 +855,14 @@
 
   const savedStatus = (verb, path) => {
     const reveal = native ? ` <a data-reveal>${window.zfoIsMac ? 'Zobrazit ve Finderu' : 'Zobrazit ve složce'}</a>` : '';
-    setStatus(`${verb} <b title="${esc(path)}">${esc(path.split('/').pop())}</b>${reveal}`, true);
-    $q('[data-reveal]')?.addEventListener('click', () => native.postMessage({action: 'reveal', path}));
+    setStatus(`${verb} <b title="${escapeHtml(path)}">${escapeHtml(path.split('/').pop())}</b>${reveal}`, true);
+    queryOne('[data-reveal]')?.addEventListener('click', () => native.postMessage({action: 'reveal', path}));
   };
-  // Form Filler's "Uložit data do souboru" and "Import dat do formuláře" (XML of the form's data model).
   const exportData = async () => {
     await queue;
-    const res = await fetch('/export-data?s=' + SESSION, {method: 'POST'});
-    if (!res.ok) { setStatus('Chyba: ' + await res.text()); return; }
-    const data = await res.json();
+    const response = await fetch('/export-data?s=' + SESSION, {method: 'POST'});
+    if (!response.ok) { setStatus('Chyba: ' + await response.text()); return; }
+    const data = await response.json();
     if (native) {
       native.postMessage({action: 'saveFile', name: data.name, folder: data.folder, content: data.xml});
       return;
@@ -891,7 +872,7 @@
     link.download = data.name;
     link.click();
     URL.revokeObjectURL(link.href);
-    setStatus(`Data stažena jako <b>${esc(data.name)}</b>`, true);
+    setStatus(`Data stažena jako <b>${escapeHtml(data.name)}</b>`, true);
   };
   window.zfoDataSaved = path => savedStatus('Data uložena do', path);
   const importData = () => {
@@ -901,35 +882,33 @@
     input.addEventListener('change', async () => {
       const file = input.files[0];
       if (!file) return;
-      const res = await fetch('/import-data?s=' + SESSION, {method: 'POST', body: await file.text()});
-      if (!res.ok) { setStatus('Import se nepodařil: ' + await res.text()); return; }
+      const response = await fetch('/import-data?s=' + SESSION, {method: 'POST', body: await file.text()});
+      if (!response.ok) { setStatus('Import se nepodařil: ' + await response.text()); return; }
       const url = new URL(location.href);
       url.searchParams.delete('blank');
-      url.searchParams.set('import', (await res.json()).import);
+      url.searchParams.set('import', (await response.json()).import);
       location.href = url;
     });
     input.click();
   };
 
-  // Designer's user buttons: their 602 expression (usually LastParam of SendAppEvent calls) runs step by step.
-  // Steps the app implements itself run natively, the rest go to the form engine.
   const splitArgs = text => {
     const parts = [];
     let depth = 0, quote = null, start = 0;
     for (let i = 0; i < text.length; i++) {
-      const ch = text[i];
-      if (quote) { if (ch === quote) quote = null; continue; }
-      if (ch === '"' || ch === "'") quote = ch;
-      else if (ch === '(' || ch === '{' || ch === '[') depth++;
-      else if (ch === ')' || ch === '}' || ch === ']') depth--;
-      else if (ch === ',' && depth === 0) { parts.push(text.slice(start, i).trim()); start = i + 1; }
+      const character = text[i];
+      if (quote) { if (character === quote) quote = null; continue; }
+      if (character === '"' || character === "'") quote = character;
+      else if (character === '(' || character === '{' || character === '[') depth++;
+      else if (character === ')' || character === '}' || character === ']') depth--;
+      else if (character === ',' && depth === 0) { parts.push(text.slice(start, i).trim()); start = i + 1; }
     }
     parts.push(text.slice(start).trim());
     return parts.filter(Boolean);
   };
   const parseCall = text => {
-    const m = /^\s*([\w.]+)\s*\(([\s\S]*)\)\s*$/.exec(text);
-    return m && {name: m[1], args: m[2]};
+    const match = /^\s*([\w.]+)\s*\(([\s\S]*)\)\s*$/.exec(text);
+    return match && {name: match[1], args: match[2]};
   };
   const engineCommand = async command => {
     gtk_handler_start();
@@ -961,8 +940,7 @@
     }
   }
 
-  // The form's buttons that do what a toolbar button does wear that button's icon.
-  const toolbarIcon = selector => $q(`.zfo-bar ${selector} svg`).outerHTML;
+  const toolbarIcon = selector => queryOne(`.zfo-bar ${selector} svg`).outerHTML;
   const buttonIcons = {
     print: toolbarIcon('[data-action="print"]'),
     saveform: toolbarIcon('[data-menu="save"]'),
@@ -970,33 +948,30 @@
     loaddata: toolbarIcon('[data-action="import-data"]'),
     printfields: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="1.5"/><path d="M7 14h10v7H7z" stroke-dasharray="2 1.5"/><path d="M9.5 17h5"/></svg>',
   };
-  const userButtonBar = $q('[data-user-buttons]');
-  for (const def of __BUTTONS__) {
+  const userButtonBar = queryOne('[data-user-buttons]');
+  for (const definition of __BUTTONS__) {
     const button = document.createElement('button');
-    const fieldsOnly = def.icon === 'print' && /SendAppEvent\s*\(\s*print\s*,\s*2\s*\)/i.test(def.express);
+    const fieldsOnly = definition.icon === 'print' && /SendAppEvent\s*\(\s*print\s*,\s*2\s*\)/i.test(definition.express);
     const icon = fieldsOnly ? buttonIcons.printfields
-      : buttonIcons[def.icon] ?? (/loaddata/i.test(def.express) ? buttonIcons.loaddata : buttonIcons.savedata);
+      : buttonIcons[definition.icon] ?? (/loaddata/i.test(definition.express) ? buttonIcons.loaddata : buttonIcons.savedata);
     button.className = 'zfo-btn icon';
-    button.title = def.tooltip || def.caption;
+    button.title = definition.tooltip || definition.caption;
     button.innerHTML = icon;
-    button.addEventListener('click', () => runExpress(def.express));
+    button.addEventListener('click', () => runExpress(definition.express));
     userButtonBar.append(button);
     userButtonBar.hidden = false;
   }
-  // The form's own "Tisk" button runs CheckData and then Print, as in Form Filler.
-  page.addEventListener('click', async e => {
-    const button = e.target.closest('button[zfo-app-event]');
+  page.addEventListener('click', async event => {
+    const button = event.target.closest('button[zfo-app-event]');
     if (!button?.getAttribute('zfo-app-event').includes('print(')) return;
-    e.preventDefault();
-    e.stopPropagation();
+    event.preventDefault();
+    event.stopPropagation();
     if (await runCheck() === 0) print();
   }, true);
 
-  // Side panels as in Form Filler: field help on the left, form and certificate information on the right.
-  // Each can be hidden; the choice is remembered for the next form.
   function togglePanel(name, show) {
     const hidden = document.body.classList.toggle(`${name}-hidden`, show === undefined ? undefined : !show);
-    $q(`.zfo-bar [data-action="${name}"]`).classList.toggle('active', !hidden);
+    queryOne(`.zfo-bar [data-action="${name}"]`).classList.toggle('active', !hidden);
     try { localStorage.setItem(`zfo-${name}-hidden`, hidden ? '1' : '0'); } catch {}
     if (ready) autoZoom();
   }
@@ -1006,48 +981,44 @@
     if (hidden) togglePanel(name, false);
   }
 
-  // Toolbar drop-down menus (Uložit, Obnovit).
-  const closeMenus = () => document.querySelectorAll('[data-menu-list]').forEach(m => { m.hidden = true; });
+  const closeMenus = () => document.querySelectorAll('[data-menu-list]').forEach(list => { list.hidden = true; });
   for (const button of document.querySelectorAll('[data-menu]')) {
-    button.addEventListener('click', e => {
-      e.stopPropagation();
-      const list = $q(`[data-menu-list="${button.dataset.menu}"]`);
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      const list = queryOne(`[data-menu-list="${button.dataset.menu}"]`);
       const open = list.hidden;
       closeMenus();
       list.hidden = !open;
     });
   }
   document.addEventListener('click', closeMenus);
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeMenus(); });
+  document.addEventListener('keydown', event => { if (event.key === 'Escape') closeMenus(); });
 
-  // "Podepsat a uložit": the certificate is chosen in a dialog; the last one used is preselected.
-  const signDialog = $q('[data-sign-dialog]');
+  const signDialog = queryOne('[data-sign-dialog]');
   signDialog.addEventListener('close', () => { if (signDialog.returnValue === 'sign') actions.sign(); });
 
-  // Field defaults (Form Filler: Obnovit výchozí hodnotu, Shift+Ctrl+Del) for the field last edited.
   let lastField = null;
-  page.addEventListener('focusin', e => { lastField = e.target.closest('input[name], select[name], textarea[name]') ?? lastField; });
+  page.addEventListener('focusin', event => { lastField = event.target.closest('input[name], select[name], textarea[name]') ?? lastField; });
   function resetField() {
     closeMenus();
     if (!lastField) { setStatus('Klikněte do pole, jehož výchozí hodnotu chcete obnovit.'); return; }
     send(JSON.stringify({type: 'default_value', data: {field: lastField.name}}));
   }
   function applyDefault({field, value}) {
-    const el = lastField?.name === field ? lastField : document.getElementsByName(field)[0];
-    if (!el || value === null) { setStatus('Pole nemá výchozí hodnotu.'); return; }
-    if (el.type === 'radio') {
-      document.getElementsByName(field).forEach(r => { r.checked = r.value === value; });
-    } else if (el.type === 'checkbox') {
-      el.checked = !['', '0', 'false'].includes(value);
+    const element = lastField?.name === field ? lastField : document.getElementsByName(field)[0];
+    if (!element || value === null) { setStatus('Pole nemá výchozí hodnotu.'); return; }
+    if (element.type === 'radio') {
+      document.getElementsByName(field).forEach(radio => { radio.checked = radio.value === value; });
+    } else if (element.type === 'checkbox') {
+      element.checked = !['', '0', 'false'].includes(value);
     } else {
-      el.value = value;
+      element.value = value;
     }
-    $(el).trigger('change');
-    setStatus(`Obnovena výchozí hodnota pole ${clean(labelFor(el))}`);
+    $(element).trigger('change');
+    setStatus(`Obnovena výchozí hodnota pole ${shortOneLine(labelFor(element))}`);
   }
 
-  // Find (Form Filler: Najít): text of the form and values of its fields, highlighted in document order.
-  const findBar = $q('.zfo-find');
+  const findBar = queryOne('.zfo-find');
   const findInput = document.createElement('input');
   findInput.type = 'search';
   findInput.placeholder = 'Najít ve formuláři';
@@ -1056,7 +1027,7 @@
   function clearFind() {
     highlights?.delete('zfo-find');
     highlights?.delete('zfo-find-current');
-    page.querySelectorAll('.zfo-find-hit, .zfo-find-current').forEach(el => el.classList.remove('zfo-find-hit', 'zfo-find-current'));
+    page.querySelectorAll('.zfo-find-hit, .zfo-find-current').forEach(element => element.classList.remove('zfo-find-hit', 'zfo-find-current'));
     findHits = []; findIndex = -1;
   }
   function runFind() {
@@ -1073,28 +1044,28 @@
             const range = new Range();
             range.setStart(node, i);
             range.setEnd(node, i + query.length);
-            findHits.push({range, el: parent});
+            findHits.push({range, element: parent});
           }
         } else if (node.matches('input[type=text], textarea, select') && node.offsetParent) {
           const value = node.tagName === 'SELECT' ? node.selectedOptions[0]?.text ?? '' : node.value;
-          if (value.toLocaleLowerCase('cs').includes(query)) { node.classList.add('zfo-find-hit'); findHits.push({el: node}); }
+          if (value.toLocaleLowerCase('cs').includes(query)) { node.classList.add('zfo-find-hit'); findHits.push({element: node}); }
         }
       }
-      const ranges = findHits.filter(h => h.range).map(h => h.range);
+      const ranges = findHits.filter(hit => hit.range).map(hit => hit.range);
       if (highlights && ranges.length) highlights.set('zfo-find', new Highlight(...ranges));
     }
     stepFind(1);
   }
   function stepFind(direction) {
     if (findBar.hidden) { openFind(); return; }
-    const count = $q('[data-find-count]');
+    const count = queryOne('[data-find-count]');
     if (!findHits.length) { count.textContent = findInput.value.trim() ? 'Nenalezeno' : ''; return; }
-    findHits[findIndex]?.el.classList.remove('zfo-find-current');
+    findHits[findIndex]?.element.classList.remove('zfo-find-current');
     findIndex = (findIndex + direction + findHits.length) % findHits.length;
     const hit = findHits[findIndex];
     if (hit.range) highlights?.set('zfo-find-current', new Highlight(hit.range));
-    else { highlights?.delete('zfo-find-current'); hit.el.classList.add('zfo-find-current'); }
-    hit.el.scrollIntoView({block: 'center'});
+    else { highlights?.delete('zfo-find-current'); hit.element.classList.add('zfo-find-current'); }
+    hit.element.scrollIntoView({block: 'center'});
     count.textContent = `${findIndex + 1} z ${findHits.length}`;
   }
   function openFind() {
@@ -1103,25 +1074,23 @@
     findInput.focus();
     findInput.select();
   }
-  function closeFind() { findBar.hidden = true; clearFind(); $q('[data-find-count]').textContent = ''; }
+  function closeFind() { findBar.hidden = true; clearFind(); queryOne('[data-find-count]').textContent = ''; }
   let findTimer;
   findInput.addEventListener('input', () => { clearTimeout(findTimer); findTimer = setTimeout(runFind, 150); });
-  findInput.addEventListener('keydown', e => {
-    if (e.key === 'Enter') { e.preventDefault(); stepFind(e.shiftKey ? -1 : 1); }
-    if (e.key === 'Escape') { e.preventDefault(); closeFind(); }
+  findInput.addEventListener('keydown', event => {
+    if (event.key === 'Enter') { event.preventDefault(); stepFind(event.shiftKey ? -1 : 1); }
+    if (event.key === 'Escape') { event.preventDefault(); closeFind(); }
   });
-  findBar.querySelectorAll('[data-find-step]').forEach(b => b.addEventListener('click', () => stepFind(Number(b.dataset.findStep))));
-  $q('[data-find-close]').addEventListener('click', closeFind);
+  findBar.querySelectorAll('[data-find-step]').forEach(button => button.addEventListener('click', () => stepFind(Number(button.dataset.findStep))));
+  queryOne('[data-find-close]').addEventListener('click', closeFind);
 
-  // Zoom.
   let zoom = 1;
-  // Until the user picks a zoom, a page wider than the space between the panels is shrunk to fit (never enlarged).
   let autoFit = true;
-  const applyZoom = z => { zoom = Math.min(3, Math.max(.4, z)); page.style.zoom = zoom; $q('.zfo-zoom').textContent = Math.round(zoom * 100) + ' %'; };
-  const widthZoom = () => ($q('.zfo-stage').clientWidth - 48) / (page.getBoundingClientRect().width / zoom);
+  const applyZoom = wanted => { zoom = Math.min(3, Math.max(.4, wanted)); page.style.zoom = zoom; queryOne('.zfo-zoom').textContent = Math.round(zoom * 100) + ' %'; };
+  const widthZoom = () => (queryOne('.zfo-stage').clientWidth - 48) / (page.getBoundingClientRect().width / zoom);
   const fitWidth = () => applyZoom(widthZoom());
   const autoZoom = () => { if (autoFit) applyZoom(Math.min(1, widthZoom())); };
-  const manualZoom = z => { autoFit = false; applyZoom(z); };
+  const manualZoom = wanted => { autoFit = false; applyZoom(wanted); };
   window.addEventListener('resize', autoZoom);
 
   const actions = {
@@ -1149,11 +1118,11 @@
     },
     'save-plain': async () => {
       await queue;
-      if (signatures.some(s => !s.publisher)
+      if (signatures.some(signature => !signature.publisher)
           && !confirm('Uložením bez podpisu se z formuláře odstraní stávající elektronický podpis. Pokračovat?')) return;
-      const res = await fetch('/save?s=' + SESSION, {method: 'POST'});
-      if (!res.ok) { setStatus('Chyba: ' + await res.text()); return; }
-      const result = await res.json();
+      const response = await fetch('/save?s=' + SESSION, {method: 'POST'});
+      if (!response.ok) { setStatus('Chyba: ' + await response.text()); return; }
+      const result = await response.json();
       signatures = result.signatures; changed = false; renderSignatures();
       savedStatus('Uloženo do', result.saved);
     },
@@ -1163,35 +1132,34 @@
       if (!certSelect.value) { setStatus('Vyber certifikát pro podpis.'); actions.save(); return; }
       certificates.remember();
       setStatus('Podepisuji… (token si může vyžádat PIN)');
-      const res = await fetch('/save?s=' + SESSION + '&cert=' + encodeURIComponent(certSelect.value),
+      const response = await fetch('/save?s=' + SESSION + '&cert=' + encodeURIComponent(certSelect.value),
                               {method: 'POST', body: JSON.stringify({password: certificates.password()})});
-      if (!res.ok) { setStatus('Chyba: ' + await res.text()); return; }
-      const result = await res.json();
+      if (!response.ok) { setStatus('Chyba: ' + await response.text()); return; }
+      const result = await response.json();
       signatures = result.signatures; changed = false; renderSignatures();
       savedStatus('Podepsáno a uloženo jako', result.saved);
     },
   };
   // A hidden page has no visible fields: until it is shown, a check would find nothing wrong and the zoom nothing to fit.
   const AVAILABLE_WHILE_OPENING = new Set(['open', 'support', 'help', 'panel']);
-  const act = name => { if (ready || AVAILABLE_WHILE_OPENING.has(name)) actions[name]?.(); };
+  const runAction = name => { if (ready || AVAILABLE_WHILE_OPENING.has(name)) actions[name]?.(); };
   for (const button of document.querySelectorAll('.zfo-bar [data-action], .zfo-close[data-action]')) {
-    button.addEventListener('click', () => act(button.dataset.action));
+    button.addEventListener('click', () => runAction(button.dataset.action));
   }
-  // Native menus call into the page through this.
-  window.zfoAction = act;
-  document.addEventListener('keydown', e => {
-    const shortcut = e.key === 'F9' ? (e.shiftKey ? 'check' : 'recalc')
-      : !window.zfoShortcut(e) ? null
-      : e.key === '+' || e.key === '=' ? 'zoom-in'
-      : e.key === '-' ? 'zoom-out'
-      : e.key.toLowerCase() === 's' ? (e.shiftKey ? 'save' : 'save-plain')
-      : e.key === 'p' ? 'print'
-      : e.key === 'f' ? 'find'
-      : e.key.toLowerCase() === 'g' ? (e.shiftKey ? 'find-previous' : 'find-next')
-      : e.key === 'Backspace' && e.shiftKey ? 'reset-field' : null;
+  window.zfoAction = runAction;
+  document.addEventListener('keydown', event => {
+    const shortcut = event.key === 'F9' ? (event.shiftKey ? 'check' : 'recalc')
+      : !window.zfoShortcut(event) ? null
+      : event.key === '+' || event.key === '=' ? 'zoom-in'
+      : event.key === '-' ? 'zoom-out'
+      : event.key.toLowerCase() === 's' ? (event.shiftKey ? 'save' : 'save-plain')
+      : event.key === 'p' ? 'print'
+      : event.key === 'f' ? 'find'
+      : event.key.toLowerCase() === 'g' ? (event.shiftKey ? 'find-previous' : 'find-next')
+      : event.key === 'Backspace' && event.shiftKey ? 'reset-field' : null;
     if (!shortcut) return;
-    e.preventDefault();
-    act(shortcut);
+    event.preventDefault();
+    runAction(shortcut);
   });
 })(/* __zfo_shell__ */);
 </script>

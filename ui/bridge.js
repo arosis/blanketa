@@ -1,33 +1,25 @@
-// Link between the page and the desktop app around it, shared by the ZFO and PDF pages:
-//  - macOS app: WKWebView message handler "app" (macapp/main.swift); it prints and has native menus;
-//  - Windows/Linux app: pywebview, window.pywebview.api.message (desktop.py); shortcuts are handled here;
-//  - plain browser: null.
 window.zfoNative = (() => {
   const mac = window.webkit?.messageHandlers?.app;
-  if (mac) return {platform: 'mac', printsNatively: true, postMessage: m => mac.postMessage(m)};
+  if (mac) return {platform: 'mac', printsNatively: true, postMessage: message => mac.postMessage(message)};
   if (!window.ZFO_DESKTOP) return null;
   const ready = new Promise(resolve => window.pywebview?.api
     ? resolve() : window.addEventListener('pywebviewready', resolve, {once: true}));
-  return {platform: 'desktop', printsNatively: false, postMessage: m => ready.then(() => window.pywebview.api.message(m))};
+  return {platform: 'desktop', printsNatively: false, postMessage: message => ready.then(() => window.pywebview.api.message(message))};
 })();
 
-// Shortcut modifier and labels: ⌘ on a Mac, Ctrl elsewhere.
 window.zfoIsMac = /Mac/.test(navigator.platform);
-window.zfoShortcut = e => (window.zfoIsMac ? e.metaKey : e.ctrlKey);
+window.zfoShortcut = event => (window.zfoIsMac ? event.metaKey : event.ctrlKey);
 if (!window.zfoIsMac) {
   const relabel = text => text.replace(/⇧⌘/g, 'Ctrl+Shift+').replace(/⌥⌘/g, 'Ctrl+Alt+').replace(/⌘/g, 'Ctrl+')
     .replace(/⇧/g, 'Shift+').replace(/⌫/g, 'Backspace');
   document.addEventListener('DOMContentLoaded', () => {
-    for (const el of document.querySelectorAll('[title*="⌘"], [title*="⇧"]')) el.title = relabel(el.title);
-    for (const el of document.querySelectorAll('kbd')) el.textContent = relabel(el.textContent);
+    for (const element of document.querySelectorAll('[title*="⌘"], [title*="⇧"]')) element.title = relabel(element.title);
+    for (const element of document.querySelectorAll('kbd')) element.textContent = relabel(element.textContent);
   });
 }
 
-// Certificate choice for the signing dialog, shared by both pages. Builds (detached, so form scripts never
-// see it as a field) a select filled from /identities, a password field shown for certificate files, and
-// "Přidat certifikát ze souboru…" for .pfx/.p12 files. Returns {element, select, password(), remember()}.
-// session: the page's session token, which the server requires before it stores a certificate file.
-window.zfoCertificates = session => {
+// Built detached, so form scripts never see it as a field.
+window.zfoCertificates = sessionToken => {
   const element = document.createElement('div');
   element.className = 'zfo-cert-choice';
   element.innerHTML = `<select class="zfo-cert" title="Certifikát pro podpis"></select>
@@ -37,24 +29,24 @@ window.zfoCertificates = session => {
   const select = element.querySelector('select');
   const passwordRow = element.querySelector('[data-cert-password]');
   const password = passwordRow.querySelector('input');
-  let list = [];
-  const update = () => { passwordRow.hidden = !list.find(c => c.id === select.value)?.needs_password; };
-  const render = wanted => {
-    select.innerHTML = list.length ? '<option value="">Vyber certifikát pro podpis…</option>'
+  let identities = [];
+  const updatePasswordRow = () => { passwordRow.hidden = !identities.find(identity => identity.id === select.value)?.needs_password; };
+  const renderOptions = wanted => {
+    select.innerHTML = identities.length ? '<option value="">Vyber certifikát pro podpis…</option>'
                                    : '<option value="">Žádný podpisový certifikát – přidejte ho ze souboru</option>';
-    for (const c of list) {
+    for (const identity of identities) {
       const option = document.createElement('option');
-      option.value = c.id;
-      option.textContent = (c.token ? '🔑 ' : '') + c.subject + (c.source === 'test' ? ' (TEST)' : '')
-        + (c.source === 'file' ? ' (soubor)' : '') + (c.not_after ? ' – do ' + c.not_after : '');
+      option.value = identity.id;
+      option.textContent = (identity.token ? '🔑 ' : '') + identity.subject + (identity.source === 'test' ? ' (TEST)' : '')
+        + (identity.source === 'file' ? ' (soubor)' : '') + (identity.not_after ? ' – do ' + identity.not_after : '');
       select.append(option);
     }
     try { wanted ??= localStorage.getItem('zfo-cert'); } catch {}
-    if (list.some(c => c.id === wanted)) select.value = wanted;
-    update();
+    if (identities.some(identity => identity.id === wanted)) select.value = wanted;
+    updatePasswordRow();
   };
-  select.addEventListener('change', update);
-  fetch('/identities').then(r => r.json()).then(found => { list = found; render(); });
+  select.addEventListener('change', updatePasswordRow);
+  fetch('/identities').then(response => response.json()).then(found => { identities = found; renderOptions(); });
   element.querySelector('[data-cert-add]').addEventListener('click', () => {
     const input = document.createElement('input');
     input.type = 'file';
@@ -66,11 +58,11 @@ window.zfoCertificates = session => {
       if (secret === null) return;
       let binary = '';
       for (const byte of new Uint8Array(await file.arrayBuffer())) binary += String.fromCharCode(byte);
-      const res = await fetch('/add-certificate?s=' + session, {method: 'POST', body: JSON.stringify({data: btoa(binary), password: secret})});
-      if (!res.ok) { alert(await res.text()); return; }
-      const known = new Set(list.map(c => c.id));
-      list = await res.json();
-      render(list.find(c => !known.has(c.id))?.id);
+      const response = await fetch('/add-certificate?s=' + sessionToken, {method: 'POST', body: JSON.stringify({data: btoa(binary), password: secret})});
+      if (!response.ok) { alert(await response.text()); return; }
+      const knownIds = new Set(identities.map(identity => identity.id));
+      identities = await response.json();
+      renderOptions(identities.find(identity => !knownIds.has(identity.id))?.id);
     });
     input.click();
   });
@@ -81,20 +73,17 @@ window.zfoCertificates = session => {
   };
 };
 
-// Opens a web page in the system browser; the app windows only ever show local forms.
 window.zfoOpenUrl = url => {
   if (!/^https?:\/\//.test(url)) return;
   if (window.zfoNative) window.zfoNative.postMessage({action: 'openUrl', url});
   else window.open(url, '_blank', 'noopener');
 };
 
-// "Podpořit Blanketu": the app is free; this shows how to send a voluntary contribution. The QR code is a Czech
-// QR platba (SPD) for the account below without an amount, so the payer chooses it in their bank app.
 window.zfoSupport = (() => {
   const SUPPORT = {
     account: '7133557349/0800',
     iban: 'CZ43 0800 0000 0071 3355 7349',
-    qr: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 164 164"><path transform="scale(4)" stroke="#000" d="M2 2.5h7m1 0h1m1 0h1m2 0h2m4 0h2m1 0h2m1 0h4m1 0h7m-37 1h1m5 0h1m4 0h5m1 0h3m6 0h1m3 0h1m5 0h1m-37 1h1m1 0h3m1 0h1m2 0h1m1 0h4m1 0h3m2 0h4m1 0h3m1 0h1m1 0h3m1 0h1m-37 1h1m1 0h3m1 0h1m1 0h2m4 0h1m5 0h1m1 0h4m1 0h1m2 0h1m1 0h3m1 0h1m-37 1h1m1 0h3m1 0h1m1 0h3m5 0h2m2 0h1m1 0h3m2 0h1m2 0h1m1 0h3m1 0h1m-37 1h1m5 0h1m1 0h2m1 0h1m1 0h1m1 0h3m1 0h1m2 0h1m1 0h1m5 0h1m5 0h1m-37 1h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7m-29 1h5m1 0h3m2 0h5m3 0h1m-28 1h1m3 0h1m1 0h4m2 0h1m2 0h2m2 0h4m1 0h1m4 0h5m2 0h1m-37 1h4m5 0h3m2 0h1m3 0h2m2 0h2m1 0h3m1 0h1m2 0h3m1 0h1m-35 1h7m4 0h1m1 0h1m1 0h3m1 0h4m2 0h1m1 0h1m1 0h1m2 0h1m-35 1h1m4 0h1m2 0h1m1 0h1m1 0h2m1 0h3m1 0h4m5 0h1m3 0h1m1 0h2m-36 1h2m1 0h1m2 0h7m3 0h3m2 0h1m1 0h1m2 0h8m2 0h1m-35 1h1m2 0h1m1 0h1m5 0h2m1 0h1m3 0h1m1 0h4m1 0h1m2 0h1m1 0h2m2 0h1m-36 1h1m2 0h3m1 0h3m1 0h1m2 0h1m1 0h1m2 0h2m1 0h1m3 0h3m2 0h3m-35 1h1m1 0h4m1 0h2m1 0h1m1 0h1m3 0h3m1 0h2m1 0h1m2 0h1m1 0h1m1 0h1m1 0h5m-37 1h1m1 0h3m1 0h1m2 0h1m2 0h3m3 0h2m4 0h1m1 0h2m1 0h3m2 0h1m-33 1h1m2 0h1m4 0h2m1 0h2m1 0h2m1 0h2m2 0h1m2 0h4m2 0h1m2 0h2m-34 1h4m6 0h2m1 0h2m2 0h1m2 0h1m3 0h1m1 0h1m2 0h1m-33 1h2m6 0h2m1 0h2m4 0h2m2 0h1m2 0h1m2 0h1m2 0h1m3 0h1m1 0h1m-37 1h1m1 0h1m1 0h3m1 0h3m2 0h1m1 0h1m1 0h3m1 0h1m1 0h1m2 0h1m1 0h4m4 0h1m-34 1h1m5 0h5m2 0h3m1 0h1m1 0h4m2 0h1m1 0h3m1 0h1m-33 1h2m1 0h4m1 0h1m2 0h1m1 0h2m1 0h1m1 0h4m3 0h1m1 0h1m3 0h1m1 0h1m-34 1h1m2 0h1m3 0h1m3 0h2m1 0h1m3 0h4m4 0h2m3 0h2m1 0h1m-36 1h1m1 0h4m1 0h1m5 0h3m2 0h2m3 0h2m3 0h2m2 0h2m-35 1h2m1 0h1m1 0h1m1 0h2m2 0h4m2 0h3m3 0h1m1 0h4m3 0h2m1 0h2m-35 1h1m2 0h2m2 0h7m3 0h1m1 0h4m2 0h3m-25 1h1m2 0h1m3 0h6m1 0h3m1 0h1m6 0h1m2 0h2m-35 1h2m1 0h2m1 0h7m1 0h1m1 0h1m4 0h1m4 0h1m1 0h9m-29 1h2m1 0h1m1 0h3m2 0h1m1 0h6m2 0h1m3 0h1m3 0h1m-37 1h7m1 0h3m1 0h1m2 0h1m1 0h1m2 0h1m2 0h1m1 0h1m1 0h2m1 0h1m1 0h1m1 0h1m-35 1h1m5 0h1m2 0h1m2 0h2m2 0h4m2 0h2m4 0h1m3 0h5m-37 1h1m1 0h3m1 0h1m1 0h1m1 0h2m6 0h2m2 0h1m1 0h1m3 0h5m1 0h1m-35 1h1m1 0h3m1 0h1m3 0h3m1 0h1m1 0h1m2 0h2m2 0h1m1 0h2m1 0h1m1 0h1m3 0h1m1 0h1m-37 1h1m1 0h3m1 0h1m3 0h1m2 0h2m1 0h1m3 0h1m1 0h2m3 0h1m2 0h1m2 0h1m-34 1h1m5 0h1m2 0h1m1 0h1m1 0h2m2 0h2m2 0h1m1 0h2m7 0h1m1 0h2m-36 1h7m1 0h4m1 0h3m3 0h1m1 0h1m1 0h1m2 0h2m1 0h2m2 0h1m1 0h2"/></svg>',
+    qrPaymentWithoutAmount: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 164 164"><path transform="scale(4)" stroke="#000" d="M2 2.5h7m1 0h1m1 0h1m2 0h2m4 0h2m1 0h2m1 0h4m1 0h7m-37 1h1m5 0h1m4 0h5m1 0h3m6 0h1m3 0h1m5 0h1m-37 1h1m1 0h3m1 0h1m2 0h1m1 0h4m1 0h3m2 0h4m1 0h3m1 0h1m1 0h3m1 0h1m-37 1h1m1 0h3m1 0h1m1 0h2m4 0h1m5 0h1m1 0h4m1 0h1m2 0h1m1 0h3m1 0h1m-37 1h1m1 0h3m1 0h1m1 0h3m5 0h2m2 0h1m1 0h3m2 0h1m2 0h1m1 0h3m1 0h1m-37 1h1m5 0h1m1 0h2m1 0h1m1 0h1m1 0h3m1 0h1m2 0h1m1 0h1m5 0h1m5 0h1m-37 1h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7m-29 1h5m1 0h3m2 0h5m3 0h1m-28 1h1m3 0h1m1 0h4m2 0h1m2 0h2m2 0h4m1 0h1m4 0h5m2 0h1m-37 1h4m5 0h3m2 0h1m3 0h2m2 0h2m1 0h3m1 0h1m2 0h3m1 0h1m-35 1h7m4 0h1m1 0h1m1 0h3m1 0h4m2 0h1m1 0h1m1 0h1m2 0h1m-35 1h1m4 0h1m2 0h1m1 0h1m1 0h2m1 0h3m1 0h4m5 0h1m3 0h1m1 0h2m-36 1h2m1 0h1m2 0h7m3 0h3m2 0h1m1 0h1m2 0h8m2 0h1m-35 1h1m2 0h1m1 0h1m5 0h2m1 0h1m3 0h1m1 0h4m1 0h1m2 0h1m1 0h2m2 0h1m-36 1h1m2 0h3m1 0h3m1 0h1m2 0h1m1 0h1m2 0h2m1 0h1m3 0h3m2 0h3m-35 1h1m1 0h4m1 0h2m1 0h1m1 0h1m3 0h3m1 0h2m1 0h1m2 0h1m1 0h1m1 0h1m1 0h5m-37 1h1m1 0h3m1 0h1m2 0h1m2 0h3m3 0h2m4 0h1m1 0h2m1 0h3m2 0h1m-33 1h1m2 0h1m4 0h2m1 0h2m1 0h2m1 0h2m2 0h1m2 0h4m2 0h1m2 0h2m-34 1h4m6 0h2m1 0h2m2 0h1m2 0h1m3 0h1m1 0h1m2 0h1m-33 1h2m6 0h2m1 0h2m4 0h2m2 0h1m2 0h1m2 0h1m2 0h1m3 0h1m1 0h1m-37 1h1m1 0h1m1 0h3m1 0h3m2 0h1m1 0h1m1 0h3m1 0h1m1 0h1m2 0h1m1 0h4m4 0h1m-34 1h1m5 0h5m2 0h3m1 0h1m1 0h4m2 0h1m1 0h3m1 0h1m-33 1h2m1 0h4m1 0h1m2 0h1m1 0h2m1 0h1m1 0h4m3 0h1m1 0h1m3 0h1m1 0h1m-34 1h1m2 0h1m3 0h1m3 0h2m1 0h1m3 0h4m4 0h2m3 0h2m1 0h1m-36 1h1m1 0h4m1 0h1m5 0h3m2 0h2m3 0h2m3 0h2m2 0h2m-35 1h2m1 0h1m1 0h1m1 0h2m2 0h4m2 0h3m3 0h1m1 0h4m3 0h2m1 0h2m-35 1h1m2 0h2m2 0h7m3 0h1m1 0h4m2 0h3m-25 1h1m2 0h1m3 0h6m1 0h3m1 0h1m6 0h1m2 0h2m-35 1h2m1 0h2m1 0h7m1 0h1m1 0h1m4 0h1m4 0h1m1 0h9m-29 1h2m1 0h1m1 0h3m2 0h1m1 0h6m2 0h1m3 0h1m3 0h1m-37 1h7m1 0h3m1 0h1m2 0h1m1 0h1m2 0h1m2 0h1m1 0h1m1 0h2m1 0h1m1 0h1m1 0h1m-35 1h1m5 0h1m2 0h1m2 0h2m2 0h4m2 0h2m4 0h1m3 0h5m-37 1h1m1 0h3m1 0h1m1 0h1m1 0h2m6 0h2m2 0h1m1 0h1m3 0h5m1 0h1m-35 1h1m1 0h3m1 0h1m3 0h3m1 0h1m1 0h1m2 0h2m2 0h1m1 0h2m1 0h1m1 0h1m3 0h1m1 0h1m-37 1h1m1 0h3m1 0h1m3 0h1m2 0h2m1 0h1m3 0h1m1 0h2m3 0h1m2 0h1m2 0h1m-34 1h1m5 0h1m2 0h1m1 0h1m1 0h2m2 0h2m2 0h1m1 0h2m7 0h1m1 0h2m-36 1h7m1 0h4m1 0h3m3 0h1m1 0h1m1 0h1m2 0h2m1 0h2m2 0h1m1 0h2"/></svg>',
     links: [
       {title: 'Přispět přes GitHub Sponsors', url: 'https://github.com/sponsors/arosis'},
       {title: 'Kafe přes Ko-fi', url: 'https://ko-fi.com/rivel_arosis'},
@@ -118,7 +107,7 @@ window.zfoSupport = (() => {
         <h2>Podpořit Blanketu</h2>
         <p>Blanketa je zdarma a zdarma zůstane. Pokud vám ušetřila čas, můžete na její další vývoj přispět
           libovolnou částkou. Děkuji!</p>
-        <div class="zfo-support-qr">${SUPPORT.qr}
+        <div class="zfo-support-qr">${SUPPORT.qrPaymentWithoutAmount}
           <dl><dt>Číslo účtu</dt><dd data-account></dd><dt>IBAN</dt><dd data-iban></dd>
             <dt>QR platbu naskenujte v aplikaci banky, částku zvolíte sami.</dt></dl></div>
         <div class="zfo-support-links" data-links></div>
@@ -147,67 +136,64 @@ window.zfoSupport = (() => {
 // Links in a form (fo:basic-link) or a PDF never navigate the app window: a web page there could reach the host.
 // Web links open in the system browser, links within the page keep working, anything else (javascript:, file:) is
 // dropped.
-document.addEventListener('click', e => {
-  const link = e.target.closest?.('a[href]');
+document.addEventListener('click', event => {
+  const link = event.target.closest?.('a[href]');
   if (!link) return;
   const href = link.getAttribute('href');
   if (href.startsWith('#')) return;
-  e.preventDefault();
-  e.stopImmediatePropagation();
+  event.preventDefault();
+  event.stopImmediatePropagation();
   if (/^https?:\/\//i.test(link.href)) window.zfoOpenUrl(link.href);
 }, true);
 
-// Whether issuers revoked the certificates of the signatures on a page. Asked after the page is up, because the answer
-// may need a download: render(sigs) draws what is known and is called again when more arrives.
 window.zfoRevocation = (() => {
-  const known = new Map();
-  const date = iso => new Date(iso).toLocaleDateString('cs-CZ');
-  const escape = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
-  const of = sig => known.get(sig.certificate);
+  const statesByCertificate = new Map();
+  const formatDate = iso => new Date(iso).toLocaleDateString('cs-CZ');
+  const escapeHtml = text => String(text).replace(/[&<>"]/g, character => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[character]));
+  const stateOf = signature => statesByCertificate.get(signature.certificate);
   return {
-    // Fills in what is missing for these signatures and calls redraw once it has arrived.
     ask(session, signatures, redraw) {
-      const missing = [...new Set(signatures.map(s => s.certificate))].filter(id => id && !known.has(id));
+      const missing = [...new Set(signatures.map(signature => signature.certificate))].filter(id => id && !statesByCertificate.has(id));
       if (!missing.length) return;
-      missing.forEach(id => known.set(id, {status: 'pending'}));
+      missing.forEach(id => statesByCertificate.set(id, {status: 'pending'}));
       redraw();
       const failed = {status: 'unknown', reason: 'Stav certifikátu se nepodařilo ověřit.'};
       fetch(`/revocation?s=${session}`, {method: 'POST', body: JSON.stringify(missing)})
-        .then(res => res.ok ? res.json() : {}).catch(() => ({}))
-        .then(answer => { missing.forEach(id => known.set(id, answer[id] || failed)); redraw(); });
+        .then(response => response.ok ? response.json() : {}).catch(() => ({}))
+        .then(answer => { missing.forEach(id => statesByCertificate.set(id, answer[id] || failed)); redraw(); });
     },
     // A signature made after the certificate was revoked is not valid. The signing time comes from the signer,
     // so an earlier time is no proof either: only the first case is a broken signature, the second is a warning.
-    // A time stamp (sig.proof) does prove the time. One inside the signature was made with it; a document stamp can
+    // A time stamp (signature.proof) does prove the time. One inside the signature was made with it; a document stamp can
     // come years later, so one after the revocation says nothing about when the signature was made.
-    provenBeforeRevocation(sig) {
-      const state = of(sig);
-      return state?.status === 'revoked' && !!sig.proof && new Date(sig.proof.at) < new Date(state.revoked_at);
+    provenBeforeRevocation(signature) {
+      const state = stateOf(signature);
+      return state?.status === 'revoked' && !!signature.proof && new Date(signature.proof.at) < new Date(state.revoked_at);
     },
-    revoked(sig) { return of(sig)?.status === 'revoked' && !this.provenBeforeRevocation(sig); },
-    revokedBeforeSigning(sig) {
-      const state = of(sig);
-      if (state?.status !== 'revoked' || this.provenBeforeRevocation(sig)) return false;
-      if (sig.proof?.kind === 'signature') return true;
-      return !!sig.signed_at && new Date(state.revoked_at) <= new Date(sig.signed_at);
+    revoked(signature) { return stateOf(signature)?.status === 'revoked' && !this.provenBeforeRevocation(signature); },
+    revokedBeforeSigning(signature) {
+      const state = stateOf(signature);
+      if (state?.status !== 'revoked' || this.provenBeforeRevocation(signature)) return false;
+      if (signature.proof?.kind === 'signature') return true;
+      return !!signature.signed_at && new Date(state.revoked_at) <= new Date(signature.signed_at);
     },
-    state(sig) {
-      const state = of(sig), what = state?.suspended ? 'pozastaven' : 'zrušen';
+    state(signature) {
+      const state = stateOf(signature), what = state?.suspended ? 'pozastaven' : 'zrušen';
       if (state?.status !== 'revoked') return '';
-      if (this.provenBeforeRevocation(sig)) return `Certifikát byl ${what} ${date(state.revoked_at)} až po podpisu, čas potvrzuje časové razítko`;
-      if (sig.proof?.kind === 'signature') return `Certifikát byl ${what} ${date(state.revoked_at)}, před časem z časového razítka`;
-      if (sig.proof && !this.revokedBeforeSigning(sig)) return `Certifikát byl ${what} ${date(state.revoked_at)}; časové razítko dokumentu je pozdější a čas podpisu nepotvrzuje`;
-      if (!sig.signed_at) return `Certifikát byl ${what} ${date(state.revoked_at)}; čas podpisu není uvedený`;
-      return this.revokedBeforeSigning(sig)
-        ? `Certifikát byl ${what} ${date(state.revoked_at)}, před uvedeným časem podpisu`
-        : `Certifikát byl ${what} ${date(state.revoked_at)}; čas podpisu uvádí podepisující a není potvrzený`;
+      if (this.provenBeforeRevocation(signature)) return `Certifikát byl ${what} ${formatDate(state.revoked_at)} až po podpisu, čas potvrzuje časové razítko`;
+      if (signature.proof?.kind === 'signature') return `Certifikát byl ${what} ${formatDate(state.revoked_at)}, před časem z časového razítka`;
+      if (signature.proof && !this.revokedBeforeSigning(signature)) return `Certifikát byl ${what} ${formatDate(state.revoked_at)}; časové razítko dokumentu je pozdější a čas podpisu nepotvrzuje`;
+      if (!signature.signed_at) return `Certifikát byl ${what} ${formatDate(state.revoked_at)}; čas podpisu není uvedený`;
+      return this.revokedBeforeSigning(signature)
+        ? `Certifikát byl ${what} ${formatDate(state.revoked_at)}, před uvedeným časem podpisu`
+        : `Certifikát byl ${what} ${formatDate(state.revoked_at)}; čas podpisu uvádí podepisující a není potvrzený`;
     },
-    line(sig) {
-      const state = of(sig);
+    line(signature) {
+      const state = stateOf(signature);
       if (!state) return '';
       const text = state.status === 'pending' ? 'Ověřuje se, zda certifikát nebyl zrušen…'
         : state.status === 'good' ? 'Certifikát není zrušený.'
-        : state.status === 'unknown' ? `Zda je certifikát zrušený, se nepodařilo ověřit. ${escape(state.reason || '')}` : '';
+        : state.status === 'unknown' ? `Zda je certifikát zrušený, se nepodařilo ověřit. ${escapeHtml(state.reason || '')}` : '';
       return text ? `<div class="meta">${text}</div>` : '';
     },
   };
