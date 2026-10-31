@@ -1,6 +1,6 @@
 # Builds and starts Blanketa for macOS, Windows and Linux, and on a version tag (v*) publishes a release.
 # Runs after every merge into main, for pull requests that change packaging or dependencies, by hand from the Actions
-# tab, or by pushing a tag that matches VERSION:  git tag v0.1.1 && git push origin v0.1.1
+# tab, or by pushing a tag that matches VERSION:  git tag v0.2.0 && git push origin v0.2.0
 # Not required by main's ruleset, so the paths filter cannot leave a pull request waiting for a check that never starts.
 name: Build and release
 
