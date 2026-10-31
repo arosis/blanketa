@@ -1,6 +1,4 @@
 <!doctype html>
-<!-- PDF forms: PDF.js shows and fills the document inside the same application chrome as the ZFO forms.
-     Placeholders: __SHELL_STYLE__ __SESSION__ __FILE__ __SIGNATURES__ __INFO__ -->
 <html lang="cs">
 <head>
 <meta charset="utf-8">
@@ -108,12 +106,13 @@ __SHELL_STYLE__
 <script type="module">
   const SESSION = '__SESSION__';
   const native = window.zfoNative;
-  const $q = s => document.querySelector(s);
-  const status = $q('[data-status]');
-  const setStatus = (text, html) => { html ? (status.innerHTML = text) : (status.textContent = text); };
-  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
-  $q('[data-file]').textContent = __FILE__;
-  if (native) $q('[data-native]').hidden = false;
+  const queryOne = selector => document.querySelector(selector);
+  const status = queryOne('[data-status]');
+  const setStatus = text => { status.textContent = text; };
+  const setStatusMarkup = markup => { status.innerHTML = markup; };
+  const escapeHtml = text => String(text).replace(/[&<>"]/g, character => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[character]));
+  queryOne('[data-file]').textContent = __FILE__;
+  if (native) queryOne('[data-native]').hidden = false;
 
   // pdf_viewer.mjs picks up the library from the global it expects.
   const pdfjsLib = await import('/pdfjs/build/pdf.min.mjs');
@@ -124,13 +123,13 @@ __SHELL_STYLE__
   const eventBus = new EventBus();
   const linkService = new PDFLinkService({eventBus});
   const viewer = new PDFViewer({
-    container: $q('#viewerContainer'), viewer: $q('#viewer'), eventBus, linkService,
+    container: queryOne('#viewerContainer'), viewer: queryOne('#viewer'), eventBus, linkService,
     annotationMode: pdfjsLib.AnnotationMode.ENABLE_FORMS, textLayerMode: 1,
   });
   linkService.setViewer(viewer);
   let pdf, fieldObjects = {}, changed = false, autoFit = true;
 
-  const load = async () => {
+  const loadDocument = async () => {
     pdf = await pdfjsLib.getDocument({
       url: '/pdf?s=' + SESSION + '&t=' + Date.now(), standardFontDataUrl: '/pdfjs/standard_fonts/',
       cMapUrl: '/pdfjs/cmaps/', cMapPacked: true,
@@ -143,12 +142,10 @@ __SHELL_STYLE__
     renderSignatures();
   };
   eventBus.on('pagesinit', () => { if (autoFit) viewer.currentScaleValue = 'page-width'; setStatus('Připraveno'); });
-  eventBus.on('scalechanging', e => { $q('.zfo-zoom').textContent = Math.round(e.scale * 100) + ' %'; });
-  new ResizeObserver(() => { if (autoFit && pdf) viewer.currentScaleValue = 'page-width'; }).observe($q('#viewerContainer'));
+  eventBus.on('scalechanging', event => { queryOne('.zfo-zoom').textContent = Math.round(event.scale * 100) + ' %'; });
+  new ResizeObserver(() => { if (autoFit && pdf) viewer.currentScaleValue = 'page-width'; }).observe(queryOne('#viewerContainer'));
 
-  // Changed fields by full name, in the shape pdf_sign.fill takes: text, true/false for a checkbox,
-  // the chosen export value for a radio group, the selected option for a list.
-  const values = () => {
+  const changedFieldValues = () => {
     const result = {};
     for (const [name, widgets] of Object.entries(fieldObjects)) {
       for (const widget of widgets) {
@@ -168,17 +165,16 @@ __SHELL_STYLE__
     return result;
   };
 
-  // Information panel.
   const info = __INFO__;
-  $q('[data-info]').innerHTML = [
-    info.title && `<b>${esc(info.title)}</b>`,
-    info.author && `Autor: ${esc(info.author)}`,
+  queryOne('[data-info]').innerHTML = [
+    info.title && `<b>${escapeHtml(info.title)}</b>`,
+    info.author && `Autor: ${escapeHtml(info.author)}`,
     `Stran: ${info.pages}`,
     info.fields ? `Vyplnitelných polí: ${info.fields}` : 'Dokument nemá vyplnitelná pole.',
     info.xfa && 'Dokument obsahuje formulář XFA, který Blanketa nepodporuje.',
   ].filter(Boolean).join('<br>');
   if (info.xfa) {
-    const notice = $q('[data-notice]');
+    const notice = queryOne('[data-notice]');
     notice.querySelector('span').textContent = info.xfa === 'dynamic'
       ? 'Toto je dynamický formulář XFA (Adobe LiveCycle), který Blanketa neumí zobrazit ani vyplnit. Otevřete ho '
         + 'v Adobe Acrobat Readeru, nebo si u úřadu vyžádejte jinou verzi formuláře.'
@@ -193,93 +189,91 @@ __SHELL_STYLE__
     warn: '<svg viewBox="0 0 24 24" fill="none" stroke="#b26a00" stroke-width="2"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17v.5"/></svg>',
     bad: '<svg viewBox="0 0 24 24" fill="none" stroke="#c5221f" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/></svg>',
   };
-  const fmt = iso => iso ? new Date(iso).toLocaleString('cs-CZ', {dateStyle: 'medium', timeStyle: 'short'}) : '–';
-  const stampLine = sig => sig.proof
-    ? `<div class="meta">Čas potvrzuje ${sig.proof.kind === 'signature' ? 'kvalifikované časové razítko' : 'kvalifikované časové razítko dokumentu'}: ${fmt(sig.proof.at)}, vydal ${esc(sig.proof.issuer)}.</div>`
-    : sig.stamp_problem ? `<div class="meta">Časové razítko čas nepotvrzuje. ${esc(sig.stamp_problem)}</div>` : '';
-  // A document time stamp is stored like a signature, but nobody signs anything with it.
-  const stampCard = sig => {
-    const level = !sig.intact ? 'bad' : sig.proof ? 'ok' : 'warn';
-    const state = !sig.intact ? 'Časové razítko dokumentu je poškozené'
-      : sig.proof ? 'Časové razítko dokumentu je platné'
-      : sig.stamp_unverifiable ? 'Časové razítko dokumentu je neporušené, důvěryhodnost nešlo ověřit'
+  const formatDateTime = iso => iso ? new Date(iso).toLocaleString('cs-CZ', {dateStyle: 'medium', timeStyle: 'short'}) : '–';
+  const stampLine = signature => signature.proof
+    ? `<div class="meta">Čas potvrzuje ${signature.proof.kind === 'signature' ? 'kvalifikované časové razítko' : 'kvalifikované časové razítko dokumentu'}: ${formatDateTime(signature.proof.at)}, vydal ${escapeHtml(signature.proof.issuer)}.</div>`
+    : signature.stamp_problem ? `<div class="meta">Časové razítko čas nepotvrzuje. ${escapeHtml(signature.stamp_problem)}</div>` : '';
+  const stampCard = signature => {
+    const level = !signature.intact ? 'bad' : signature.proof ? 'ok' : 'warn';
+    const state = !signature.intact ? 'Časové razítko dokumentu je poškozené'
+      : signature.proof ? 'Časové razítko dokumentu je platné'
+      : signature.stamp_unverifiable ? 'Časové razítko dokumentu je neporušené, důvěryhodnost nešlo ověřit'
       : 'Časové razítko dokumentu je neporušené, ale nedůvěryhodné';
     return `<div class="zfo-card ${level}">
-      <div class="who">${icons[level]}${esc(sig.subject)}</div>
+      <div class="who">${icons[level]}${escapeHtml(signature.subject)}</div>
       <div class="state">${state}</div>
-      ${stampLine(sig)}
-      ${sig.intact && !sig.covers_whole ? '<div class="meta">Po razítku byl dokument doplněn nebo změněn, razítko se vztahuje jen k dřívější verzi.</div>' : ''}
-      <div class="meta">Vystavil: ${esc(sig.issuer)}</div>
+      ${stampLine(signature)}
+      ${signature.intact && !signature.covers_whole ? '<div class="meta">Po razítku byl dokument doplněn nebo změněn, razítko se vztahuje jen k dřívější verzi.</div>' : ''}
+      <div class="meta">Vystavil: ${escapeHtml(signature.issuer)}</div>
     </div>`;
   };
-  const card = sig => {
-    if (sig.document_stamp) return stampCard(sig);
-    const expired = new Date(sig.not_after) < new Date(sig.proof?.at ?? Date.now());
+  const signatureCard = signature => {
+    if (signature.document_stamp) return stampCard(signature);
+    const expired = new Date(signature.not_after) < new Date(signature.proof?.at ?? Date.now());
     const revocation = window.zfoRevocation;
-    const level = !sig.intact || revocation.revokedBeforeSigning(sig) ? 'bad'
-      : (sig.trusted && !expired && !sig.modified && !sig.changes_unchecked && !revocation.revoked(sig)) ? 'ok' : 'warn';
-    const state = !sig.intact ? 'Podpis je porušen – podepsaný obsah byl změněn'
-      : revocation.state(sig) ? revocation.state(sig)
-      : sig.modified ? 'Podepsaná verze je neporušená, ale po podpisu se změnilo víc než vyplněná pole'
-      : sig.changes_unchecked ? 'Podepsaná verze je neporušená, ale změny po podpisu se nepodařilo zkontrolovat'
-      : sig.trusted ? 'Podpis je platný, certifikát je důvěryhodný'
-      : sig.unverifiable ? 'Obsah je neporušený, důvěryhodnost certifikátu se nepodařilo ověřit'
+    const level = !signature.intact || revocation.revokedBeforeSigning(signature) ? 'bad'
+      : (signature.trusted && !expired && !signature.modified && !signature.changes_unchecked && !revocation.revoked(signature)) ? 'ok' : 'warn';
+    const state = !signature.intact ? 'Podpis je porušen – podepsaný obsah byl změněn'
+      : revocation.state(signature) ? revocation.state(signature)
+      : signature.modified ? 'Podepsaná verze je neporušená, ale po podpisu se změnilo víc než vyplněná pole'
+      : signature.changes_unchecked ? 'Podepsaná verze je neporušená, ale změny po podpisu se nepodařilo zkontrolovat'
+      : signature.trusted ? 'Podpis je platný, certifikát je důvěryhodný'
+      : signature.unverifiable ? 'Obsah je neporušený, důvěryhodnost certifikátu se nepodařilo ověřit'
       : 'Obsah je neporušený, certifikát není hodnocen jako důvěryhodný';
-    return `<div class="zfo-card ${level}" title="${esc(sig.reason || '')}">
-      <div class="who">${icons[level]}${esc(sig.subject)}</div>
+    return `<div class="zfo-card ${level}" title="${escapeHtml(signature.reason || '')}">
+      <div class="who">${icons[level]}${escapeHtml(signature.subject)}</div>
       <div class="state">${state}</div>
-      ${sig.trust_source === 'eu' ? '<div class="meta">Vydavatel je v důvěryhodném seznamu EU.</div>' : ''}
-      ${sig.unverifiable ? `<div class="meta">${esc(sig.reason)}</div>` : ''}
-      ${revocation.line(sig)}
-      ${stampLine(sig)}
-      <div class="meta">Podepsáno: ${fmt(sig.signed_at)}${sig.proof ? ' (uvádí podepisující)' : ''}<br>Vystavil: ${esc(sig.issuer)}<br>
-        ${new Date(sig.not_after) < new Date() ? 'Platnost certifikátu skončila' : 'Certifikát platí do'} ${new Date(sig.not_after).toLocaleDateString('cs-CZ')}
-        ${sig.intact && !sig.covers_whole && !sig.changes_unchecked ? '<br>Po podpisu byla doplněna pole nebo další podpisy.' : ''}</div>
+      ${signature.trust_source === 'eu' ? '<div class="meta">Vydavatel je v důvěryhodném seznamu EU.</div>' : ''}
+      ${signature.unverifiable ? `<div class="meta">${escapeHtml(signature.reason)}</div>` : ''}
+      ${revocation.line(signature)}
+      ${stampLine(signature)}
+      <div class="meta">Podepsáno: ${formatDateTime(signature.signed_at)}${signature.proof ? ' (uvádí podepisující)' : ''}<br>Vystavil: ${escapeHtml(signature.issuer)}<br>
+        ${new Date(signature.not_after) < new Date() ? 'Platnost certifikátu skončila' : 'Certifikát platí do'} ${new Date(signature.not_after).toLocaleDateString('cs-CZ')}
+        ${signature.intact && !signature.covers_whole && !signature.changes_unchecked ? '<br>Po podpisu byla doplněna pole nebo další podpisy.' : ''}</div>
     </div>`;
   };
   let signatures = __SIGNATURES__;
   const renderSignatures = () => {
-    $q('[data-signatures]').innerHTML =
+    queryOne('[data-signatures]').innerHTML =
       (changed && signatures.length ? '<div class="zfo-note">Vyplněné hodnoty se uloží jako dodatek; stávající podpisy zůstanou platné, pokud je dokument nezamyká.</div>' : '') +
-      (signatures.length ? signatures.map(card).join('') : '<div class="zfo-empty">Dokument zatím není podepsaný.</div>');
-    window.zfoRevocation.ask(SESSION, signatures.filter(sig => !sig.document_stamp), renderSignatures);
+      (signatures.length ? signatures.map(signatureCard).join('') : '<div class="zfo-empty">Dokument zatím není podepsaný.</div>');
+    window.zfoRevocation.ask(SESSION, signatures.filter(signature => !signature.document_stamp), renderSignatures);
   };
 
   const certificates = window.zfoCertificates(SESSION);
   const certSelect = certificates.select;
-  $q('[data-cert-slot]').replaceWith(certificates.element);
+  queryOne('[data-cert-slot]').replaceWith(certificates.element);
 
   const savedStatus = (verb, path) => {
     const reveal = native ? ` <a data-reveal>${window.zfoIsMac ? 'Zobrazit ve Finderu' : 'Zobrazit ve složce'}</a>` : '';
-    setStatus(`${verb} <b title="${esc(path)}">${esc(path.split('/').pop())}</b>${reveal}`, true);
-    $q('[data-reveal]')?.addEventListener('click', () => native.postMessage({action: 'reveal', path}));
+    setStatusMarkup(`${verb} <b title="${escapeHtml(path)}">${escapeHtml(path.split('/').pop())}</b>${reveal}`);
+    queryOne('[data-reveal]')?.addEventListener('click', () => native.postMessage({action: 'reveal', path}));
   };
-  const post = async (path, extra = '', more = {}) => {
-    // Leaving a text field commits its value to the annotation storage.
+  const postChangedValues = async (path, extra = '', more = {}) => {
     document.activeElement?.blur();
-    const res = await fetch(`${path}?s=${SESSION}${extra}`, {method: 'POST', body: JSON.stringify({values: values(), ...more})});
-    if (!res.ok) throw new Error(await res.text());
-    return res.json();
+    const response = await fetch(`${path}?s=${SESSION}${extra}`, {method: 'POST', body: JSON.stringify({values: changedFieldValues(), ...more})});
+    if (!response.ok) throw new Error(await response.text());
+    return response.json();
   };
-  const saved = async (result, verb) => {
+  const showSavedDocument = async (result, verb) => {
     signatures = result.signatures;
     signatureField = result.signature_field;
     savedStatus(verb, result.saved);
-    $q('[data-file]').textContent = result.saved.split('/').pop();
-    await load();
+    queryOne('[data-file]').textContent = result.saved.split('/').pop();
+    await loadDocument();
   };
 
-  // A form without an empty signature field gets a new one: drawn on the page by the user, or invisible.
   let signatureField = info.signature_field;
-  const signMode = () => $q('[data-sign-mode] input:checked').value;
-  try { const mode = localStorage.getItem('zfo-sign-mode'); if (mode) $q(`[data-sign-mode] input[value="${mode}"]`).checked = true; } catch {}
+  const signMode = () => queryOne('[data-sign-mode] input:checked').value;
+  try { const mode = localStorage.getItem('zfo-sign-mode'); if (mode) queryOne(`[data-sign-mode] input[value="${mode}"]`).checked = true; } catch {}
   const signWith = async placement => {
     setStatus('Podepisuji… (token si může vyžádat PIN)');
     try {
-      await saved(await post('/pdf-save', '&cert=' + encodeURIComponent(certSelect.value),
+      await showSavedDocument(await postChangedValues('/pdf-save', '&cert=' + encodeURIComponent(certSelect.value),
                              {placement, password: certificates.password()}), 'Podepsáno a uloženo jako');
-    } catch (e) { setStatus('Chyba: ' + e.message); }
+    } catch (error) { setStatus('Chyba: ' + error.message); }
   };
+  const MIN_DRAGGED_BOX_PX = 12, SIGNATURE_WIDTH_PT = 180, SIGNATURE_HEIGHT_PT = 60;
   let placing = null;
   const stopPlacing = () => {
     placing?.box?.remove();
@@ -291,54 +285,54 @@ __SHELL_STYLE__
     placing = {};
     setStatus('Tažením myši vyznačte na stránce místo pro podpis, klepnutím vložíte podpis běžné velikosti. Esc zruší.');
   };
-  const pointIn = (page, e) => {
+  const pointIn = (page, event) => {
     const rect = page.getBoundingClientRect();
-    return [Math.min(Math.max(e.clientX - rect.left, 0), rect.width), Math.min(Math.max(e.clientY - rect.top, 0), rect.height)];
+    return [Math.min(Math.max(event.clientX - rect.left, 0), rect.width), Math.min(Math.max(event.clientY - rect.top, 0), rect.height)];
   };
-  $q('#viewer').addEventListener('pointerdown', e => {
-    const page = placing && e.target.closest('.page');
+  queryOne('#viewer').addEventListener('pointerdown', event => {
+    const page = placing && event.target.closest('.page');
     if (!page) return;
-    e.preventDefault();
+    event.preventDefault();
     const box = document.createElement('div');
     box.className = 'zfo-place-box';
     page.append(box);
-    Object.assign(placing, {page, box, start: pointIn(page, e)});
-    try { page.setPointerCapture(e.pointerId); } catch {}
+    Object.assign(placing, {page, box, start: pointIn(page, event)});
+    try { page.setPointerCapture(event.pointerId); } catch {}
   });
-  $q('#viewer').addEventListener('pointermove', e => {
+  queryOne('#viewer').addEventListener('pointermove', event => {
     if (!placing?.box) return;
-    const [x, y] = pointIn(placing.page, e), [sx, sy] = placing.start;
-    Object.assign(placing.box.style, {left: Math.min(x, sx) + 'px', top: Math.min(y, sy) + 'px',
-                                      width: Math.abs(x - sx) + 'px', height: Math.abs(y - sy) + 'px'});
+    const [x, y] = pointIn(placing.page, event), [startX, startY] = placing.start;
+    Object.assign(placing.box.style, {left: Math.min(x, startX) + 'px', top: Math.min(y, startY) + 'px',
+                                      width: Math.abs(x - startX) + 'px', height: Math.abs(y - startY) + 'px'});
   });
-  $q('#viewer').addEventListener('pointerup', e => {
+  queryOne('#viewer').addEventListener('pointerup', event => {
     if (!placing?.box) return;
     const index = Number(placing.page.dataset.pageNumber) - 1;
     const {viewport} = viewer.getPageView(index);
-    const end = pointIn(placing.page, e), start = placing.start;
+    const end = pointIn(placing.page, event), start = placing.start;
     stopPlacing();
     let corners;
-    if (Math.abs(end[0] - start[0]) < 12 || Math.abs(end[1] - start[1]) < 12) {
-      // A click places a signature of the usual size (180 × 60 pt) centred on it.
+    const isClick = Math.abs(end[0] - start[0]) < MIN_DRAGGED_BOX_PX || Math.abs(end[1] - start[1]) < MIN_DRAGGED_BOX_PX;
+    if (isClick) {
       const [x, y] = viewport.convertToPdfPoint(...end);
-      corners = [[x - 90, y - 30], [x + 90, y + 30]];
+      corners = [[x - SIGNATURE_WIDTH_PT / 2, y - SIGNATURE_HEIGHT_PT / 2], [x + SIGNATURE_WIDTH_PT / 2, y + SIGNATURE_HEIGHT_PT / 2]];
     } else {
       corners = [viewport.convertToPdfPoint(...start), viewport.convertToPdfPoint(...end)];
     }
-    const xs = corners.map(c => c[0]), ys = corners.map(c => c[1]);
+    const xs = corners.map(corner => corner[0]), ys = corners.map(corner => corner[1]);
     signWith({page: index, box: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]});
   });
-  document.addEventListener('keydown', e => {
-    if (e.key === 'Escape' && placing) { stopPlacing(); setStatus('Podepisování zrušeno'); }
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && placing) { stopPlacing(); setStatus('Podepisování zrušeno'); }
   });
 
-  const signDialog = $q('[data-sign-dialog]');
+  const signDialog = queryOne('[data-sign-dialog]');
   signDialog.addEventListener('close', () => { if (signDialog.returnValue === 'sign') actions.sign(); });
-  const closeMenus = () => document.querySelectorAll('[data-menu-list]').forEach(m => { m.hidden = true; });
+  const closeMenus = () => document.querySelectorAll('[data-menu-list]').forEach(list => { list.hidden = true; });
   for (const button of document.querySelectorAll('[data-menu]')) {
-    button.addEventListener('click', e => {
-      e.stopPropagation();
-      const list = $q(`[data-menu-list="${button.dataset.menu}"]`);
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      const list = queryOne(`[data-menu-list="${button.dataset.menu}"]`);
       const open = list.hidden;
       closeMenus();
       list.hidden = !open;
@@ -352,14 +346,14 @@ __SHELL_STYLE__
     support: () => zfoSupport(),
     'save-plain': async () => {
       closeMenus();
-      try { await saved(await post('/pdf-save'), 'Uloženo do'); } catch (e) { setStatus('Chyba: ' + e.message); }
+      try { await showSavedDocument(await postChangedValues('/pdf-save'), 'Uloženo do'); } catch (error) { setStatus('Chyba: ' + error.message); }
     },
     save: () => {
       closeMenus();
-      $q('[data-sign-text]').textContent = 'Dokument se podepíše vybraným certifikátem a uloží jako nový soubor vedle původního. '
+      queryOne('[data-sign-text]').textContent = 'Dokument se podepíše vybraným certifikátem a uloží jako nový soubor vedle původního. '
         + (signatureField ? `Podpis se vloží do připraveného podpisového pole „${signatureField}“.`
                           : 'Dokument nemá připravené podpisové pole.');
-      $q('[data-sign-mode]').hidden = Boolean(signatureField);
+      queryOne('[data-sign-mode]').hidden = Boolean(signatureField);
       signDialog.returnValue = '';
       signDialog.showModal();
       certSelect.focus();
@@ -372,14 +366,14 @@ __SHELL_STYLE__
     },
     print: async () => {
       try {
-        const {path} = await post('/pdf-print');
+        const {path} = await postChangedValues('/pdf-print');
         if (native) native.postMessage({action: 'printPdf', path});
         else window.print();
-      } catch (e) { setStatus('Chyba: ' + e.message); }
+      } catch (error) { setStatus('Chyba: ' + error.message); }
     },
     reset: async () => {
       if (changed && !confirm('Zahodit neuložené změny a načíst hodnoty z uloženého souboru?')) return;
-      await load();
+      await loadDocument();
       setStatus('Načteny hodnoty z uloženého souboru');
     },
     'zoom-in': () => zoomTo(viewer.currentScale + .1),
@@ -387,23 +381,23 @@ __SHELL_STYLE__
     'zoom-fit': () => { autoFit = true; viewer.currentScaleValue = 'page-width'; },
     panel: () => {
       const hidden = document.body.classList.toggle('panel-hidden');
-      $q('.zfo-bar [data-action="panel"]').classList.toggle('active', !hidden);
+      queryOne('.zfo-bar [data-action="panel"]').classList.toggle('active', !hidden);
     },
   };
   for (const button of document.querySelectorAll('.zfo-bar [data-action], .zfo-close[data-action]')) {
     button.addEventListener('click', () => actions[button.dataset.action]());
   }
   window.zfoAction = name => actions[name]?.();
-  document.addEventListener('keydown', e => {
-    if (!window.zfoShortcut(e)) return;
-    const shortcut = e.key === '+' || e.key === '=' ? 'zoom-in' : e.key === '-' ? 'zoom-out'
-      : e.key.toLowerCase() === 's' ? (e.shiftKey ? 'save' : 'save-plain') : e.key === 'p' ? 'print' : null;
+  document.addEventListener('keydown', event => {
+    if (!window.zfoShortcut(event)) return;
+    const shortcut = event.key === '+' || event.key === '=' ? 'zoom-in' : event.key === '-' ? 'zoom-out'
+      : event.key.toLowerCase() === 's' ? (event.shiftKey ? 'save' : 'save-plain') : event.key === 'p' ? 'print' : null;
     if (!shortcut || native?.platform === 'mac') return;
-    e.preventDefault();
+    event.preventDefault();
     actions[shortcut]();
   });
 
-  await load();
+  await loadDocument();
 </script>
 </body>
 </html>
