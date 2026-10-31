@@ -1,6 +1,6 @@
 # Builds and starts Blanketa for macOS, Windows and Linux, and on a version tag (v*) publishes a release.
 # Runs after every merge into main, for pull requests that change packaging or dependencies, by hand from the Actions
-# tab, or by pushing a tag that matches VERSION:  git tag v0.1.1 && git push origin v0.1.1
+# tab, or by pushing a tag that matches VERSION:  git tag v0.2.1 && git push origin v0.2.1
 # Not required by main's ruleset, so the paths filter cannot leave a pull request waiting for a check that never starts.
 name: Build and release
 
@@ -37,6 +37,21 @@ jobs:
     # Pull requests and main already have them from tests.yml; a release must not depend on that having happened.
     if: github.ref_type == 'tag' || github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/tests.yml
+
+  version:
+    name: Check the tag against VERSION
+    # Packages are named after VERSION and release tags cannot be moved or deleted, so a mismatch must not get published.
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Compare
+        run: |
+          if [ "v$(cat VERSION)" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match VERSION $(cat VERSION)"
+            exit 1
+          fi
 
   macos:
     name: Package for macOS
@@ -165,7 +180,7 @@ jobs:
     # The release environment waits for the owner's approval before anything is published.
     environment: release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [tests, macos, windows, linux]
+    needs: [version, tests, macos, windows, linux]
     runs-on: ubuntu-latest
     permissions: {contents: write}
     steps:
