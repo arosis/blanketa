@@ -265,7 +265,7 @@ class OpeningForms(unittest.TestCase):
 
 
 class ControlsWithoutOwnName(unittest.TestCase):
-    """Some forms name a radio button or check box only by its bind; an empty id stopped the page loading its values (#46)."""
+    """Some forms name a radio button or check box only by its bind; an empty name stopped the page loading its values (#46)."""
     FORM = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#" Id="_1"><dsig:Object Id="_2" MimeType="text/xml">
 <fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:fm="http://software602.cz/forms" xmlns:d="http://software602.cz/sample">
 <fm:formparams><fm:model><fm:instance><d:root><d:chb>1</d:chb><d:rad>b</d:rad><d:old>1</d:old></d:root></fm:instance>
@@ -276,7 +276,7 @@ class ControlsWithoutOwnName(unittest.TestCase):
 <fo:character form602bind="rad" form602ct="rad" form602on="a" character="x"/>
 <fo:character form602bind="rad" form602ct="rad" form602on="b" character="x"/>
 <fo:character form602chkbx="old" form602bind="old" form602ct="chb" form602on="1" form602off="0" character="x"/>
-<fo:character form602ct="chb" form602id="nothing" character="x"/>
+<fo:character form602ct="rad" form602id="nothing" form602on="c" character="x"/>
 </fo:block></fo:flow></fo:page-sequence></fo:root></dsig:Object></dsig:Signature>"""
 
     def inputs(self, kind):
@@ -286,8 +286,8 @@ class ControlsWithoutOwnName(unittest.TestCase):
 
     def test_bind_names_the_control(self):
         boxes = self.inputs("checkbox")
-        self.assertEqual([(box.get("id"), box.get("name")) for box in boxes[:2]], [("chb", "chb"), ("old", "old")])
-        self.assertEqual([(radio.get("id"), radio.get("name")) for radio in self.inputs("radio")], [("rad-a", "rad"), ("rad-b", "rad")])
+        self.assertEqual([(box.get("id"), box.get("name")) for box in boxes], [("chb", "chb"), ("old", "old")])
+        self.assertEqual([(radio.get("id"), radio.get("name")) for radio in self.inputs("radio")[:2]], [("rad-a", "rad"), ("rad-b", "rad")])
 
     def test_page_gets_values_of_controls_named_by_bind(self):
         doc = engine.open_document(self.FORM.encode())
@@ -298,8 +298,8 @@ class ControlsWithoutOwnName(unittest.TestCase):
     def test_control_without_any_name_does_not_reach_the_page(self):
         # The page builds the selector "#" from an empty key, and that stops it before it reaches the other fields.
         doc = engine.open_document(self.FORM.encode())
-        self.assertEqual([box.get("id") for box in self.inputs("checkbox")][2], "")
-        answer = engine.handle(doc, "get_init_values", {"": {"type": "check"}, "chb": {"type": "check", "bind": "chb"}})
+        self.assertEqual(self.inputs("radio")[2].get("name"), "")
+        answer = engine.handle(doc, "get_init_values", {"": {"type": "radio", "bind": ""}, "chb": {"type": "check", "bind": "chb"}})
         self.assertEqual(list(json.loads(answer[0]["data"][len("set_inputs_init_values_callback("):-1])), ["chb"])
 
 

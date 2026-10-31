@@ -10,7 +10,8 @@
   <xsl:import href="../vendor/zfo-editor-src/zfo-editor-0.3.2/xslt/fo2html.xsl"/>
 
   <!-- Some forms name a radio button or check box only by its bind. zfo-editor reads form602radio and form602chkbx
-       alone, and the empty id it writes then stops the page at the selector "#" while it loads the values. -->
+       alone. A radio button's empty name then stops the page at the selector "#" while it loads the values,
+       and a check box without a name silently gets none. -->
   <xsl:template name="radio-input">
     <xsl:variable name="name" select="(@form602radio[. != ''] | @form602bind[not(../@form602radio != '')])"/>
     <input title="{@form602tooltip}" type="radio" name="{$name}" id="{concat($name, '-', @form602on)}" value="{@form602on}">
