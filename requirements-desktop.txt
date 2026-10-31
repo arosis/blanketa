@@ -1484,9 +1484,9 @@ pyobjc-framework-webkit==12.2.2 ; sys_platform == 'darwin' \
     --hash=sha256:e5588df2a73b377b59a994cc2a78b467e4341f4e4d28b52e8671e21a2811d3c1 \
     --hash=sha256:ef37692f0280151bf8164a718e334a9b3cb0abfc5455be14172280de7e277505
     # via pywebview
-pypdf==6.21.3 \
-    --hash=sha256:11e1ca6d6cc8ca322558a3a974078d5ebc0f3a2104b8e673eee25621ee97abd8 \
-    --hash=sha256:c8ca4d9a360dbd5d4b9bb7a8389e2a9ae6a106bee722b496f918040ba2daa17e
+pypdf==6.21.4 \
+    --hash=sha256:33e4fb41ca352810eb4e9838aa0d82d6888a5f8bf682f43e99cce5faa666255c \
+    --hash=sha256:c8817e3f888d47a087872ded69812c1ef30cacb871d6e053e0c00bbaf0bc2163
     # via
     #   -c requirements.txt
     #   -r deps/runtime.in
