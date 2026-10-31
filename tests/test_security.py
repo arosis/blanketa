@@ -46,8 +46,8 @@ def write_form(root, source, target):
 
 class PageInjection(unittest.TestCase):
     def test_script_texts_cannot_end_the_script(self):
-        self.assertNotIn("<", app.js({"title": "</script><script>alert(1)</script>"}))
-        self.assertEqual(json.loads(app.js({"t": "</script>&"})), {"t": "</script>&"})
+        self.assertNotIn("<", app.json_for_script({"title": "</script><script>alert(1)</script>"}))
+        self.assertEqual(json.loads(app.json_for_script({"t": "</script>&"})), {"t": "</script>&"})
 
     def test_font_that_closes_the_style_block_is_left_out(self):
         root = form_root(ROOT / "samples/cuzk/form.zfo")
@@ -60,7 +60,7 @@ class PageInjection(unittest.TestCase):
             write_form(root, ROOT / "samples/cuzk/form.zfo", path)
             app.FORMS["font-test"] = path
             try:
-                html = app.render("font-test")
+                html = app.render_zfo_page("font-test")
             finally:
                 del app.FORMS["font-test"]
         self.assertNotIn("window.pwned", html)
@@ -167,7 +167,7 @@ class LocalServer(unittest.TestCase):
 
     def test_revocation_answers_only_about_signatures_shown(self):
         session = self.request("GET", "/?form=cuzk-test")[1].decode().split("const SESSION = '")[1].split("'")[0]
-        known = next(iter(app.CERTIFICATES))
+        known = next(iter(app.SHOWN_CERTIFICATES_BY_ID))
         self.assertEqual(self.request("POST", "/revocation", body=json.dumps([known]))[0], 404)
         status, answer = self.request("POST", f"/revocation?s={session}", body=json.dumps([known, "unknown-id", 5]))
         self.assertEqual(status, 200)

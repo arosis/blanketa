@@ -49,16 +49,16 @@ FORM_WITH_ATTRIBUTE = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/x
 <fm:formparams><fm:model><fm:instance><d:root><d:e a=""/></d:root></fm:instance><fm:bind Id="k" nodeset="/d:root"><fm:bind Id="e" nodeset="d:e">
 <fm:bind Id="a" nodeset="@a" calculate='%s'/></fm:bind></fm:bind></fm:model></fm:formparams></fo:root></dsig:Object></dsig:Signature>"""
 
-ITF_BY_PATTERN = {pattern: digit for digit, pattern in barcode.ITF_DIGITS.items()}
+ITF_BY_PATTERN = {pattern: digit for digit, pattern in barcode.ITF_DIGIT_PATTERNS.items()}
 
 
 def decode_itf(widths):
     """Reads Interleaved 2 of 5 element widths back into digits, checking start and stop patterns."""
-    assert widths[:4] == [1, 1, 1, 1] and widths[-3:] == [barcode.WIDE, 1, 1], "start or stop pattern"
+    assert widths[:4] == [1, 1, 1, 1] and widths[-3:] == [barcode.WIDE_MODULES, 1, 1], "start or stop pattern"
     body, digits = widths[4:-3], ""
     for i in range(0, len(body), 10):
         pair = body[i:i + 10]
-        to_pattern = lambda ws: "".join("w" if w == barcode.WIDE else "n" for w in ws)  # noqa: E731
+        to_pattern = lambda ws: "".join("w" if w == barcode.WIDE_MODULES else "n" for w in ws)  # noqa: E731
         digits += ITF_BY_PATTERN[to_pattern(pair[0::2])] + ITF_BY_PATTERN[to_pattern(pair[1::2])]
     return digits
 
@@ -66,13 +66,13 @@ def decode_itf(widths):
 class Barcodes(unittest.TestCase):
     def test_interleaved_2_of_5_round_trip(self):
         for data in ("7582212456", "0000", "1234567"):
-            self.assertEqual(decode_itf(barcode.interleaved_2_of_5(data)), data.zfill(len(data) + len(data) % 2))
+            self.assertEqual(decode_itf(barcode.element_widths_starting_with_bar(data)), data.zfill(len(data) + len(data) % 2))
 
     def test_svg_size_follows_the_form(self):
-        drawing = barcode.svg("interleaved2of5", "7582212456", "8.0mm", "0.4mm", "not")
+        drawing = barcode.barcode_svg("interleaved2of5", "7582212456", "8.0mm", "0.4mm", "not")
         self.assertIn('height="8mm"', drawing)
         self.assertNotIn("<text", drawing)
-        self.assertIn("<text", barcode.svg("interleaved2of5", "12", "8mm", "0.4mm", "yes"))
+        self.assertIn("<text", barcode.barcode_svg("interleaved2of5", "12", "8mm", "0.4mm", "yes"))
 
     def test_unknown_symbology_falls_back_to_text(self):
         self.assertEqual(barcode.svg_data_uri("code128", "ABC"), "")
@@ -81,7 +81,7 @@ class Barcodes(unittest.TestCase):
     def test_form_barcode_is_drawn(self):
         app.FORMS["barcode-test"] = ROOT / "samples/cssz-onz/form.zfo"
         try:
-            html = app.render("barcode-test")
+            html = app.render_zfo_page("barcode-test")
         finally:
             del app.FORMS["barcode-test"]
         self.assertIn('<img class="zfo-barcode" src="data:image/svg+xml;base64,', html)
@@ -131,16 +131,16 @@ class UnsupportedForms(unittest.TestCase):
     def test_form_with_scripts_that_run_is_not_reported(self):
         for sample in ("cssz-onz", "olk-dotace", "cuzk"):
             doc = etree.fromstring(zipfile.ZipFile(ROOT / f"samples/{sample}/form.zfo").read("form.fo"), etree.XMLParser(huge_tree=True))
-            self.assertEqual(app.script_binds(doc), [])
+            self.assertEqual(app.binds_with_unsupported_scripts(doc), [])
 
     def test_braces_alone_are_not_javascript(self):
         doc = self.parsed('<fm:bind Id="x" calculate="{../d:a}"/><fm:bind Id="y" calculate="  { var a = SendData(); }"/>'
                           '<fm:bind Id="z" constraint="{GetDocument().SendData()}"/><fm:bind Id="w" calculate="{ var a = 1; }"/>')
-        self.assertEqual(app.script_binds(doc), ["y", "z"])
+        self.assertEqual(app.binds_with_unsupported_scripts(doc), ["y", "z"])
 
     def test_script_actions_are_counted_and_xpath_ones_are_not(self):
         doc = self.parsed('<a form602btnclick="{ SendData(); }"/><a form602onchange=" { x(); }"/><a form602btnclick="SendAppEvent(1)"/>')
-        self.assertEqual(app.script_actions(doc), 2)
+        self.assertEqual(app.count_never_run_scripts(doc), 2)
 
     @staticmethod
     def pdf_with(xfa, source):
@@ -238,7 +238,7 @@ class OpeningForms(unittest.TestCase):
 
     def test_engine_answers_quickly_with_many_sections(self):
         started = time.monotonic()
-        page = app.render("many-sections")
+        page = app.render_zfo_page("many-sections")
         session = app.SESSIONS[re.search(r"const SESSION = '([\w-]+)'", page).group(1)]
         for message in ("document.ready", "init_rep_sections", "get_readonly_binds", "get_selected_listboxes",
                         "get_multiswitch_list", "get_repeatable"):
@@ -248,9 +248,9 @@ class OpeningForms(unittest.TestCase):
         self.assertEqual(answer[0]["data"].count('"o1_porad_cislo"'), self.SECTIONS)
 
     def test_form_is_not_painted_before_the_shell_styles_it(self):
-        page = app.render("many-sections")
-        self.assertLess(page.index(app.OPENING_STYLE), page.index("<body"))
-        self.assertIn("body:not(.zfo-app) > * { display: none; }", app.OPENING_STYLE)
+        page = app.render_zfo_page("many-sections")
+        self.assertLess(page.index(app.OPENING_PLACEHOLDER_STYLE), page.index("<body"))
+        self.assertIn("body:not(.zfo-app) > * { display: none; }", app.OPENING_PLACEHOLDER_STYLE)
 
     def test_page_keeps_its_opening_fixes(self):
         # Removing one breaks nothing else, the form just opens slowly again.
@@ -317,7 +317,7 @@ class TimeStamps(unittest.TestCase):
     def judge(self, stamps, verdict):
         sig = {"stamps": stamps}
         with mock.patch.object(app.certstore, "stamp_trust", return_value=verdict) as asked:
-            app.judged_stamps(sig)
+            app.judge_time_stamps(sig)
         return sig, asked
 
     def test_signature_without_a_stamp_has_none(self):
@@ -532,8 +532,8 @@ class FormScripts(unittest.TestCase):
 
     def test_form_description_reports_what_does_not_run(self):
         fo = etree.fromstring(zipfile.ZipFile(ROOT / "samples/skripty/vypocty.zfo").read("form.fo"))
-        self.assertEqual(app.script_binds(fo), ["odeslano"])
-        self.assertEqual(app.script_actions(fo), 1)
+        self.assertEqual(app.binds_with_unsupported_scripts(fo), ["odeslano"])
+        self.assertEqual(app.count_never_run_scripts(fo), 1)
 
     def test_cadastre_form_agrees_with_form_filler(self):
         # samples/ref-filler was saved by Form Filler: with tisk=0 all three checks are 0.

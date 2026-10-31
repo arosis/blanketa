@@ -1,12 +1,3 @@
-"""Local web app: render a 602XML form on the Mac, let the user fill it, then save it signed.
-
-The form logic (calculations, constraints, repeating sections) runs in zfoengine, the
-Python 3 port of CZ.NIC zfo-editor's backend; the page talks to it through /ipc.
-
-usage: app.py [PORT]               opens forms from samples/*/form.zfo, saves to out/
-       app.py --file PATH [PORT]   opens one form, saves the signed copy next to it
-PORT 0 picks a free port; the chosen one is printed as "PORT <n>".
-"""
 import base64
 import copy
 import hashlib
@@ -41,32 +32,40 @@ RESOURCES = Path(getattr(sys, "_MEIPASS", ROOT))
 EDITOR = RESOURCES / "vendor/zfo-editor-src/zfo-editor-0.3.2"
 PDFJS = RESOURCES / "vendor/pdfjs"
 DS = "http://www.w3.org/2000/09/xmldsig#"
-# ui/fo2html.xsl draws fm:barcode through bl:barcode(); the XSLT itself cannot encode a barcode.
-etree.FunctionNamespace("urn:blanketa")["barcode"] = lambda _context, *args: barcode.svg_data_uri(*args)
-OPENING_STYLE = ('<style>body:not(.zfo-app) > * { display: none; } body:not(.zfo-app)::before { content: "Otevírám formulář…"; '
-                 'display: block; margin-top: 30vh; text-align: center; font: 14px sans-serif; color: #6e6e73; }</style>')
+FM = "http://software602.cz/forms"
+FO = "http://www.w3.org/1999/XSL/Format"
+xslt_extension_functions = etree.FunctionNamespace("urn:blanketa")
+xslt_extension_functions["barcode"] = lambda _context, *args: barcode.svg_data_uri(*args)
+OPENING_PLACEHOLDER_STYLE = ('<style>body:not(.zfo-app) > * { display: none; } body:not(.zfo-app)::before { content: "Otevírám formulář…"; '
+                             'display: block; margin-top: 30vh; text-align: center; font: 14px sans-serif; color: #6e6e73; }</style>')
 XSLT = etree.XSLT(etree.parse(str(RESOURCES / "ui/fo2html.xsl")))
 FORMS = {}
 SINGLE_FILE = False
 DAMAGED_PAGE = ("<!doctype html><meta charset=utf-8><title>Soubor nelze otevřít</title>"
                 "<body style='font:14px system-ui,sans-serif;padding:24px'><h1 style='font-size:18px'>Soubor nelze otevřít</h1>"
-                "<p>Soubor může být poškozený nebo nejde o\u00a0formulář, který Blanketa umí přečíst. Může jít i\u00a0o\u00a0chybu Blankety; "
+                "<p>Soubor může být poškozený nebo nejde o formulář, který Blanketa umí přečíst. Může jít i o chybu Blankety; "
                 "pokud ho jiná aplikace otevře, dejte nám prosím vědět.</p>")
-SCRIPT_ACTIONS = ("form602btnclick", "form602onchange", "form602attchuploadstartaction")
+# These scripts never run here: they could reach the network, files and signing.
+NEVER_RUN_SCRIPT_ATTRIBUTES = ("form602btnclick", "form602onchange", "form602attchuploadstartaction")
 SESSIONS = {}
-CERTIFICATES = {}  # certificates of the signatures shown, by id; pages only ever name them
+SHOWN_CERTIFICATES_BY_ID = {}
 IMPORTS = {}
 LOCK = threading.Lock()
-# Sessions hold a whole document each; a window only ever uses its newest few (reload, reset, import).
 MAX_SESSIONS = 8
+PLAIN_TEXT = "text/plain"
+PLAIN_TEXT_UTF8 = "text/plain; charset=utf-8"
+HTML_UTF8 = "text/html; charset=utf-8"
+JSON = "application/json"
+STATIC_CONTENT_TYPES = {".js": "text/javascript", ".css": "text/css", ".png": "image/png"}
+PDFJS_CONTENT_TYPES = {".mjs": "text/javascript", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml",
+                       ".png": "image/png"}
 
 SHELL = (RESOURCES / "ui/shell.html").read_text(encoding="utf-8")
 PDF_PAGE = (RESOURCES / "ui/pdf.html").read_text(encoding="utf-8").replace(
     "__SHELL_STYLE__", re.search(r"<style>.*?</style>", SHELL, re.S).group(0).replace("__FONTS__", ""))
 
 
-def js(value):
-    """JSON for a <script> block: a form's own texts (title, signer names, button captions) cannot end the script."""
+def json_for_script(value):
     return json.dumps(value, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
 
 
@@ -90,41 +89,46 @@ def output_path(name):
     if not SINGLE_FILE:
         return ROOT / "out" / f"{name}-podepsany{source.suffix}"
     stem = source.stem.removesuffix("-podepsany")
-    candidate, n = source.with_name(f"{stem}-podepsany{source.suffix}"), 2
+    candidate, copy_number = source.with_name(f"{stem}-podepsany{source.suffix}"), 2
     while candidate.exists() and candidate != source:
-        candidate, n = source.with_name(f"{stem}-podepsany-{n}{source.suffix}"), n + 1
+        candidate, copy_number = source.with_name(f"{stem}-podepsany-{copy_number}{source.suffix}"), copy_number + 1
     return candidate
 
 
-def read_fo(path):
+def read_form_fo(path):
     return zipfile.ZipFile(path).read("form.fo")
 
 
+def parse_fo(fo):
+    return etree.fromstring(fo, etree.XMLParser(huge_tree=True))
+
+
 def publisher_layer(doc):
-    """Peel user signature layers off so the form can be re-filled and signed again."""
     while not is_publisher_signature(doc):
         doc = doc.find(f"{{{DS}}}Object/{{{DS}}}Signature")
     return doc
 
 
-def is_publisher_signature(sig):
-    cert = sig.find(f"{{{DS}}}KeyInfo//{{{DS}}}X509Certificate").text
-    subject = x509.load_der_x509_certificate(base64.b64decode(cert)).subject.rfc4514_string()
+def is_publisher_signature(signature):
+    certificate = signature.find(f"{{{DS}}}KeyInfo//{{{DS}}}X509Certificate").text
+    subject = x509.load_der_x509_certificate(base64.b64decode(certificate)).subject.rfc4514_string()
     return "602XML" in subject
 
 
-def render_empty():
-    """The application window before a form is opened (Mac app started without a file)."""
+def remove_data_objects(layer):
+    for data_object in layer.xpath("dsig:Object[not(@Id)]", namespaces={"dsig": DS}):
+        layer.remove(data_object)
+
+
+def render_empty_window():
     return SHELL.replace("__SESSION__", "").replace("__FILE__", '""').replace("__FONTS__", "").replace("__EMPTY__", "true")
 
 
-def judged_stamps(sig):
-    """Sets sig["proof"], the earliest time confirmed by a good stamp, or sig["stamp_problem"], why the stamps do not count,
-    and sig["stamp_unverifiable"] when the trusted lists could not tell."""
+def judge_time_stamps(signature):
     problem = ""
     proofs = []
     unverifiable = False
-    for stamp in sig.pop("stamps", ()):
+    for stamp in signature.pop("stamps", ()):
         der = stamp.pop("der")
         if not stamp["intact"]:
             problem = problem or "Časové razítko je poškozené nebo nepatří k tomuto dokumentu."
@@ -135,30 +139,27 @@ def judged_stamps(sig):
         else:
             problem = problem or verdict["reason"]
             unverifiable = unverifiable or verdict["unverifiable"]
-    sig["proof"] = min(proofs, key=lambda stamp: stamp["at"], default=None)
-    sig["stamp_problem"] = "" if proofs else problem
-    sig["stamp_unverifiable"] = unverifiable and not proofs
+    signature["proof"] = min(proofs, key=lambda stamp: stamp["at"], default=None)
+    signature["stamp_problem"] = "" if proofs else problem
+    signature["stamp_unverifiable"] = unverifiable and not proofs
 
 
-def judged(found):
-    """Adds trust verdicts to signatures; each keeps a certificate id the page can ask about revocation with."""
-    ders = [sig.pop("der") for sig in found]
-    for sig in found:
-        judged_stamps(sig)
-    for sig, der, verdict in zip(found, ders, certstore.trust(ders), strict=True):
-        sig.update(trusted=verdict["trusted"], reason=verdict.get("reason", ""), trust_source=verdict["source"],
-                   unverifiable=verdict["unverifiable"], certificate=hashlib.sha256(der).hexdigest())
-        CERTIFICATES[sig["certificate"]] = der
-    return found
+def add_trust_verdicts(signatures):
+    ders = [signature.pop("der") for signature in signatures]
+    for signature in signatures:
+        judge_time_stamps(signature)
+    for signature, der, verdict in zip(signatures, ders, certstore.trust(ders), strict=True):
+        signature.update(trusted=verdict["trusted"], reason=verdict.get("reason", ""), trust_source=verdict["source"],
+                         unverifiable=verdict["unverifiable"], certificate=hashlib.sha256(der).hexdigest())
+        SHOWN_CERTIFICATES_BY_ID[signature["certificate"]] = der
+    return signatures
 
 
 def pdf_signatures(pdf):
-    found = pdf_sign.signatures(pdf)
-    return judged(found)
+    return add_trust_verdicts(pdf_sign.signatures(pdf))
 
 
-def pdf_xfa(reader, fields):
-    """How the PDF uses XFA: "" not at all, "hybrid" besides ordinary fields, "dynamic" with nothing to fill here."""
+def pdf_xfa_usage(reader, fields):
     acroform = reader.trailer["/Root"].get_object().get("/AcroForm")
     acroform = acroform.get_object() if acroform is not None else None
     if not isinstance(acroform, dict) or "/XFA" not in acroform:
@@ -168,30 +169,27 @@ def pdf_xfa(reader, fields):
 
 def pdf_info(pdf):
     reader = pdf_sign.PdfReader(io.BytesIO(pdf))
-    meta = reader.metadata or {}
+    metadata = reader.metadata or {}
     fields = pdf_sign.form_fields(pdf)
-    return {"title": meta.get("/Title") or "", "author": meta.get("/Author") or "", "pages": len(reader.pages),
-            "fields": len(fields), "producer": meta.get("/Producer") or "",
-            "signature_field": pdf_sign.empty_signature_field(pdf), "xfa": pdf_xfa(reader, fields)}
+    return {"title": metadata.get("/Title") or "", "author": metadata.get("/Author") or "", "pages": len(reader.pages),
+            "fields": len(fields), "producer": metadata.get("/Producer") or "",
+            "signature_field": pdf_sign.empty_signature_field(pdf), "xfa": pdf_xfa_usage(reader, fields)}
 
 
-def render_pdf(name):
-    """PDF forms are shown by PDF.js; the file itself is fetched from /pdf."""
+def render_pdf_page(name):
     pdf = form_path(name).read_bytes()
     session = new_session({"name": name, "pdf": pdf})
     return (PDF_PAGE.replace("__SESSION__", session)
-            .replace("__FILE__", js(form_path(name).name))
-            .replace("__SIGNATURES__", js(pdf_signatures(pdf)))
-            .replace("__INFO__", js(pdf_info(pdf))))
+            .replace("__FILE__", json_for_script(form_path(name).name))
+            .replace("__SIGNATURES__", json_for_script(pdf_signatures(pdf)))
+            .replace("__INFO__", json_for_script(pdf_info(pdf))))
 
 
 def save_pdf(session, values, identity_id=None, placement=None, password=None):
-    """Field values go in as an incremental update, so earlier signatures stay valid. Signed: a new
-    "-podepsany" file, which the window then continues with. Unsigned: the open file itself."""
     name = session["name"]
     pdf = pdf_sign.fill(session["pdf"], values) if values else session["pdf"]
     if identity_id:
-        pdf = pdf_sign.sign(pdf, *signer(identity_id, password), placement=placement)
+        pdf = pdf_sign.sign(pdf, *certstore.load(identity_id, password), placement=placement)
         target = output_path(name)
     else:
         target = form_path(name) if SINGLE_FILE else ROOT / "out" / f"{name}-ulozeny.pdf"
@@ -202,115 +200,108 @@ def save_pdf(session, values, identity_id=None, placement=None, password=None):
     return {"saved": str(target), "signatures": pdf_signatures(pdf), "signature_field": pdf_sign.empty_signature_field(pdf)}
 
 
-def print_pdf(session, values):
-    """The filled PDF as a temporary file for the system print panel."""
+def write_pdf_for_printing(session, values):
     pdf = pdf_sign.fill(session["pdf"], values) if values else session["pdf"]
     target = Path(tempfile.gettempdir()) / f"zfo-tisk-{secrets.token_hex(4)}-{form_path(session['name']).name}"
     target.write_bytes(pdf)
     return {"path": str(target)}
 
 
-def render(name, blank=False, data=None):
-    fo = read_fo(form_path(name))
+def published_form_with_data(fo, data):
+    published = publisher_layer(parse_fo(fo))
+    remove_data_objects(published)
+    if data is not None:
+        etree.SubElement(published, f"{{{DS}}}Object").append(data)
+    return etree.tostring(published)
+
+
+def render_zfo_page(name, blank=False, data=None):
+    fo = read_form_fo(form_path(name))
     if blank or data is not None:
-        # Form Filler's "Obnovit výchozí hodnoty" (no data) or "Import dat do formuláře" (given data):
-        # the form as published, with the user's signatures and old data removed
-        stripped = publisher_layer(etree.fromstring(fo, etree.XMLParser(huge_tree=True)))
-        for old in stripped.xpath("dsig:Object[not(@Id)]", namespaces={"dsig": DS}):
-            stripped.remove(old)
-        if data is not None:
-            etree.SubElement(stripped, f"{{{DS}}}Object").append(data)
-        fo = etree.tostring(stripped)
+        fo = published_form_with_data(fo, data)
     session = new_session({"name": name, "doc": engine.open_document(fo)})
-    doc = etree.fromstring(fo, etree.XMLParser(huge_tree=True))
+    doc = parse_fo(fo)
     for hidden in doc.xpath("//dsig:SignatureProperties | //dsig:Object[not(@Id)]", namespaces={"dsig": DS}):
         hidden.getparent().remove(hidden)
     html = etree.tostring(XSLT(etree.ElementTree(doc), PATH_TO_JS="'/static/scripts/'",
                                PATH_TO_CSS="'/static/styles/'"), method="html", encoding="unicode")
     shell = (SHELL.replace("__SESSION__", session)
-             .replace("__FILE__", js(form_path(name).name if SINGLE_FILE else name))
-             .replace("__SIGNATURES__", js(signatures(fo)))
-             .replace("__PAGE__", js(page_geometry(doc)))
-             .replace("__COLORS__", js(field_colors(doc)))
-             .replace("__INFO__", js(form_info(name)))
-             .replace("__BLANK__", js(blank))
+             .replace("__FILE__", json_for_script(form_path(name).name if SINGLE_FILE else name))
+             .replace("__SIGNATURES__", json_for_script(zfo_signatures(fo)))
+             .replace("__PAGE__", json_for_script(page_geometry(doc)))
+             .replace("__COLORS__", json_for_script(field_colors(doc)))
+             .replace("__INFO__", json_for_script(form_info(name)))
+             .replace("__BLANK__", json_for_script(blank))
              .replace("__FONTS__", embedded_fonts(doc))
-             .replace("__BUTTONS__", js(user_buttons(doc)))
-             .replace("__CODES__", js(code_lists(doc)))
+             .replace("__BUTTONS__", json_for_script(user_buttons(doc)))
+             .replace("__CODES__", json_for_script(binds_of_lists_showing_codes(doc)))
              .replace("__EMPTY__", "false"))
-    # The form arrives before the shell's styles; without this the browser paints it unstyled while the page loads.
-    return html.replace("</head>", OPENING_STYLE + "</head>", 1).replace("</body>", shell + "</body>", 1)
+    return html.replace("</head>", OPENING_PLACEHOLDER_STYLE + "</head>", 1).replace("</body>", shell + "</body>", 1)
 
 
-def code_lists(doc):
-    """Bindings of the lists that show their item's code rather than its label (form602displaycode)."""
-    return sorted({cell.get("form602bind") for cell in doc.iter("{http://www.w3.org/1999/XSL/Format}table-cell")
+def binds_of_lists_showing_codes(doc):
+    return sorted({cell.get("form602bind") for cell in doc.iter(f"{{{FO}}}table-cell")
                    if cell.get("form602displaycode") == "true" and cell.get("form602bind")})
 
 
 def user_buttons(doc):
-    """Designer's toolbar buttons (fm:userbutton1…n in fm:formsettings), in their numbered order."""
-    settings = doc.find(".//{http://software602.cz/forms}formsettings")
-    found = []
-    for el in (settings if settings is not None else []):
-        number = re.fullmatch(r"userbutton(\d+)", etree.QName(el).localname if isinstance(el.tag, str) else "")
-        if number and el.get("express"):
-            found.append((int(number.group(1)), {"caption": el.get("caption", ""), "tooltip": el.get("tooltip", ""),
-                                                 "icon": el.get("iconid", ""), "text": el.get("showtext", "yes") != "no",
-                                                 "express": el.get("express")}))
-    return [button for _, button in sorted(found, key=lambda pair: pair[0])]
+    settings = doc.find(f".//{{{FM}}}formsettings")
+    numbered_buttons = []
+    for element in (settings if settings is not None else []):
+        number = re.fullmatch(r"userbutton(\d+)", etree.QName(element).localname if isinstance(element.tag, str) else "")
+        if number and element.get("express"):
+            numbered_buttons.append((int(number.group(1)), {"caption": element.get("caption", ""), "tooltip": element.get("tooltip", ""),
+                                                            "icon": element.get("iconid", ""), "text": element.get("showtext", "yes") != "no",
+                                                            "express": element.get("express")}))
+    return [button for _, button in sorted(numbered_buttons, key=lambda pair: pair[0])]
+
+
+def is_font_safe_in_style_block(name, data):
+    return name and data and re.fullmatch(r"[\w .-]+", name) and re.fullmatch(r"[A-Za-z0-9+/]+=*", data)
 
 
 def embedded_fonts(doc):
-    """@font-face rules for TrueType fonts the form carries in fm:fonts. They land in a <style> block, so a font
-    whose name or data could close it is left out."""
     rules = []
-    for font in doc.iter("{http://software602.cz/forms}font"):
+    for font in doc.iter(f"{{{FM}}}font"):
         name, data = font.get("name"), "".join((font.text or "").split())
-        if name and data and re.fullmatch(r"[\w .-]+", name) and re.fullmatch(r"[A-Za-z0-9+/]+=*", data):
+        if is_font_safe_in_style_block(name, data):
             rules.append(f'@font-face {{ font-family: {json.dumps(name)}; src: url(data:font/ttf;base64,{data}) format("truetype"); }}')
     return "\n  ".join(rules)
 
 
+def attribute_or_default(element, attribute, default=""):
+    return element.get(attribute, default) if element is not None else default
+
+
 def field_colors(doc):
-    """Background colours of editable and read-only fields as set by the form designer."""
-    params = doc.find(".//{http://software602.cz/forms}formparams")
-    get = lambda attr, default: params.get(attr, default) if params is not None else default
-    return {"field": get("proprequiredformfieldbkcolor", "rgb(255,255,180)"),
-            "readonly": get("proproformfieldbkcolor", "rgb(220,220,220)")}
+    params = doc.find(f".//{{{FM}}}formparams")
+    return {"field": attribute_or_default(params, "proprequiredformfieldbkcolor", "rgb(255,255,180)"),
+            "readonly": attribute_or_default(params, "proproformfieldbkcolor", "rgb(220,220,220)")}
 
 
 def page_geometry(doc):
-    """Paper size and margins from the form's first fo:simple-page-master, as CSS."""
-    master = next(doc.iter("{http://www.w3.org/1999/XSL/Format}simple-page-master"), None)
+    master = next(doc.iter(f"{{{FO}}}simple-page-master"), None)
     if master is None:
         return {}
-    margin = lambda side: master.get(f"margin-{side}", "15mm")
-    return {"width": master.get("page-width", "21cm"),
-            "padding": " ".join(margin(s) for s in ("top", "right", "bottom", "left"))}
+    margins = (master.get(f"margin-{side}", "15mm") for side in ("top", "right", "bottom", "left"))
+    return {"width": master.get("page-width", "21cm"), "padding": " ".join(margins)}
 
 
-def signatures(fo):
-    """Signature layers of a form.fo with integrity and trust verdicts, outermost first."""
-    found = zfo_verify.describe(etree.fromstring(fo, etree.XMLParser(huge_tree=True)))
-    return judged(found)
+def zfo_signatures(fo):
+    return add_trust_verdicts(zfo_verify.describe(parse_fo(fo)))
 
 
-def signer(identity_id, password=None):
-    return certstore.load(identity_id, password)
-
-
-def script_binds(doc):
-    """Binds with 602 JavaScript that cannot run here, found by trying each on empty answers. Branches an empty form does
-    not reach stay untried: the form check reports those it met while the form was being filled."""
-    library = [element.text for element in doc.iter("{http://software602.cz/forms}script") if element.text]
+def binds_with_unsupported_scripts(doc):
+    # Tried on empty answers, so branches an empty form does not reach stay untried: the form check reports those it met
+    # while the form was being filled.
+    library = [element.text for element in doc.iter(f"{{{FM}}}script") if element.text]
     interpreter = js602.Interpreter(library)
     found = []
-    for bind in doc.iter("{http://software602.cz/forms}bind"):
-        for name, value in bind.attrib.items():
+    for bind in doc.iter(f"{{{FM}}}bind"):
+        for attribute, value in bind.attrib.items():
             if not js602.is_script(value):
                 continue
-            if name not in ("calculate", "constraint"):
+            if attribute not in ("calculate", "constraint"):
                 found.append(bind.get("Id"))
                 break
             try:
@@ -325,54 +316,54 @@ def script_binds(doc):
     return found
 
 
-def script_actions(doc):
-    """How many buttons and fields carry scripts that never run here: they could reach the network, files and signing."""
-    return sum(1 for element in doc.iter() if isinstance(element.tag, str) for name in SCRIPT_ACTIONS
-               if element.get(name, "").lstrip().startswith("{"))
+def count_never_run_scripts(doc):
+    return sum(1 for element in doc.iter() if isinstance(element.tag, str) for attribute in NEVER_RUN_SCRIPT_ATTRIBUTES
+               if element.get(attribute, "").lstrip().startswith("{"))
 
 
 def form_info(name):
-    """Form description as Form Filler shows it under "Popis formuláře"."""
-    with zipfile.ZipFile(form_path(name)) as z:
-        summary = etree.fromstring(z.read("summary/summary.xml")).find("summary") if "summary/summary.xml" in z.namelist() else None
-        # "Modifikován": the forms carry no such attribute; Form Filler stamps form.fo in the archive when it saves.
-        modified = datetime(*z.getinfo("form.fo").date_time).isoformat()
-    fo = etree.fromstring(read_fo(form_path(name)), etree.XMLParser(huge_tree=True))
-    params = fo.find(".//{http://software602.cz/forms}formparams")
-    get = lambda el, attr: el.get(attr, "") if el is not None else ""
-    return {"title": get(summary, "title"), "subject": get(summary, "subject"), "author": get(summary, "author"),
-            "keywords": get(summary, "keywords"), "comment": get(summary, "comment"), "code": get(summary, "formcode"),
-            "form_id": get(params, "form-id") or get(summary, "form-id"), "created": get(params, "creationdate"),
-            "modified": modified, "version": get(params, "xmlcore-version"), "scripts": len(script_binds(fo)), "actions": script_actions(fo)}
+    with zipfile.ZipFile(form_path(name)) as archive:
+        summary = etree.fromstring(archive.read("summary/summary.xml")).find("summary") if "summary/summary.xml" in archive.namelist() else None
+        # The forms carry no modification date; Form Filler stamps form.fo in the archive when it saves.
+        modified = datetime(*archive.getinfo("form.fo").date_time).isoformat()
+    fo = parse_fo(read_form_fo(form_path(name)))
+    params = fo.find(f".//{{{FM}}}formparams")
+    return {"title": attribute_or_default(summary, "title"), "subject": attribute_or_default(summary, "subject"),
+            "author": attribute_or_default(summary, "author"), "keywords": attribute_or_default(summary, "keywords"),
+            "comment": attribute_or_default(summary, "comment"), "code": attribute_or_default(summary, "formcode"),
+            "form_id": attribute_or_default(params, "form-id") or attribute_or_default(summary, "form-id"),
+            "created": attribute_or_default(params, "creationdate"), "modified": modified,
+            "version": attribute_or_default(params, "xmlcore-version"), "scripts": len(binds_with_unsupported_scripts(fo)),
+            "actions": count_never_run_scripts(fo)}
 
 
 def filled_form(session, key=None, cert=None):
-    """form.fo bytes with the session's data under the publisher signature, signed by the user when a key is given."""
-    doc = publisher_layer(etree.fromstring(read_fo(form_path(session["name"])), etree.XMLParser(huge_tree=True)))
-    for stale in doc.xpath("dsig:Object[not(@Id)]", namespaces={"dsig": DS}):
-        doc.remove(stale)
+    doc = publisher_layer(parse_fo(read_form_fo(form_path(session["name"]))))
+    remove_data_objects(doc)
     etree.SubElement(doc, f"{{{DS}}}Object").append(copy.deepcopy(engine.data_element(session["doc"])))
     if key is None:
         return etree.tostring(doc, xml_declaration=True, encoding="UTF-8")
     return zfo_sign.sign(etree.tostring(doc), key, cert, "sha256")
 
 
+def stamped_with_saving_time(zip_info):
+    stamped = copy.copy(zip_info)
+    stamped.date_time = time.localtime()[:6]
+    return stamped
+
+
 def write_zfo(name, fo, target):
     out = io.BytesIO()
-    with zipfile.ZipFile(form_path(name)) as zin, zipfile.ZipFile(out, "w") as zout:
-        for info in zin.infolist():
-            data = zin.read(info.filename)
+    with zipfile.ZipFile(form_path(name)) as source, zipfile.ZipFile(out, "w") as saved:
+        for info in source.infolist():
+            data = source.read(info.filename)
             if info.filename == "form.fo":
-                # Stamped with the time of saving, as Form Filler does: it is what "Modifikován" shows.
-                info, data = copy.copy(info), fo
-                info.date_time = time.localtime()[:6]
-            zout.writestr(info, data, compress_type=info.compress_type)
+                info, data = stamped_with_saving_time(info), fo
+            saved.writestr(info, data, compress_type=info.compress_type)
     target.write_bytes(out.getvalue())
 
 
 def export_data(session):
-    """Form Filler's "Uložit data do souboru": the filled data instance as XML, with a suggested file name and folder.
-    The user picks where to save it."""
     path = form_path(session["name"])
     xml = etree.tostring(engine.data_element(session["doc"]), xml_declaration=True, encoding="UTF-8", pretty_print=True)
     return {"name": f"{path.stem if SINGLE_FILE else session['name']}-data.xml",
@@ -381,11 +372,10 @@ def export_data(session):
 
 
 def import_data(session, xml):
-    """Form Filler's "Import dat do formuláře": checks the XML matches the form's data model, returns a reload token."""
     try:
         data = etree.fromstring(xml, etree.XMLParser(resolve_entities=False, no_network=True))
-    except etree.XMLSyntaxError as e:
-        raise ValueError(f"Soubor není platné XML: {e}") from None
+    except etree.XMLSyntaxError as error:
+        raise ValueError(f"Soubor není platné XML: {error}") from None
     expected = engine.data_element(session["doc"])
     if data.tag != expected.tag:
         raise ValueError(f"Data patří k jinému formuláři (kořen {etree.QName(data).localname}, "
@@ -395,17 +385,20 @@ def import_data(session, xml):
     return {"import": token}
 
 
-def save(session, identity_id=None, password=None):
-    """Signed: a new "-podepsany" file next to the form. Unsigned (Form Filler's "Uložit"): the open file itself."""
+def save_zfo(session, identity_id=None, password=None):
     name = session["name"]
     if identity_id:
-        fo = filled_form(session, *signer(identity_id, password))
+        fo = filled_form(session, *certstore.load(identity_id, password))
         target = output_path(name)
     else:
         fo = filled_form(session)
         target = form_path(name) if SINGLE_FILE else ROOT / "out" / f"{name}-ulozeny.zfo"
     write_zfo(name, fo, target)
-    return {"saved": str(target), "signatures": signatures(fo)}
+    return {"saved": str(target), "signatures": zfo_signatures(fo)}
+
+
+def first_query_value(query, key, default=""):
+    return parse_qs(query).get(key, [default])[0]
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -414,140 +407,183 @@ class Handler(BaseHTTPRequestHandler):
         if sys.stderr:
             super().log_message(format, *args)
 
-    def _send(self, code, body, ctype):
+    def _send_response(self, code, body, content_type):
         self.send_response(code)
-        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
-    def _foreign(self):
-        """Any web page in the user's browser can reach localhost. A request whose Host is not this server (DNS
-        rebinding) or a POST from another origin (a forged form) is refused before it reads or changes anything."""
+    def _send_json(self, value):
+        self._send_response(200, json.dumps(value, ensure_ascii=False).encode(), JSON)
+
+    def _send_not_found(self):
+        self._send_response(404, b"not found", PLAIN_TEXT)
+
+    def _send_error_message(self, error):
+        self._send_response(400, str(error).encode(), PLAIN_TEXT_UTF8)
+
+    def _read_body(self):
+        return self.rfile.read(int(self.headers.get("Content-Length") or 0))
+
+    def _is_foreign_request(self):
+        # Any web page in the user's browser can reach localhost: DNS rebinding changes the Host, a forged form the Origin.
         port = self.server.server_address[1]
-        own = {f"127.0.0.1:{port}", f"localhost:{port}"}
-        if self.headers.get("Host") not in own:
+        own_hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
+        if self.headers.get("Host") not in own_hosts:
             return True
         origin = self.headers.get("Origin")
-        return self.command == "POST" and origin is not None and origin not in {f"http://{h}" for h in own}
+        return self.command == "POST" and origin is not None and origin not in {f"http://{host}" for host in own_hosts}
 
-    def do_GET(self):
-        if self._foreign():
-            return self._send(403, b"forbidden", "text/plain")
-        url = urlparse(self.path)
-        if url.path.startswith("/static/"):
-            path = (EDITOR / url.path[len("/static/"):]).resolve()
-            if EDITOR in path.parents and path.is_file():
-                ctype = {".js": "text/javascript", ".css": "text/css", ".png": "image/png"}.get(path.suffix, "application/octet-stream")
-                return self._send(200, path.read_bytes(), ctype)
-            return self._send(404, b"not found", "text/plain")
-        if url.path.startswith("/pdfjs/"):
-            path = (PDFJS / url.path[len("/pdfjs/"):]).resolve()
-            if PDFJS in path.parents and path.is_file():
-                ctype = {".mjs": "text/javascript", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml",
-                         ".png": "image/png"}.get(path.suffix, "application/octet-stream")
-                return self._send(200, path.read_bytes(), ctype)
-            return self._send(404, b"not found", "text/plain")
-        if url.path == "/bridge.js":
-            # Started by the Windows/Linux app (desktop.py): pages talk to it through pywebview.
-            flag = b"window.ZFO_DESKTOP = true;\n" if os.environ.get("ZFO_DESKTOP") else b""
-            return self._send(200, flag + (RESOURCES / "ui/bridge.js").read_bytes(), "text/javascript")
-        if url.path == "/pdf":
-            session = SESSIONS.get(parse_qs(url.query).get("s", [""])[0])
-            if session is None or "pdf" not in session:
-                return self._send(404, b"not found", "text/plain")
-            return self._send(200, session["pdf"], "application/pdf")
-        if url.path == "/identities":
-            return self._send(200, json.dumps(certstore.identities(), ensure_ascii=False).encode(), "application/json")
-        name = parse_qs(url.query).get("form", [None])[0]
-        if not name and SINGLE_FILE and not FORMS:
-            return self._send(200, render_empty().encode(), "text/html; charset=utf-8")
-        if not name and SINGLE_FILE:
-            name = next(iter(FORMS))
-        if not name:
-            links = "".join(f'<li><a href="/?form={quote(n)}">{n}</a></li>' for n in sorted(FORMS))
-            return self._send(200, f"<meta charset=utf-8><h1>Formuláře</h1><ul>{links}</ul>".encode(), "text/html; charset=utf-8")
+    def _serve_file_inside(self, root, relative_path, content_types):
+        path = os.path.realpath(root / relative_path)
+        if path.startswith(os.path.realpath(root) + os.sep) and os.path.isfile(path):
+            content_type = content_types.get(Path(path).suffix, "application/octet-stream")
+            return self._send_response(200, Path(path).read_bytes(), content_type)
+        return self._send_not_found()
+
+    def _serve_bridge_script(self):
+        desktop_flag = b"window.ZFO_DESKTOP = true;\n" if os.environ.get("ZFO_DESKTOP") else b""
+        self._send_response(200, desktop_flag + (RESOURCES / "ui/bridge.js").read_bytes(), "text/javascript")
+
+    def _serve_session_pdf(self, query):
+        session = SESSIONS.get(first_query_value(query, "s"))
+        if session is None or "pdf" not in session:
+            return self._send_not_found()
+        return self._send_response(200, session["pdf"], "application/pdf")
+
+    def _serve_form_list(self):
+        links = "".join(f'<li><a href="/?form={quote(name)}">{name}</a></li>' for name in sorted(FORMS))
+        self._send_response(200, f"<meta charset=utf-8><h1>Formuláře</h1><ul>{links}</ul>".encode(), HTML_UTF8)
+
+    def _serve_form_page(self, name, query):
         try:
-            query = parse_qs(url.query)
-            data = IMPORTS.pop(query.get("import", [""])[0], None)
-            page = (render_pdf(name) if form_path(name).suffix.lower() == ".pdf"
-                    else render(name, query.get("blank", [""])[0] == "1", data))
-            self._send(200, page.encode(), "text/html; charset=utf-8")
+            data = IMPORTS.pop(first_query_value(query, "import"), None)
+            page = (render_pdf_page(name) if form_path(name).suffix.lower() == ".pdf"
+                    else render_zfo_page(name, first_query_value(query, "blank") == "1", data))
+            self._send_response(200, page.encode(), HTML_UTF8)
         except FileNotFoundError:
-            self._send(404, b"form not found", "text/plain")
+            self._send_response(404, b"form not found", PLAIN_TEXT)
         except Exception as error:  # noqa: BLE001 - a damaged or hostile file must end in a message, not an empty window
             # Quoted with %r: the text can carry pieces of the file, which must not forge log lines.
             self.log_message("cannot open %r: %r", name, str(error)[:200])
-            self._send(422, DAMAGED_PAGE.encode(), "text/html; charset=utf-8")
+            self._send_response(422, DAMAGED_PAGE.encode(), HTML_UTF8)
+
+    def do_GET(self):
+        if self._is_foreign_request():
+            return self._send_response(403, b"forbidden", PLAIN_TEXT)
+        url = urlparse(self.path)
+        if url.path.startswith("/static/"):
+            return self._serve_file_inside(EDITOR, url.path[len("/static/"):], STATIC_CONTENT_TYPES)
+        if url.path.startswith("/pdfjs/"):
+            return self._serve_file_inside(PDFJS, url.path[len("/pdfjs/"):], PDFJS_CONTENT_TYPES)
+        if url.path == "/bridge.js":
+            return self._serve_bridge_script()
+        if url.path == "/pdf":
+            return self._serve_session_pdf(url.query)
+        if url.path == "/identities":
+            return self._send_json(certstore.identities())
+        name = first_query_value(url.query, "form", None)
+        if not name and SINGLE_FILE and not FORMS:
+            return self._send_response(200, render_empty_window().encode(), HTML_UTF8)
+        if not name and SINGLE_FILE:
+            name = next(iter(FORMS))
+        if not name:
+            return self._serve_form_list()
+        return self._serve_form_page(name, url.query)
+
+    def _add_certificate(self):
+        request = json.loads(self._read_body() or b"{}")
+        try:
+            certstore.add_pfx(base64.b64decode(request["data"]), request.get("password") or "")
+        except (KeyError, ValueError, OSError) as error:
+            return self._send_error_message(error)
+        return self._send_json(certstore.identities())
+
+    def _report_revocation(self, body):
+        try:
+            certificate_ids = [certificate_id for certificate_id in json.loads(body or b"[]")
+                               if isinstance(certificate_id, str) and certificate_id in SHOWN_CERTIFICATES_BY_ID]
+        except (ValueError, TypeError):
+            return self._send_response(400, b"bad request", PLAIN_TEXT)
+        return self._send_json({certificate_id: certstore.revocation_status(SHOWN_CERTIFICATES_BY_ID[certificate_id])
+                                for certificate_id in certificate_ids})
+
+    def _answer_engine_message(self, session, body):
+        message = json.loads(body)
+        self._send_json(engine.handle(session["doc"], message.get("type"), message.get("data")))
+
+    def _save_zfo(self, session, query, body):
+        try:
+            result = save_zfo(session, first_query_value(query, "cert") or None, json.loads(body or b"{}").get("password"))
+        except (LookupError, RuntimeError, ValueError, OSError) as error:
+            return self._send_error_message(error)
+        return self._send_json(result)
+
+    def _save_or_print_pdf(self, session, url, body):
+        try:
+            request = json.loads(body or b"{}")
+            values = request.get("values") or {}
+            result = (write_pdf_for_printing(session, values) if url.path == "/pdf-print"
+                      else save_pdf(session, values, first_query_value(url.query, "cert") or None,
+                                    request.get("placement"), request.get("password")))
+        except (LookupError, RuntimeError, ValueError, OSError) as error:
+            return self._send_error_message(error)
+        return self._send_json(result)
+
+    def _export_or_import_data(self, session, path, body):
+        try:
+            result = export_data(session) if path == "/export-data" else import_data(session, body)
+        except (ValueError, OSError) as error:
+            return self._send_error_message(error)
+        return self._send_json(result)
 
     def do_POST(self):
-        if self._foreign():
-            return self._send(403, b"forbidden", "text/plain")
+        if self._is_foreign_request():
+            return self._send_response(403, b"forbidden", PLAIN_TEXT)
         url = urlparse(self.path)
-        session = SESSIONS.get(parse_qs(url.query).get("s", [""])[0])
+        session = SESSIONS.get(first_query_value(url.query, "s"))
         if session is None:
-            return self._send(404, "Relace vypršela, načti formulář znovu".encode(), "text/plain; charset=utf-8")
+            return self._send_response(404, "Relace vypršela, načti formulář znovu".encode(), PLAIN_TEXT_UTF8)
         if url.path == "/add-certificate":
-            request = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
-            try:
-                certstore.add_pfx(base64.b64decode(request["data"]), request.get("password") or "")
-            except (KeyError, ValueError, OSError) as e:
-                return self._send(400, str(e).encode(), "text/plain; charset=utf-8")
-            return self._send(200, json.dumps(certstore.identities(), ensure_ascii=False).encode(), "application/json")
-        body = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+            return self._add_certificate()
+        body = self._read_body()
         if url.path == "/revocation":  # outside the lock: it may wait for a download, the form must stay usable
-            try:
-                ids = [i for i in json.loads(body or b"[]") if isinstance(i, str) and i in CERTIFICATES]
-            except (ValueError, TypeError):
-                return self._send(400, b"bad request", "text/plain")
-            result = {i: certstore.revocation_status(CERTIFICATES[i]) for i in ids}
-            return self._send(200, json.dumps(result, ensure_ascii=False).encode(), "application/json")
+            return self._report_revocation(body)
         with LOCK:
             if url.path == "/ipc":
-                msg = json.loads(body)
-                responses = engine.handle(session["doc"], msg.get("type"), msg.get("data"))
-                return self._send(200, json.dumps(responses, ensure_ascii=False).encode(), "application/json")
+                return self._answer_engine_message(session, body)
             if url.path == "/save":
-                try:
-                    result = save(session, parse_qs(url.query).get("cert", [""])[0] or None,
-                                  json.loads(body or b"{}").get("password"))
-                except (LookupError, RuntimeError, ValueError, OSError) as e:
-                    return self._send(400, str(e).encode(), "text/plain; charset=utf-8")
-                return self._send(200, json.dumps(result, ensure_ascii=False).encode(), "application/json")
+                return self._save_zfo(session, url.query, body)
             if url.path in ("/pdf-save", "/pdf-print"):
-                try:
-                    request = json.loads(body or b"{}")
-                    values = request.get("values") or {}
-                    result = (print_pdf(session, values) if url.path == "/pdf-print"
-                              else save_pdf(session, values, parse_qs(url.query).get("cert", [""])[0] or None,
-                                            request.get("placement"), request.get("password")))
-                except (LookupError, RuntimeError, ValueError, OSError) as e:
-                    return self._send(400, str(e).encode(), "text/plain; charset=utf-8")
-                return self._send(200, json.dumps(result, ensure_ascii=False).encode(), "application/json")
+                return self._save_or_print_pdf(session, url, body)
             if url.path in ("/export-data", "/import-data"):
-                try:
-                    result = export_data(session) if url.path == "/export-data" else import_data(session, body)
-                except (ValueError, OSError) as e:
-                    return self._send(400, str(e).encode(), "text/plain; charset=utf-8")
-                return self._send(200, json.dumps(result, ensure_ascii=False).encode(), "application/json")
-        self._send(404, b"not found", "text/plain")
+                return self._export_or_import_data(session, url.path, body)
+        return self._send_not_found()
 
 
-def watch_parent():
-    """End together with the app that started this server, even when it is killed without cleaning up."""
-    if os.environ.get("ZFO_WATCH_STDIN"):
-        # The desktop shell keeps our stdin open; end of input means it is gone (works on Windows too).
-        # The descriptor is read directly: a windowed Windows build has no sys.stdin object.
-        try:
-            while os.read(0, 4096):
-                pass
-        except OSError:
-            return
-        os._exit(0)
+def exit_when_stdin_closes():
+    # The descriptor is read directly: a windowed Windows build has no sys.stdin object.
+    try:
+        while os.read(0, 4096):
+            pass
+    except OSError:
+        return
+    os._exit(0)
+
+
+def exit_when_parent_changes():
     parent = os.getppid()
     while os.getppid() == parent:
         threading.Event().wait(2)
     os._exit(0)
+
+
+def exit_together_with_host_app():
+    if os.environ.get("ZFO_WATCH_STDIN"):
+        exit_when_stdin_closes()
+    else:
+        exit_when_parent_changes()
 
 
 def main(args):
@@ -558,10 +594,10 @@ def main(args):
             FORMS[path.stem] = path
             args = args[1:]
         SINGLE_FILE, args = True, args[1:]
-        threading.Thread(target=watch_parent, daemon=True).start()
+        threading.Thread(target=exit_together_with_host_app, daemon=True).start()
     else:
-        FORMS.update({p.parent.name: p for p in sorted((ROOT / "samples").glob("*/form.zfo"))})
-        FORMS.update({p.stem: p for p in sorted((ROOT / "samples-pdf").glob("*.pdf"))})
+        FORMS.update({path.parent.name: path for path in sorted((ROOT / "samples").glob("*/form.zfo"))})
+        FORMS.update({path.stem: path for path in sorted((ROOT / "samples-pdf").glob("*.pdf"))})
     server = ThreadingHTTPServer(("127.0.0.1", int(args[0]) if args else 8602), Handler)
     if sys.stdout:
         print(f"PORT {server.server_address[1]}", flush=True)

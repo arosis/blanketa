@@ -148,7 +148,9 @@ Verze aplikace je v souboru `VERSION`, ikona se kreslí skriptem `tools/make-ico
 .venv/bin/python app.py 8602
 ```
 
-Server ve vývojovém režimu nabídne vzorky ze `samples/` a `samples-pdf/` na http://localhost:8602.
+Server ve vývojovém režimu nabídne vzorky ze `samples/` a `samples-pdf/` na http://localhost:8602 a ukládá do `out/`.
+S `--file CESTA [PORT]` otevře jeden formulář a podepsanou kopii uloží vedle něj, port 0 vybere volný port a vypíše ho
+jako `PORT <n>`.
 
 Pozor: náhled v Chromu se liší od aplikace (WebKit). Rozvržení proto ověřujte nástrojem `tools/webkit-probe`:
 
