@@ -122,3 +122,21 @@ Pro každou vrstvu se kontroluje:
 Důvěryhodnost se hodnotí v úložišti certifikátů systému: na Macu přes `SecTrustEvaluateWithError`, ve Form Filleru přes úložiště Windows. Form Filler hlásí vydavatele Software602 jako „nebyl nalezen certifikát vystavitele“, pokud v systému chybí jejich CA. Nejde o chybu podpisu.
 
 Implementace: `zfo_verify.py` (ověření), `zfo_sign.py` (podpis), `macsign/` (klíč v klíčence nebo tokenu).
+
+## Pomocné programy
+
+```text
+zfo_sign.py IN.zfo OUT.zfo KEY.pem CERT.pem [--sha1] [pole=hodnota ...]
+zfo_verify.py FORM.fo|FORM.zfo
+macsign list [--keychain CESTA]
+macsign sign --cert SHA1HEX [--alg sha256|sha1] [--keychain CESTA] < data > podpis.b64
+macsign trust < certifikáty DER v base64, po jednom na řádku
+winsign.ps1 list
+winsign.ps1 sign SHA1 sha1|sha256 SOUBOR
+winsign.ps1 trust < certifikáty DER v base64, po jednom na řádku
+```
+
+`macsign` podepisuje klíčem z klíčenky macOS nebo tokenu přes CryptoTokenKit, `winsign.ps1` je jeho protějšek pro úložiště
+certifikátů Windows (`Cert:\CurrentUser\My`, včetně čipových karet) a funguje ve Windows PowerShellu 5.1 i PowerShellu 7.
+Klíč systém neopustí a token si o PIN řekne systémovým dialogem. `list` vrací JSON s poli `sha1`, `subject`, `token` a
+`certificate`, `trust` vypíše na každý řádek jeden JSON s poli `trusted` a `reason`.

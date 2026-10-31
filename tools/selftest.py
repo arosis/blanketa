@@ -26,14 +26,14 @@ import zfo_verify  # noqa: E402
 
 
 def main(source, password=None):
-    found = [i for i in certstore.identities() if i["source"] == source]
-    print("identities:", [(i["id"], i["subject"]) for i in certstore.identities()])
+    found = [i for i in certstore.signing_identities() if i["source"] == source]
+    print("identities:", [(i["id"], i["subject"]) for i in certstore.signing_identities()])
     if not found:
         sys.exit(f"no identity from source {source!r}")
-    key, cert = certstore.load(found[0]["id"], password)
+    key, cert = certstore.load_identity(found[0]["id"], password)
 
-    pdf = pdf_sign.sign(pdf_sign.fill((ROOT / "samples-pdf/zadost.pdf").read_bytes(), {"jmeno": "Jana Nováková"}), key, cert)
-    sigs = pdf_sign.signatures(pdf)
+    pdf = pdf_sign.sign_pdf(pdf_sign.fill_form_fields((ROOT / "samples-pdf/zadost.pdf").read_bytes(), {"jmeno": "Jana Nováková"}), key, cert)
+    sigs = pdf_sign.describe_signatures(pdf)
     print("pdf:", [(s["subject"], s["intact"], s["covers_whole"]) for s in sigs])
     assert sigs and sigs[-1]["intact"] and sigs[-1]["covers_whole"], "PDF signature does not verify"
 
@@ -42,21 +42,21 @@ def main(source, password=None):
     writer.encrypt(user_password="", owner_password="selftest", algorithm="AES-128")
     encrypted = io.BytesIO()
     writer.write(encrypted)
-    pdf = pdf_sign.sign(pdf_sign.fill(encrypted.getvalue(), {"jmeno": "Jana Nováková"}), key, cert)
-    sigs = pdf_sign.signatures(pdf)
+    pdf = pdf_sign.sign_pdf(pdf_sign.fill_form_fields(encrypted.getvalue(), {"jmeno": "Jana Nováková"}), key, cert)
+    sigs = pdf_sign.describe_signatures(pdf)
     print("encrypted pdf:", [(s["subject"], s["intact"], s["covers_whole"]) for s in sigs],
           pdf_sign.form_fields(pdf).get("jmeno"))
     assert sigs and sigs[-1]["intact"] and pdf_sign.form_fields(pdf).get("jmeno") == "Jana Nováková", \
         "encrypted PDF does not fill or verify"
 
     fo = zipfile.ZipFile(ROOT / "samples/cuzk/form.zfo").read("form.fo")
-    signed = zfo_sign.sign(fo, key, cert, "sha256")
+    signed = zfo_sign.sign_form(fo, key, cert, "sha256")
     root = etree.parse(io.BytesIO(signed), etree.XMLParser(huge_tree=True)).getroot()
-    layers = zfo_verify.describe(root)
+    layers = zfo_verify.describe_signature_layers(root)
     print("zfo:", [(l["subject"], l["intact"]) for l in layers])
     assert layers[0]["intact"] and layers[0]["subject"] == found[0]["subject"], "ZFO signature does not verify"
 
-    print("trust:", certstore.trust([der for der in [l["der"] for l in layers[:1]]]))
+    print("trust:", certstore.trust_verdicts([der for der in [l["der"] for l in layers[:1]]]))
     print("selftest ok")
 
 
