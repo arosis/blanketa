@@ -436,9 +436,10 @@ class Handler(BaseHTTPRequestHandler):
         return self.command == "POST" and origin is not None and origin not in {f"http://{host}" for host in own_hosts}
 
     def _serve_file_inside(self, root, relative_path, content_types):
-        path = (root / relative_path).resolve()
-        if root in path.parents and path.is_file():
-            return self._send_response(200, path.read_bytes(), content_types.get(path.suffix, "application/octet-stream"))
+        path = os.path.realpath(root / relative_path)
+        if path.startswith(os.path.realpath(root) + os.sep) and os.path.isfile(path):
+            content_type = content_types.get(Path(path).suffix, "application/octet-stream")
+            return self._send_response(200, Path(path).read_bytes(), content_type)
         return self._send_not_found()
 
     def _serve_bridge_script(self):
