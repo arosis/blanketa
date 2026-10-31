@@ -340,7 +340,7 @@ def signatures(pdf):
             "field": sig.field_name,
             "covers_whole": covers == "ENTIRE_FILE",
             "der": cert.dump(),
-            "stamps": [stamp for stamp in (_signature_stamp(sig), *(details for later, details, status in document_stamps
+            "stamps": [stamp for stamp in (_signature_stamp(sig), *(dict(details) for later, details, status in document_stamps
                                                                     if _stamp_covers(later, status, sig)))
                        if stamp is not None],
         })

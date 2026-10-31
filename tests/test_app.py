@@ -296,6 +296,15 @@ class TimeStamps(unittest.TestCase):
         self.assertTrue(stamp["document_stamp"])
         self.assertEqual(signature["stamps"], [])
 
+    def test_document_stamp_judged_for_its_card_and_its_signature(self):
+        data = (self.FOLDER / "razitko-dokumentu.pdf").read_bytes()
+        trust = [{"trusted": False, "unverifiable": False, "source": "system"}] * 2
+        with (mock.patch.object(app.certstore, "stamp_trust", return_value={"qualified": True, "unverifiable": False, "reason": ""}),
+              mock.patch.object(app.certstore, "trust", return_value=trust)):
+            signature, stamp = app.pdf_signatures(data)
+        self.assertEqual(signature["proof"]["kind"], "document")
+        self.assertEqual(stamp["proof"]["kind"], "document")
+
     def test_document_stamp_moved_behind_a_signature_proves_nothing(self):
         found = {bool(sig.get("document_stamp")): sig for sig in self.read("razitko-premistene")}
         self.assertTrue(found[True]["intact"])
