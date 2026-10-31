@@ -16,6 +16,7 @@ from asn1crypto import x509 as asn1_x509
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from pyhanko.pdf_utils import generic
 from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
 from pyhanko.sign import fields, signers
 from pyhanko.sign.timestamps import DummyTimeStamper
@@ -83,6 +84,20 @@ def stamp_document(pdf, when=LATER):
     return signers.PdfTimeStamper(stamper(when)).timestamp_pdf(writer, "sha256").getvalue()
 
 
+def relocate_document_stamp(pdf):
+    """Rewrites an older document stamp into a new revision, so that its object sits after a signature it never hashed."""
+    writer = IncrementalPdfFileWriter(io.BytesIO(pdf), strict=False)
+    for reference in writer.root["/AcroForm"]["/Fields"]:
+        field = reference.get_object()
+        value = field.get("/V")
+        if isinstance(value, generic.DictionaryObject) and value.get("/SubFilter") == "/ETSI.RFC3161":
+            field[generic.pdf_name("/V")] = writer.add_object(generic.DictionaryObject(dict(value.items())))
+            writer.mark_update(reference)
+    out = io.BytesIO()
+    writer.write(out)
+    return out.getvalue()
+
+
 def main():
     blank = (ROOT / "samples-pdf/zadost.pdf").read_bytes()
     samples = {
@@ -90,13 +105,13 @@ def main():
         "razitko-v-podpisu": sign(blank, timestamper=stamper()),
         "razitko-dokumentu": stamp_document(sign(blank)),
         "razitko-pred-podpisem": sign(stamp_document(blank, SIGNED - timedelta(days=1))),
+        "razitko-premistene": relocate_document_stamp(sign(stamp_document(blank, SIGNED - timedelta(days=1)))),
         "razitko-jineho-dokumentu": sign(blank, timestamper=stamper(kind=WrongDocumentStamper)),
         "razitko-nedoveryhodne": sign(blank, timestamper=stamper(cert=OTHER_TSA, key=OTHER_TSA_KEY)),
     }
     TARGET.mkdir(parents=True, exist_ok=True)
     for name, data in samples.items():
         (TARGET / f"{name}.pdf").write_bytes(data)
-    (TARGET / "tsa.crt").write_bytes(TSA.public_bytes(serialization.Encoding.PEM))
     print(f"{len(samples)} samples in {TARGET}", file=sys.stdout)
 
 

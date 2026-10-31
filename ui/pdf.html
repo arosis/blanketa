@@ -201,11 +201,14 @@ __SHELL_STYLE__
   const stampCard = sig => {
     const level = !sig.intact ? 'bad' : sig.proof ? 'ok' : 'warn';
     const state = !sig.intact ? 'Časové razítko dokumentu je poškozené'
-      : sig.proof ? 'Časové razítko dokumentu je platné' : 'Časové razítko dokumentu je neporušené, ale nedůvěryhodné';
+      : sig.proof ? 'Časové razítko dokumentu je platné'
+      : sig.stamp_unverifiable ? 'Časové razítko dokumentu je neporušené, důvěryhodnost nešlo ověřit'
+      : 'Časové razítko dokumentu je neporušené, ale nedůvěryhodné';
     return `<div class="zfo-card ${level}">
       <div class="who">${icons[level]}${esc(sig.subject)}</div>
       <div class="state">${state}</div>
       ${stampLine(sig)}
+      ${sig.intact && !sig.covers_whole ? '<div class="meta">Po razítku byl dokument doplněn nebo změněn, razítko se vztahuje jen k dřívější verzi.</div>' : ''}
       <div class="meta">Vystavil: ${esc(sig.issuer)}</div>
     </div>`;
   };

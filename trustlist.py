@@ -380,6 +380,16 @@ def check(der, folder):
         return {"trusted": False, "unverifiable": False, "reason": "Certifikát je poškozený, nelze ho ověřit."}
 
 
+def _only_for_stamping(certificate):
+    """RFC 3161 demands this of a stamping unit. Authorities listed for stamps can issue people's certificates too, and
+    their holders must not be able to stamp any time they like."""
+    try:
+        usage = certificate.extensions.get_extension_for_class(x509.ExtendedKeyUsage)
+    except x509.ExtensionNotFound:
+        return False
+    return usage.critical and list(usage.value) == [x509.ExtendedKeyUsageOID.TIME_STAMPING]
+
+
 def _stamps_qualified(root, certificate, moment):
     """Was this certificate's time stamping unit, or the authority issuing such units, qualified at that moment?
     Units are retired routinely and their old stamps stay good, so only the status at the stamp's time counts."""
@@ -395,7 +405,7 @@ def _stamps_qualified(root, certificate, moment):
                 listed = x509.load_der_x509_certificate(base64.b64decode(element.text))
                 if listed == certificate:
                     return True
-                if listed.subject == certificate.issuer:
+                if listed.subject == certificate.issuer and _only_for_stamping(certificate):
                     certificate.verify_directly_issued_by(listed)
                     return True
             except (ValueError, TypeError, InvalidSignature, UnsupportedAlgorithm):

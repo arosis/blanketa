@@ -15,6 +15,7 @@ from pyhanko.pdf_utils.reader import PdfFileReader
 from pyhanko.pdf_utils.text import TextBoxStyle
 from pyhanko.sign import fields, signers
 from pyhanko.sign.validation import validate_pdf_signature, validate_pdf_timestamp
+from pyhanko.sign.validation.status import SignatureCoverageLevel
 from pyhanko.stamp import TextStampStyle
 from pyhanko_certvalidator import ValidationContext
 from pyhanko_certvalidator.registry import SimpleCertificateStore
@@ -263,10 +264,10 @@ def _stamp_details(status, kind):
 
 def _signature_stamp(sig):
     """The time stamp inside a signature, proving the signature existed by then; None when it has none."""
-    attributes = sig.signer_info["unsigned_attrs"]
-    if not attributes.native or not any(a["type"].dotted == SIGNATURE_STAMP for a in attributes):
-        return None
     try:  # no fetching: the page must not wait for the network, and trust comes from the trusted lists
+        attributes = sig.signer_info["unsigned_attrs"]
+        if not attributes.native or not any(a["type"].dotted == SIGNATURE_STAMP for a in attributes):
+            return None
         status = validate_pdf_signature(sig, ts_validation_context=ValidationContext(allow_fetching=False), skip_diff=True)
         return _stamp_details(status.timestamp_validity, "signature")
     except Exception:  # a damaged token only means the time is not confirmed, the signature is judged apart from it
@@ -282,9 +283,19 @@ def _document_stamp(sig):
         return _stamp_details(None, "document"), None
 
 
-def _document_stamp_entry(sig):
+def _stamp_covers(stamp, status, sig):
+    """Did this document stamp hash the signature? Where the stamp's object sits in the file proves nothing, it can be
+    rewritten into a later revision: only the bytes it hashed count, and in one block, so no hole can skip the signature."""
+    if status is None or status.coverage < SignatureCoverageLevel.CONTIGUOUS_BLOCK_FROM_START:
+        return False
+    try:
+        return sum(list(stamp.byte_range)[2:]) >= sum(list(sig.byte_range)[2:])
+    except TypeError:  # a hostile range need not hold numbers
+        return False
+
+
+def _document_stamp_entry(sig, stamp, status):
     cert = sig.signer_cert
-    stamp, status = _document_stamp(sig)
     return {
         "document_stamp": True,
         "subject": cert.subject.native.get("common_name") or cert.subject.human_friendly,
@@ -307,9 +318,10 @@ def signatures(pdf):
     reader = _open(pdf)
     result = []
     found = reader.embedded_signatures
+    document_stamps = [(sig, *_document_stamp(sig)) for sig in found if sig.sig_object_type == "/DocTimeStamp"]
     for sig in found:
         if sig.sig_object_type == "/DocTimeStamp":
-            result.append(_document_stamp_entry(sig))
+            result.append(_document_stamp_entry(*next(entry for entry in document_stamps if entry[0] is sig)))
             continue
         cert = sig.signer_cert
         intact, covers, modified, unchecked = _evaluate(sig)
@@ -328,10 +340,8 @@ def signatures(pdf):
             "field": sig.field_name,
             "covers_whole": covers == "ENTIRE_FILE",
             "der": cert.dump(),
-            # A document stamp proves the signature only if the signature was already in the file it stamped.
-            "stamps": [stamp for stamp in (_signature_stamp(sig), *(_document_stamp(later)[0] for later in found
-                                                                    if later.sig_object_type == "/DocTimeStamp"
-                                                                    and later.signed_revision > sig.signed_revision))
+            "stamps": [stamp for stamp in (_signature_stamp(sig), *(details for later, details, status in document_stamps
+                                                                    if _stamp_covers(later, status, sig)))
                        if stamp is not None],
         })
     return result

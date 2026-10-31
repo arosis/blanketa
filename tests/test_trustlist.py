@@ -35,12 +35,14 @@ RSA_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 EC_KEY = ec.generate_private_key(ec.SECP256R1())
 
 
-def certificate(name, key, issuer=None, issuer_key=None, start=None, end=None, country="CZ", ca=True):
+def certificate(name, key, issuer=None, issuer_key=None, start=None, end=None, country="CZ", ca=True, usage=None):
     subject = x509.Name([x509.NameAttribute(x509.NameOID.COUNTRY_NAME, country), x509.NameAttribute(x509.NameOID.COMMON_NAME, name)])
     builder = (x509.CertificateBuilder().subject_name(subject).issuer_name(issuer.subject if issuer else subject)
                .public_key(key.public_key()).serial_number(x509.random_serial_number())
                .not_valid_before(start or NOW - timedelta(days=3000)).not_valid_after(end or NOW + timedelta(days=3000))
                .add_extension(x509.BasicConstraints(ca=ca, path_length=None), critical=True))
+    if usage:
+        builder = builder.add_extension(x509.ExtendedKeyUsage(usage), critical=True)
     return builder.sign(issuer_key or key, hashes.SHA256())
 
 
@@ -183,11 +185,20 @@ class TrustLists(unittest.TestCase):
         self.assertEqual(verdict, {"qualified": True, "unverifiable": False, "reason": ""})
 
     def test_unit_issued_by_a_listed_stamping_authority_is_qualified(self):
-        unit = certificate("TSU", EC_KEY, AUTHORITY, RSA_KEY, ca=False)
+        unit = certificate("TSU", EC_KEY, AUTHORITY, RSA_KEY, ca=False, usage=[x509.ExtendedKeyUsageOID.TIME_STAMPING])
         self.assertTrue(self.stamp_verdict(unit, NOW - timedelta(days=1), [service(AUTHORITY, kind=trustlist.TSA_QTST)])["qualified"])
 
+    def test_person_certificate_from_a_listed_stamping_authority_is_not_qualified(self):
+        person = certificate("Person", EC_KEY, AUTHORITY, RSA_KEY, ca=False)
+        self.assertFalse(self.stamp_verdict(person, NOW - timedelta(days=1), [service(AUTHORITY, kind=trustlist.TSA_QTST)])["qualified"])
+
+    def test_certificate_with_other_uses_from_a_listed_stamping_authority_is_not_qualified(self):
+        usage = [x509.ExtendedKeyUsageOID.TIME_STAMPING, x509.ExtendedKeyUsageOID.EMAIL_PROTECTION]
+        person = certificate("Person", EC_KEY, AUTHORITY, RSA_KEY, ca=False, usage=usage)
+        self.assertFalse(self.stamp_verdict(person, NOW - timedelta(days=1), [service(AUTHORITY, kind=trustlist.TSA_QTST)])["qualified"])
+
     def test_same_name_with_another_key_is_not_qualified(self):
-        unit = certificate("TSU", EC_KEY, AUTHORITY, EC_KEY, ca=False)
+        unit = certificate("TSU", EC_KEY, AUTHORITY, EC_KEY, ca=False, usage=[x509.ExtendedKeyUsageOID.TIME_STAMPING])
         self.assertFalse(self.stamp_verdict(unit, NOW - timedelta(days=1), [service(AUTHORITY, kind=trustlist.TSA_QTST)])["qualified"])
 
     def test_authority_for_signatures_does_not_vouch_for_stamps(self):

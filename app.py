@@ -117,9 +117,11 @@ def render_empty():
 
 
 def judged_stamps(sig):
-    """Sets sig["proof"], the earliest time confirmed by a good stamp, or sig["stamp_problem"], why the stamps do not count."""
+    """Sets sig["proof"], the earliest time confirmed by a good stamp, or sig["stamp_problem"], why the stamps do not count,
+    and sig["stamp_unverifiable"] when the trusted lists could not tell."""
     problem = ""
     proofs = []
+    unverifiable = False
     for stamp in sig.pop("stamps", ()):
         der = stamp.pop("der")
         if not stamp["intact"]:
@@ -130,8 +132,10 @@ def judged_stamps(sig):
             proofs.append(stamp)
         else:
             problem = problem or verdict["reason"]
+            unverifiable = unverifiable or verdict["unverifiable"]
     sig["proof"] = min(proofs, key=lambda stamp: stamp["at"], default=None)
     sig["stamp_problem"] = "" if proofs else problem
+    sig["stamp_unverifiable"] = unverifiable and not proofs
 
 
 def judged(found):

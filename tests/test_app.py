@@ -4,8 +4,11 @@
 """
 import copy
 import io
+import json
 import os
 import re
+import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -293,6 +296,17 @@ class TimeStamps(unittest.TestCase):
         self.assertTrue(stamp["document_stamp"])
         self.assertEqual(signature["stamps"], [])
 
+    def test_document_stamp_moved_behind_a_signature_proves_nothing(self):
+        found = {bool(sig.get("document_stamp")): sig for sig in self.read("razitko-premistene")}
+        self.assertTrue(found[True]["intact"])
+        self.assertEqual(found[False]["stamps"], [])
+
+    def test_damaged_stamp_attribute_keeps_the_panel_working(self):
+        data = (self.FOLDER / "razitko-v-podpisu.pdf").read_bytes()
+        at = data.lower().index(b"060b2a864886f70d010910020e")  # the attribute's type; a signature does not cover it
+        found = pdf_sign.signatures(data[:at] + b"05" + data[at + 2:])[0]
+        self.assertFalse(found["stamps"][0]["intact"])
+
     def test_stamp_of_another_document_does_not_break_the_signature(self):
         found = self.read("razitko-jineho-dokumentu")[0]
         self.assertTrue(found["intact"])
@@ -327,10 +341,50 @@ class TimeStamps(unittest.TestCase):
         self.assertIn("poškozené", sig["stamp_problem"])
         asked.assert_not_called()
 
+    def test_unverifiable_stamp_is_not_called_untrusted(self):
+        sig, _ = self.judge([self.stamp()], {"qualified": False, "unverifiable": True, "reason": "Seznam nejde načíst."})
+        self.assertIsNone(sig["proof"])
+        self.assertTrue(sig["stamp_unverifiable"])
+
     def test_good_stamp_hides_a_bad_one(self):
         sig, _ = self.judge([self.stamp(intact=False), self.stamp()], {"qualified": True, "unverifiable": False, "reason": ""})
         self.assertIsNotNone(sig["proof"])
         self.assertEqual(sig["stamp_problem"], "")
+
+
+@unittest.skipUnless(shutil.which("node"), "needs Node.js; CI runners have it")
+class RevocationVerdict(unittest.TestCase):
+    """Runs the decision in ui/bridge.js: the certificate below was revoked on 1 June."""
+    BEFORE, AFTER = "2026-01-01T00:00:00+00:00", "2026-09-01T00:00:00+00:00"
+    SCRIPT = """
+    const window = {}, fetch = async () => ({ok: true, json: async () => ({c: {status: 'revoked', revoked_at: '2026-06-01T00:00:00+00:00'}})});
+    %s
+    const sigs = JSON.parse(process.argv[1]), r = window.zfoRevocation;
+    r.ask('s', sigs, () => {});
+    setTimeout(() => console.log(JSON.stringify(sigs.map(sig => [r.provenBeforeRevocation(sig), r.revoked(sig), r.revokedBeforeSigning(sig)]))), 50);
+    """
+
+    def verdict(self, kind, proof_at, signed_at):
+        source = (ROOT / "ui/bridge.js").read_text(encoding="utf-8")
+        block = re.search(r"window\.zfoRevocation = .*?\n\}\)\(\);", source, re.S).group(0)
+        sig = {"certificate": "c", "signed_at": signed_at, "proof": {"kind": kind, "at": proof_at} if kind else None}
+        out = subprocess.run(["node", "-e", self.SCRIPT % block, "--", json.dumps([sig])], capture_output=True, text=True, check=True).stdout
+        return tuple(json.loads(out)[0])
+
+    def test_stamp_before_revocation_keeps_the_signature_valid(self):
+        for kind in ("signature", "document"):
+            self.assertEqual(self.verdict(kind, self.BEFORE, self.AFTER), (True, False, False))
+
+    def test_signature_stamp_after_revocation_is_invalid(self):
+        self.assertEqual(self.verdict("signature", self.AFTER, self.BEFORE), (False, True, True))
+
+    def test_later_document_stamp_leaves_the_signers_claim(self):
+        self.assertEqual(self.verdict("document", self.AFTER, self.BEFORE), (False, True, False))
+        self.assertEqual(self.verdict("document", self.AFTER, self.AFTER), (False, True, True))
+
+    def test_without_a_stamp_the_signers_claim_decides(self):
+        self.assertEqual(self.verdict(None, None, self.BEFORE), (False, True, False))
+        self.assertEqual(self.verdict(None, None, self.AFTER), (False, True, True))
 
 
 if __name__ == "__main__":
