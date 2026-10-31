@@ -698,7 +698,7 @@ class InterpreterAgainstNode(unittest.TestCase):
         expected = json.loads(subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True, env={**os.environ, "TZ": "UTC"}).stdout)
 
         def shown(value):
-            if isinstance(value, js602.Arr):
+            if isinstance(value, js602.ScriptArray):
                 return "[" + "|".join(shown(item) for item in value.items) + "]"
             return js602.to_string(value)
 
@@ -707,7 +707,7 @@ class InterpreterAgainstNode(unittest.TestCase):
         for case, wanted in zip(cases, expected, strict=True):
             box = []
             try:
-                keep = js602.Native(lambda this, args, kept=box: kept.append(args[0]))
+                keep = js602.NativeFunction(lambda this, args, kept=box: kept.append(args[0]))
                 interpreter.run(f"__keep(({case}));", {"__keep": keep})
                 got = shown(box[0])
             except js602.Thrown as error:

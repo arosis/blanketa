@@ -10,38 +10,36 @@
 #*
 #*    Written in October 2026 by Richard Winkler Bejr for "Blanketa".
 
-'''
-Interpreter of the JavaScript forms carry, for their calculations and constraints.
-
-A form is a hostile file, so its scripts run here and not in the page, which can sign. They reach nothing but the values
-below: no Python object is ever handed to them, an unknown name stops the script instead of being guessed, and a budget
-of steps stops any loop. A regular expression has its own matcher, because Python's re cannot be stopped once it backtracks.
-
-Numbers are floats, undefined is UNDEFINED and null is None. Local time is kept as if it were UTC, scripts only do date
-arithmetic with it.
-'''
+# Interpreter of the JavaScript forms carry, for their calculations and constraints.
+#
+# A form is a hostile file, so its scripts run here and not in the page, which can sign. They reach nothing but the values
+# below: no Python object is ever handed to them, an unknown name stops the script instead of being guessed, and a budget
+# of steps stops any loop. A regular expression has its own matcher, because Python's re cannot be stopped once it backtracks.
+#
+# Numbers are floats, undefined is UNDEFINED and null is None. Local time is kept as if it were UTC, scripts only do date
+# arithmetic with it.
 import datetime
 import json
 import math
 import re
 
 STEP_BUDGET = 2_000_000  # for one script run; the largest forms published by offices stay far below it
-MAX_DEPTH = 150  # nested calls in a script
-MAX_STRING = 4_000_000
-MAX_ITEMS = 200_000  # in one array
-MAX_SOURCE = 8_000_000
+MAX_CALL_DEPTH = 150
+MAX_STRING_LENGTH = 4_000_000
+MAX_ARRAY_ITEMS = 200_000
+MAX_SOURCE_LENGTH = 8_000_000
 
 
 class Unsupported(Exception):
-  '''The script needs something this interpreter does not offer, or cannot be read. Nothing it did counts.'''
+  # The script needs something this interpreter does not offer, or cannot be read. Nothing it did counts.
+  pass
 
 
 class Exhausted(Exception):
-  '''The script spent its budget.'''
+  pass
 
 
 class Thrown(Exception):
-  '''An exception of the script itself.'''
   def __init__(self, value):
     super().__init__(value)
     self.value = value
@@ -63,22 +61,20 @@ class _Return:
     self.value = value
 
 
-class Obj:
-  '''A plain object.'''
+class ScriptObject:
   __slots__ = ("props",)
   def __init__(self, props=None):
     self.props = props if props is not None else {}
 
 
-class Arr:
+class ScriptArray:
   __slots__ = ("items", "props")
   def __init__(self, items=None):
     self.items = items if items is not None else []
     self.props = {}
 
 
-class Native:
-  '''A function offered to scripts: call(this, args).'''
+class NativeFunction:
   __slots__ = ("call", "construct", "props")
   def __init__(self, call, construct=None, props=None):
     self.call = call
@@ -86,8 +82,8 @@ class Native:
     self.props = props if props is not None else {}
 
 
-class Host(Obj):
-  '''An object of the 602 application: asking it for anything else than what is offered stops the script.'''
+class HostObject(ScriptObject):
+  # An object of the 602 application: asking it for anything else than what is offered stops the script.
   __slots__ = ("name",)
   def __init__(self, name, props):
     super().__init__(props)
@@ -96,8 +92,8 @@ class Host(Obj):
 
 class Date:
   __slots__ = ("ms", "props")
-  def __init__(self, ms):
-    self.ms = ms
+  def __init__(self, milliseconds):
+    self.ms = milliseconds
     self.props = {}
 
 
@@ -108,7 +104,6 @@ class _Scope:
     self.parent = parent
 
 
-# ---- tokens ----
 
 _TOKEN = re.compile(r'''
     (?P<skip>(?:\s+|//[^\n]*|/\*.*?\*/)+)
@@ -130,30 +125,29 @@ def _unescape(match):
   return _ESCAPES.get(text, text)
 
 
-def _tokens(source):
-  '''(kind, value, newline before) for each token.'''
-  if len(source) > MAX_SOURCE:
+def _tokenize(source):
+  if len(source) > MAX_SOURCE_LENGTH:
     raise Unsupported("skript je příliš dlouhý")
   found = []
-  at, end, newline = 0, len(source), False
-  while at < end:
-    if source[at] == "/" and source[at:at + 2] not in ("//", "/*"):
+  position, end, newline = 0, len(source), False
+  while position < end:
+    if source[position] == "/" and source[position:position + 2] not in ("//", "/*"):
       last = found[-1] if found else None
       after_value = last and (last[0] in ("num", "str", "re") or (last[0] == "name" and last[1] not in _KEYWORDS_BEFORE_REGEX)
                               or (last[0] == "punct" and last[1] in (")", "]", "}")))
       if not after_value:
-        match = _REGEX.match(source, at)
+        match = _REGEX.match(source, position)
         if match is None:
           raise Unsupported("nečitelný regulární výraz")
         found.append(("re", (match.group(1), match.group(2)), newline))
-        at, newline = match.end(), False
+        position, newline = match.end(), False
         continue
-    match = _TOKEN.match(source, at)
+    match = _TOKEN.match(source, position)
     if match is None:
       raise Unsupported("nečitelný skript")
     kind = match.lastgroup
     text = match.group()
-    at = match.end()
+    position = match.end()
     if kind == "skip":
       newline = newline or "\n" in text
       continue
@@ -169,7 +163,6 @@ def _tokens(source):
   return found
 
 
-# ---- conversions ----
 
 _NUMERIC = re.compile(r'[+-]?(?:\d+\.?\d*(?:[eE][+-]?\d+)?|\.\d+(?:[eE][+-]?\d+)?|Infinity)\Z')
 
@@ -238,15 +231,15 @@ def to_string(value):
 
 
 def to_primitive(value):
-  if isinstance(value, Arr):
+  if isinstance(value, ScriptArray):
     return ",".join("" if item is None or item is UNDEFINED else to_string(item) for item in value.items)
   if isinstance(value, Date):
     return _date_text(value.ms)
   if isinstance(value, Regex):
     return f"/{value.source}/{value.flags}"
-  if isinstance(value, (Function, Native)):
+  if isinstance(value, (Function, NativeFunction)):
     return "function () { [native code] }"
-  if isinstance(value, Obj):
+  if isinstance(value, ScriptObject):
     return "[object Object]"
   return value
 
@@ -269,39 +262,39 @@ def to_int32(value):
   return whole - 0x100000000 if whole >= 0x80000000 else whole
 
 
-def strict_equal(a, b):
-  if type(a) is float and type(b) is float:
-    return a == b
-  if type(a) is not type(b):
+def strict_equal(left, right):
+  if type(left) is float and type(right) is float:
+    return left == right
+  if type(left) is not type(right):
     return False
-  if type(a) in (str, bool):
-    return a == b
-  return a is b
+  if type(left) in (str, bool):
+    return left == right
+  return left is right
 
 
-def loose_equal(a, b):
-  if type(a) is type(b):
-    return strict_equal(a, b)
-  if (a is None or a is UNDEFINED) or (b is None or b is UNDEFINED):
-    return (a is None or a is UNDEFINED) and (b is None or b is UNDEFINED)
-  if type(a) in (float, str, bool) and type(b) in (float, str, bool):
-    return to_number(a) == to_number(b)
-  if type(a) in (float, str, bool):
-    return loose_equal(a, to_primitive(b))
-  if type(b) in (float, str, bool):
-    return loose_equal(to_primitive(a), b)
-  return a is b
+def loose_equal(left, right):
+  if type(left) is type(right):
+    return strict_equal(left, right)
+  if (left is None or left is UNDEFINED) or (right is None or right is UNDEFINED):
+    return (left is None or left is UNDEFINED) and (right is None or right is UNDEFINED)
+  if type(left) in (float, str, bool) and type(right) in (float, str, bool):
+    return to_number(left) == to_number(right)
+  if type(left) in (float, str, bool):
+    return loose_equal(left, to_primitive(right))
+  if type(right) in (float, str, bool):
+    return loose_equal(to_primitive(left), right)
+  return left is right
 
 
-def _less(a, b):
-  '''a < b, None when a NaN takes part.'''
-  a, b = to_primitive(a), to_primitive(b)
-  if type(a) is str and type(b) is str:
-    return a < b
-  a, b = to_number(a), to_number(b)
-  if a != a or b != b:
+def _less_than(left, right):
+  # a < b, None when a NaN takes part.
+  left, right = to_primitive(left), to_primitive(right)
+  if type(left) is str and type(right) is str:
+    return left < right
+  left, right = to_number(left), to_number(right)
+  if left != left or right != right:
     return None
-  return a < b
+  return left < right
 
 
 def type_of(value):
@@ -313,12 +306,11 @@ def type_of(value):
     return "string"
   if type(value) is bool:
     return "boolean"
-  if isinstance(value, (Function, Native)):
+  if isinstance(value, (Function, NativeFunction)):
     return "function"
   return "object"
 
 
-# ---- dates ----
 
 def _days_from_civil(year, month, day):
   year -= month <= 2
@@ -334,35 +326,35 @@ def _civil_from_days(days):
   of_era = days - era * 146097
   year_of_era = (of_era - of_era // 1460 + of_era // 36524 - of_era // 146096) // 365
   of_year = of_era - (365 * year_of_era + year_of_era // 4 - year_of_era // 100)
-  mp = (5 * of_year + 2) // 153
-  day = of_year - (153 * mp + 2) // 5 + 1
-  month = mp + (3 if mp < 10 else -9)
+  shifted_month = (5 * of_year + 2) // 153
+  day = of_year - (153 * shifted_month + 2) // 5 + 1
+  month = shifted_month + (3 if shifted_month < 10 else -9)
   return year_of_era + era * 400 + (month <= 2), month, day
 
 
-def _make_time(year, month, day=1.0, hour=0.0, minute=0.0, second=0.0, ms=0.0):
-  parts = (year, month, day, hour, minute, second, ms)
+def _make_time(year, month, day=1.0, hour=0.0, minute=0.0, second=0.0, milliseconds=0.0):
+  parts = (year, month, day, hour, minute, second, milliseconds)
   if any(part != part or part in (math.inf, -math.inf) for part in parts):
     return math.nan
-  year, month, day, hour, minute, second, ms = (int(part) for part in parts)
+  year, month, day, hour, minute, second, milliseconds = (int(part) for part in parts)
   if abs(year) > 300000 or abs(month) > 4000000 or abs(day) > 110000000:
     return math.nan
   year += month // 12
   days = _days_from_civil(year, month % 12 + 1, 1) + day - 1
-  return float(days * 86400000 + hour * 3600000 + minute * 60000 + second * 1000 + ms)
+  return float(days * 86400000 + hour * 3600000 + minute * 60000 + second * 1000 + milliseconds)
 
 
-def _fields(ms):
-  whole = int(ms)
+def _date_fields(milliseconds):
+  whole = int(milliseconds)
   days, rest = divmod(whole, 86400000)
   year, month, day = _civil_from_days(days)
   return [year, month - 1, day, rest // 3600000, rest // 60000 % 60, rest // 1000 % 60, rest % 1000, (days + 4) % 7]
 
 
-def _date_text(ms):
-  if ms != ms:
+def _date_text(milliseconds):
+  if milliseconds != milliseconds:
     return "Invalid Date"
-  year, month, day, hour, minute, second, _, weekday = _fields(ms)
+  year, month, day, hour, minute, second, _, weekday = _date_fields(milliseconds)
   names = "Sun Mon Tue Wed Thu Fri Sat".split()
   months = "Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec".split()
   return f"{names[weekday]} {months[month]} {day:02d} {year} {hour:02d}:{minute:02d}:{second:02d} GMT+0000"
@@ -379,7 +371,7 @@ def _parse_date(text):
   return _make_time(year, month - 1, day or 1.0, hour or 0.0, minute or 0.0, second or 0.0)
 
 
-def _now():
+def _current_local_time():
   now = datetime.datetime.now()
   return _make_time(float(now.year), float(now.month - 1), float(now.day), float(now.hour), float(now.minute), float(now.second))
 
@@ -392,26 +384,25 @@ _DATE_SETTERS = {"setFullYear": 0, "setMonth": 1, "setDate": 2, "setHours": 3, "
 def _date_method(date, name):
   if name in _DATE_GETTERS:
     index = _DATE_GETTERS[name]
-    return Native(lambda this, args: math.nan if date.ms != date.ms else float(_fields(date.ms)[index]))
+    return NativeFunction(lambda this, args: math.nan if date.ms != date.ms else float(_date_fields(date.ms)[index]))
   if name in _DATE_SETTERS:
     index = _DATE_SETTERS[name]
     def setter(this, args):
       if date.ms != date.ms:
         return math.nan
-      parts = [float(part) for part in _fields(date.ms)[:7]]
+      parts = [float(part) for part in _date_fields(date.ms)[:7]]
       for offset, arg in enumerate(args[:7 - index]):
         parts[index + offset] = to_number(arg)
       date.ms = _make_time(*parts)
       return date.ms
-    return Native(setter)
+    return NativeFunction(setter)
   if name in ("getTime", "valueOf"):
-    return Native(lambda this, args: date.ms)
+    return NativeFunction(lambda this, args: date.ms)
   if name == "toString":
-    return Native(lambda this, args: _date_text(date.ms))
+    return NativeFunction(lambda this, args: _date_text(date.ms))
   return UNDEFINED
 
 
-# ---- regular expressions ----
 
 class Regex:
   __slots__ = ("source", "flags", "matcher", "groups", "last_index", "props", "budget")
@@ -427,12 +418,11 @@ class Regex:
     self.groups = parser.groups
 
   def match_at(self, text, start):
-    '''(start, end, captures) of the first match from start on.'''
-    if len(text) > MAX_STRING:
+    if len(text) > MAX_STRING_LENGTH:
       raise Exhausted("text")
     for begin in range(start, len(text) + 1):
       captures = [None] * (self.groups + 1)
-      end = self.matcher(text, begin, captures, lambda at, caps: at)
+      end = self.matcher(text, begin, captures, lambda position, caps: position)
       self.budget.tick()
       if end is not None:
         return begin, end, captures
@@ -440,14 +430,14 @@ class Regex:
 
 
 _CLASS_ESCAPES = {
-  "d": lambda c: "0" <= c <= "9",
-  "w": lambda c: c.isascii() and (c.isalnum() or c == "_"),
-  "s": lambda c: c.isspace() or c == "﻿",
+  "d": lambda character: "0" <= character <= "9",
+  "w": lambda character: character.isascii() and (character.isalnum() or character == "_"),
+  "s": lambda character: character.isspace() or character == "﻿",
 }
 
 
 class _RegexParser:
-  '''Builds a backtracking matcher: matcher(text, at, captures, then) gives what then gave, None when nothing matches.'''
+  # Builds a backtracking matcher: matcher(text, at, captures, then) gives what then gave, None when nothing matches.
 
   def __init__(self, source, flags, budget):
     self.s, self.i, self.budget = source, 0, budget
@@ -472,9 +462,9 @@ class _RegexParser:
     self.depth -= 1
     if len(options) == 1:
       return options[0]
-    def alternatives(text, at, caps, then):
+    def alternatives(text, position, caps, then):
       for option in options:
-        end = option(text, at, caps, then)
+        end = option(text, position, caps, then)
         if end is not None:
           return end
       return None
@@ -485,7 +475,7 @@ class _RegexParser:
     while self.i < len(self.s) and self.s[self.i] not in "|)":
       items.append(self.term())
     if not items:
-      return lambda text, at, caps, then: then(at, caps)
+      return lambda text, position, caps, then: then(position, caps)
     node = items[-1]
     for item in reversed(items[:-1]):
       node = self._chain(item, node)
@@ -493,7 +483,7 @@ class _RegexParser:
 
   @staticmethod
   def _chain(first, second):
-    return lambda text, at, caps, then: first(text, at, caps, lambda end, c: second(text, end, c, then))
+    return lambda text, position, caps, then: first(text, position, caps, lambda end, character: second(text, end, character, then))
 
   def term(self):
     tested, node = self.atom()
@@ -501,38 +491,38 @@ class _RegexParser:
 
   def _single(self, test):
     budget = self.budget
-    def single(text, at, caps, then):
+    def single(text, position, caps, then):
       budget.tick()
-      return then(at + 1, caps) if at < len(text) and test(text[at]) else None
+      return then(position + 1, caps) if position < len(text) and test(text[position]) else None
     return test, single
 
   def atom(self):
-    c = self.s[self.i]
+    character = self.s[self.i]
     self.i += 1
-    if c == "^":
+    if character == "^":
       multi = self.multiline
-      return None, lambda text, at, caps, then: then(at, caps) if at == 0 or (multi and text[at - 1] == "\n") else None
-    if c == "$":
+      return None, lambda text, position, caps, then: then(position, caps) if position == 0 or (multi and text[position - 1] == "\n") else None
+    if character == "$":
       multi = self.multiline
-      return None, lambda text, at, caps, then: then(at, caps) if at == len(text) or (multi and text[at] == "\n") else None
-    if c == "(":
+      return None, lambda text, position, caps, then: then(position, caps) if position == len(text) or (multi and text[position] == "\n") else None
+    if character == "(":
       return None, self.group()
-    if c == ".":
+    if character == ".":
       dotall = self.dotall
-      return self._single(lambda ch: dotall or ch not in "\n\r  ")
-    if c == "[":
+      return self._single(lambda current_character: dotall or current_character not in "\n\r  ")
+    if character == "[":
       return self._single(self.char_class())
-    if c == "\\":
+    if character == "\\":
       return self.escape()
-    if c in "*+?":
+    if character in "*+?":
       raise Unsupported("nečitelný regulární výraz")
-    return self._single(self._literal(c))
+    return self._single(self._literal(character))
 
-  def _literal(self, c):
+  def _literal(self, character):
     if self.ignore_case:
-      lower = c.lower()
-      return lambda ch: ch.lower() == lower
-    return lambda ch: ch == c
+      lower = character.lower()
+      return lambda current_character: current_character.lower() == lower
+    return lambda current_character: current_character == character
 
   def group(self):
     capture = None
@@ -552,66 +542,65 @@ class _RegexParser:
       raise Unsupported("nečitelný regulární výraz")
     self.i += 1
     if look == "=":
-      def ahead(text, at, caps, then):
-        return then(at, caps) if inner(text, at, caps, lambda end, c: end) is not None else None
+      def ahead(text, position, caps, then):
+        return then(position, caps) if inner(text, position, caps, lambda end, character: end) is not None else None
       return ahead
     if look == "!":
-      def not_ahead(text, at, caps, then):
-        return then(at, caps) if inner(text, at, list(caps), lambda end, c: end) is None else None
+      def not_ahead(text, position, caps, then):
+        return then(position, caps) if inner(text, position, list(caps), lambda end, character: end) is None else None
       return not_ahead
     if capture is None:
       return inner
-    def captured(text, at, caps, then):
-      def closed(end, c):
-        saved = c[capture]
-        c[capture] = text[at:end]
-        result = then(end, c)
+    def captured(text, position, caps, then):
+      def closed(end, character):
+        saved = character[capture]
+        character[capture] = text[position:end]
+        result = then(end, character)
         if result is None:
-          c[capture] = saved
+          character[capture] = saved
         return result
-      return inner(text, at, caps, closed)
+      return inner(text, position, caps, closed)
     return captured
 
-  def _escape_char(self, c):
-    '''The character an escape stands for, None for a class of them.'''
-    if c == "x" and re.fullmatch(r'[0-9a-fA-F]{2}', self.s[self.i:self.i + 2]):
+  def _escape_char(self, character):
+    if character == "x" and re.fullmatch(r'[0-9a-fA-F]{2}', self.s[self.i:self.i + 2]):
       self.i += 2
       return chr(int(self.s[self.i - 2:self.i], 16))
-    if c == "u" and re.fullmatch(r'[0-9a-fA-F]{4}', self.s[self.i:self.i + 4]):
+    if character == "u" and re.fullmatch(r'[0-9a-fA-F]{4}', self.s[self.i:self.i + 4]):
       self.i += 4
       return chr(int(self.s[self.i - 4:self.i], 16))
-    if c == "c" and self.i < len(self.s) and self.s[self.i].isalpha():
+    if character == "c" and self.i < len(self.s) and self.s[self.i].isalpha():
       self.i += 1
       return chr(ord(self.s[self.i - 1]) % 32)
-    return {"n": "\n", "t": "\t", "r": "\r", "f": "\f", "v": "\v", "0": "\0"}.get(c, c)
+    return {"n": "\n", "t": "\t", "r": "\r", "f": "\f", "v": "\v", "0": "\0"}.get(character, character)
 
   def escape(self):
     if self.i >= len(self.s):
       raise Unsupported("nečitelný regulární výraz")
-    c = self.s[self.i]
+    character = self.s[self.i]
     self.i += 1
-    if c in _CLASS_ESCAPES:
-      return self._single(_CLASS_ESCAPES[c])
-    if c in ("D", "W", "S"):
-      test = _CLASS_ESCAPES[c.lower()]
-      return self._single(lambda ch: not test(ch))
-    if c in "bB":
+    if character in _CLASS_ESCAPES:
+      return self._single(_CLASS_ESCAPES[character])
+    if character in ("D", "W", "S"):
+      test = _CLASS_ESCAPES[character.lower()]
+      return self._single(lambda current_character: not test(current_character))
+    if character in "bB":
       word = _CLASS_ESCAPES["w"]
-      wanted = c == "b"
-      def boundary(text, at, caps, then):
-        before = at > 0 and word(text[at - 1])
-        after = at < len(text) and word(text[at])
-        return then(at, caps) if (before != after) == wanted else None
+      wanted = character == "b"
+      def boundary(text, position, caps, then):
+        before = position > 0 and word(text[position - 1])
+        after = position < len(text) and word(text[position])
+        return then(position, caps) if (before != after) == wanted else None
       return None, boundary
-    if c in "123456789":
-      number = int(c)
-      def backreference(text, at, caps, then):
+    if character in "123456789":
+      number = int(character)
+      def backreference(text, position, caps, then):
         seen = caps[number] if number < len(caps) else None
         if seen is None:
-          return then(at, caps)
-        return then(at + len(seen), caps) if text.startswith(seen, at) else None
+          return then(position, caps)
+        return then(position + len(seen), caps) if text.startswith(seen, position) else None
       return None, backreference
-    return self._single(self._literal(self._escape_char(c)))
+    return self._single(self._literal(self._escape_char(character)))
 
   def char_class(self):
     negated = self.s.startswith("^", self.i)
@@ -621,11 +610,11 @@ class _RegexParser:
     while True:
       if self.i >= len(self.s):
         raise Unsupported("nečitelný regulární výraz")
-      c = self.s[self.i]
+      character = self.s[self.i]
       self.i += 1
-      if c == "]":
+      if character == "]":
         break
-      low = self._class_atom(c, tests)
+      low = self._class_atom(character, tests)
       if low is None:
         continue
       if self.s.startswith("-", self.i) and self.i + 1 < len(self.s) and self.s[self.i + 1] != "]":
@@ -638,24 +627,24 @@ class _RegexParser:
         else:
           ranges.append((low, high))
       else:
-        chars.add(c if c != "\\" else low)
+        chars.add(character if character != "\\" else low)
     if self.ignore_case:
-      chars |= {c.lower() for c in chars} | {c.upper() for c in chars}
+      chars |= {character.lower() for character in chars} | {character.upper() for character in chars}
     ignore_case = self.ignore_case
-    def inside(ch):
-      if ch in chars:
+    def inside(current_character):
+      if current_character in chars:
         return True
       for low, high in ranges:
-        if low <= ch <= high or (ignore_case and (low <= ch.lower() <= high or low <= ch.upper() <= high)):
+        if low <= current_character <= high or (ignore_case and (low <= current_character.lower() <= high or low <= current_character.upper() <= high)):
           return True
-      return any(test(ch) for test in tests)
-    return (lambda ch: not inside(ch)) if negated else inside
+      return any(test(current_character) for test in tests)
+    return (lambda current_character: not inside(current_character)) if negated else inside
 
-  def _class_atom(self, c, tests, advance=False):
+  def _class_atom(self, character, tests, advance=False):
     if advance:
       self.i += 1
-    if c != "\\":
-      return c
+    if character != "\\":
+      return character
     if self.i >= len(self.s):
       raise Unsupported("nečitelný regulární výraz")
     e = self.s[self.i]
@@ -665,7 +654,7 @@ class _RegexParser:
       return None
     if e in ("D", "W", "S"):
       test = _CLASS_ESCAPES[e.lower()]
-      tests.append(lambda ch, test=test: not test(ch))
+      tests.append(lambda current_character, test=test: not test(current_character))
       return None
     if e == "b":
       return "\b"
@@ -674,17 +663,17 @@ class _RegexParser:
   def quantifier(self, tested, node):
     if self.i >= len(self.s):
       return node
-    c = self.s[self.i]
-    if c == "*":
+    character = self.s[self.i]
+    if character == "*":
       low, high = 0, math.inf
       self.i += 1
-    elif c == "+":
+    elif character == "+":
       low, high = 1, math.inf
       self.i += 1
-    elif c == "?":
+    elif character == "?":
       low, high = 0, 1
       self.i += 1
-    elif c == "{":
+    elif character == "{":
       match = re.compile(r'\{(\d+)(,(\d*))?\}').match(self.s, self.i)
       if match is None:
         return node  # a brace that counts nothing is an ordinary character in this dialect
@@ -703,22 +692,22 @@ class _RegexParser:
 
   def _repeat_char(self, test, low, high, greedy):
     budget = self.budget
-    def repeat_char(text, at, caps, then):
+    def repeat_char(text, position, caps, then):
       size = len(text)
       if greedy:  # a loop, not recursion: a character class over a long text must not use up the stack
-        end = at
-        while end < size and end - at < high and test(text[end]):
+        end = position
+        while end < size and end - position < high and test(text[end]):
           end += 1
-        budget.spend(end - at + 1)
-        while end - at >= low:
+        budget.spend(end - position + 1)
+        while end - position >= low:
           budget.tick()
           result = then(end, caps)
           if result is not None:
             return result
           end -= 1
         return None
-      end = at
-      while end - at < low:
+      end = position
+      while end - position < low:
         if end >= size or not test(text[end]):
           return None
         end += 1
@@ -727,7 +716,7 @@ class _RegexParser:
         result = then(end, caps)
         if result is not None:
           return result
-        if end >= size or end - at >= high or not test(text[end]):
+        if end >= size or end - position >= high or not test(text[end]):
           return None
         end += 1
     return repeat_char
@@ -735,28 +724,27 @@ class _RegexParser:
   def _repeat(self, node, low, high, greedy):
     budget = self.budget
     def repeat(text, at, caps, then):
-      def attempt(position, count, c):
+      def attempt(position, count, character):
         budget.tick()
         def more():
           if count >= high:
             return None
-          def after(end, c2):
+          def after(end, next_character):
             if end == position and count >= low:
               return None  # an empty round would go on for ever
-            return attempt(end, count + 1, c2)
-          return node(text, position, c, after)
+            return attempt(end, count + 1, next_character)
+          return node(text, position, character, after)
         if count < low:
           return more()
         if greedy:
           result = more()
-          return result if result is not None else then(position, c)
-        result = then(position, c)
+          return result if result is not None else then(position, character)
+        result = then(position, character)
         return result if result is not None else more()
       return attempt(at, 0, caps)
     return repeat
 
 
-# ---- strings and arrays ----
 
 def _int_arg(args, index, default=0):
   if index >= len(args) or args[index] is UNDEFINED:
@@ -769,8 +757,7 @@ def _int_arg(args, index, default=0):
   return int(number)
 
 
-def _index(key):
-  '''A number as a position in an array or text, -1 when it is none.'''
+def _array_position(key):
   return int(key) if key >= 0 and key != math.inf and key == math.floor(key) else -1
 
 
@@ -779,7 +766,7 @@ def _clamp_slice(value, size):
 
 
 class Function:
-  '''A function of a script; its body is compiled when first called, most of a form's library never is.'''
+  # A function of a script; its body is compiled when first called, most of a form's library never is.
   __slots__ = ("interpreter", "definition", "scope", "props")
 
   def __init__(self, interpreter, definition, scope):
@@ -813,16 +800,16 @@ class _Budget:
     if self.left < 0:
       raise Exhausted("kroky")
   def spend_text(self, text):
-    '''Long texts are paid for by size: each copy takes memory and time that one step would not show.'''
+    # Long texts are paid for by size: each copy takes memory and time that one step would not show.
     self.spend(len(text) >> 8)
 
 
 def _callable(value):
-  return isinstance(value, (Function, Native))
+  return isinstance(value, (Function, NativeFunction))
 
 
 class Interpreter:
-  '''One form's scripts. The library stays compiled for all runs, its globals live as long as the form is open.'''
+  # One form's scripts. The library stays compiled for all runs, its globals live as long as the form is open.
 
   def __init__(self, library=()):
     self.budget = _Budget()
@@ -836,7 +823,7 @@ class Interpreter:
     self.library_loaded = False
 
   def _load_library(self):
-    '''Later, not when the form opens: many forms never need it. A broken script of the library takes nothing else down.'''
+    # Later, not when the form opens: many forms never need it. A broken script of the library takes nothing else down.
     if self.library_loaded:
       return
     self.library_loaded = True
@@ -849,7 +836,7 @@ class Interpreter:
   def _run_program(self, source, scope):
     definition = self.compiled.get(source)
     if definition is None:
-      tokens = _tokens(source)
+      tokens = _tokenize(source)
       definition = _Definition("", [], tokens, 0, len(tokens) - 1)
       _Compiler(self, definition).compile()
       self.compiled[source] = definition
@@ -860,7 +847,6 @@ class Interpreter:
         break
 
   def run(self, source, host):
-    '''Runs a script with these extra globals. Raises Unsupported, Exhausted or Thrown when it does not finish.'''
     self.budget.left = STEP_BUDGET
     self.depth = 0
     self._load_library()
@@ -890,11 +876,11 @@ class Interpreter:
     if definition.body is None:
       _Compiler(self, definition).compile()
     self.depth += 1
-    if self.depth > MAX_DEPTH:
+    if self.depth > MAX_CALL_DEPTH:
       self.depth -= 1
       raise Exhausted("zanoření")
     self.budget.tick()
-    variables = {"arguments": Arr(list(args)), "this": this}
+    variables = {"arguments": ScriptArray(list(args)), "this": this}
     scope = _Scope(function.scope, variables)
     self._hoist(definition, scope)
     count = len(args)
@@ -915,23 +901,22 @@ class Interpreter:
     return callee.call(this, args)
 
   def construct(self, callee, args, name=""):
-    if isinstance(callee, Native):
+    if isinstance(callee, NativeFunction):
       if callee.construct is None:
         raise Unsupported(name or "new")
       return callee.construct(args)
     if isinstance(callee, Function):
-      created = Obj()
+      created = ScriptObject()
       result = callee.call(created, args)
-      return result if isinstance(result, (Obj, Arr, Date, Regex, Function, Native)) else created
+      return result if isinstance(result, (ScriptObject, ScriptArray, Date, Regex, Function, NativeFunction)) else created
     raise Unsupported(name or "new")
 
-  # -- properties --
 
   def get(self, target, key):
     kind = type(target)
-    if kind is Arr:
+    if kind is ScriptArray:
       if type(key) is float:
-        index = _index(key)
+        index = _array_position(key)
         return target.items[index] if 0 <= index < len(target.items) else UNDEFINED
       name = to_string(key)
       if name == "length":
@@ -943,7 +928,7 @@ class Interpreter:
       return self.array_methods.get(name, UNDEFINED) if name in self.array_methods else UNDEFINED
     if kind is str:
       if type(key) is float:
-        index = _index(key)
+        index = _array_position(key)
         return target[index] if 0 <= index < len(target) else UNDEFINED
       name = to_string(key)
       if name == "length":
@@ -954,29 +939,29 @@ class Interpreter:
     if target is UNDEFINED or target is None:
       raise Thrown(self.error("TypeError", f"Cannot read properties of {to_string(target)} (reading '{to_string(key)}')"))
     name = to_string(key)
-    if kind is Host:
+    if kind is HostObject:
       if name not in target.props:
         raise Unsupported(f"{target.name}.{name}")
       return target.props[name]
-    if kind is Obj or kind is Function or kind is Native:
+    if kind is ScriptObject or kind is Function or kind is NativeFunction:
       if name in target.props:
         return target.props[name]
       if name == "toString":
-        return Native(lambda this, args: to_string(this))
-      if name == "hasOwnProperty" and kind is Obj:
-        return Native(lambda this, args: to_string(args[0] if args else UNDEFINED) in this.props)
+        return NativeFunction(lambda this, args: to_string(this))
+      if name == "hasOwnProperty" and kind is ScriptObject:
+        return NativeFunction(lambda this, args: to_string(args[0] if args else UNDEFINED) in this.props)
       return UNDEFINED
     if kind is float:
       if name == "toString":
-        return Native(_number_to_string)
+        return NativeFunction(_number_to_string)
       if name == "toFixed":
-        return Native(_to_fixed)
+        return NativeFunction(_to_fixed)
       if name == "valueOf":
-        return Native(lambda this, args: this)
+        return NativeFunction(lambda this, args: this)
       return UNDEFINED
     if kind is bool:
       if name == "toString":
-        return Native(lambda this, args: to_string(this))
+        return NativeFunction(lambda this, args: to_string(this))
       return UNDEFINED
     if kind is Date:
       return _date_method(target, name)
@@ -988,24 +973,24 @@ class Interpreter:
       if name == "global":
         return "g" in target.flags
       if name == "test":
-        return Native(lambda this, args: self.regex_exec(this, to_string(args[0] if args else UNDEFINED)) is not None)
+        return NativeFunction(lambda this, args: self.regex_exec(this, to_string(args[0] if args else UNDEFINED)) is not None)
       if name == "exec":
-        return Native(lambda this, args: self.regex_result(this, to_string(args[0] if args else UNDEFINED)))
+        return NativeFunction(lambda this, args: self.regex_result(this, to_string(args[0] if args else UNDEFINED)))
       if name == "toString":
-        return Native(lambda this, args: to_string(this))
+        return NativeFunction(lambda this, args: to_string(this))
       return UNDEFINED
     raise Unsupported("vlastnost")
 
   def put(self, target, key, value):
     kind = type(target)
-    if kind is Arr:
+    if kind is ScriptArray:
       index = None
-      if type(key) is float and _index(key) >= 0:
-        index = _index(key)
+      if type(key) is float and _array_position(key) >= 0:
+        index = _array_position(key)
       elif type(key) is str and key.isdigit():
         index = int(key)
       if index is not None:
-        if index >= MAX_ITEMS:
+        if index >= MAX_ARRAY_ITEMS:
           raise Exhausted("pole")
         items = target.items
         if index >= len(items):
@@ -1014,7 +999,7 @@ class Interpreter:
         items[index] = value
       elif to_string(key) == "length":
         size = _int_arg([value], 0)
-        if not 0 <= size < MAX_ITEMS:
+        if not 0 <= size < MAX_ARRAY_ITEMS:
           raise Exhausted("pole")
         del target.items[size:]
         target.items.extend([UNDEFINED] * (size - len(target.items)))
@@ -1022,18 +1007,17 @@ class Interpreter:
         target.props[to_string(key)] = value
     elif kind is Regex and to_string(key) == "lastIndex":
       target.last_index = to_number(value)
-    elif kind is Host:
+    elif kind is HostObject:
       raise Unsupported(f"{target.name}.{to_string(key)}")
-    elif kind in (Obj, Function, Native, Date, Regex):
+    elif kind in (ScriptObject, Function, NativeFunction, Date, Regex):
       target.props[to_string(key)] = value
     elif target is UNDEFINED or target is None:
       raise Thrown(self.error("TypeError", "Cannot set properties"))
     return value
 
   def error(self, name, message):
-    return Obj({"name": name, "message": message})
+    return ScriptObject({"name": name, "message": message})
 
-  # -- regular expressions --
 
   def regex_exec(self, regex, text):
     tracked = "g" in regex.flags
@@ -1054,12 +1038,11 @@ class Interpreter:
 
   def _match_array(self, found, text):
     begin, end, captures = found
-    result = Arr([text[begin:end], *(UNDEFINED if c is None else c for c in captures[1:])])
+    result = ScriptArray([text[begin:end], *(UNDEFINED if character is None else character for character in captures[1:])])
     result.props["index"] = float(begin)
     result.props["input"] = text
     return result
 
-  # -- library --
 
   def _make_regex(self, args):
     pattern = args[0] if args else UNDEFINED
@@ -1070,7 +1053,7 @@ class Interpreter:
 
   def _make_date(self, args):
     if not args:
-      return Date(_now())
+      return Date(_current_local_time())
     if len(args) == 1:
       value = args[0]
       if isinstance(value, Date):
@@ -1086,60 +1069,60 @@ class Interpreter:
   def _make_array(self, args):
     if len(args) == 1 and type(args[0]) is float:
       size = _int_arg(args, 0)
-      if not 0 <= size < MAX_ITEMS or size != args[0]:
+      if not 0 <= size < MAX_ARRAY_ITEMS or size != args[0]:
         raise Thrown(self.error("RangeError", "Invalid array length"))
       self.budget.spend(size)
-      return Arr([UNDEFINED] * size)
-    return Arr(list(args))
+      return ScriptArray([UNDEFINED] * size)
+    return ScriptArray(list(args))
 
   def _builtins(self):
-    math_props = {name: Native(lambda this, args, f=f: _math(f, args)) for name, f in {
+    math_props = {name: NativeFunction(lambda this, args, function=function: _math_object(function, args)) for name, function in {
       "floor": math.floor, "ceil": math.ceil, "trunc": math.trunc, "abs": abs, "sqrt": math.sqrt, "exp": math.exp,
       "log": math.log, "sin": math.sin, "cos": math.cos, "tan": math.tan, "atan": math.atan,
     }.items()}
     math_props.update({
-      "round": Native(lambda this, args: _round(to_number(args[0] if args else UNDEFINED))),
-      "max": Native(lambda this, args: _extreme(args, max, -math.inf)),
-      "min": Native(lambda this, args: _extreme(args, min, math.inf)),
-      "pow": Native(lambda this, args: _power(args)),
-      "random": Native(lambda this, args: 0.5),  # a calculation must give the same answer every time it runs
+      "round": NativeFunction(lambda this, args: _javascript_round(to_number(args[0] if args else UNDEFINED))),
+      "max": NativeFunction(lambda this, args: _extreme(args, max, -math.inf)),
+      "min": NativeFunction(lambda this, args: _extreme(args, min, math.inf)),
+      "pow": NativeFunction(lambda this, args: _power(args)),
+      "random": NativeFunction(lambda this, args: 0.5),  # a calculation must give the same answer every time it runs
       "PI": math.pi, "E": math.e,
     })
-    date = Native(lambda this, args: _date_text(_now()), construct=self._make_date, props={
-      "now": Native(lambda this, args: _now()),
+    date = NativeFunction(lambda this, args: _date_text(_current_local_time()), construct=self._make_date, props={
+      "now": NativeFunction(lambda this, args: _current_local_time()),
     })
-    string = Native(lambda this, args: to_string(args[0]) if args else "", props={
-      "fromCharCode": Native(lambda this, args: "".join(chr(to_int32(arg) & 0xFFFF) for arg in args)),
+    string = NativeFunction(lambda this, args: to_string(args[0]) if args else "", props={
+      "fromCharCode": NativeFunction(lambda this, args: "".join(chr(to_int32(arg) & 0xFFFF) for arg in args)),
     })
-    number = Native(lambda this, args: to_number(args[0]) if args else 0.0, props={
-      "isInteger": Native(lambda this, args: bool(args) and type(args[0]) is float and args[0] == args[0]
+    number = NativeFunction(lambda this, args: to_number(args[0]) if args else 0.0, props={
+      "isInteger": NativeFunction(lambda this, args: bool(args) and type(args[0]) is float and args[0] == args[0]
                           and abs(args[0]) != math.inf and args[0] == int(args[0])),
-      "isNaN": Native(lambda this, args: bool(args) and type(args[0]) is float and args[0] != args[0]),
+      "isNaN": NativeFunction(lambda this, args: bool(args) and type(args[0]) is float and args[0] != args[0]),
     })
     return {
       "undefined": UNDEFINED, "NaN": math.nan, "Infinity": math.inf,
-      "Math": Obj(math_props),
+      "Math": ScriptObject(math_props),
       "Date": date, "String": string, "Number": number,
-      "Boolean": Native(lambda this, args: truthy(args[0]) if args else False),
-      "Array": Native(lambda this, args: self._make_array(args), construct=self._make_array, props={
-        "isArray": Native(lambda this, args: bool(args) and isinstance(args[0], Arr)),
+      "Boolean": NativeFunction(lambda this, args: truthy(args[0]) if args else False),
+      "Array": NativeFunction(lambda this, args: self._make_array(args), construct=self._make_array, props={
+        "isArray": NativeFunction(lambda this, args: bool(args) and isinstance(args[0], ScriptArray)),
       }),
-      "Object": Native(lambda this, args: Obj(), construct=lambda args: Obj()),
-      "RegExp": Native(lambda this, args: self._make_regex(args), construct=self._make_regex),
-      "Error": Native(lambda this, args: self.error("Error", to_string(args[0]) if args else ""),
+      "Object": NativeFunction(lambda this, args: ScriptObject(), construct=lambda args: ScriptObject()),
+      "RegExp": NativeFunction(lambda this, args: self._make_regex(args), construct=self._make_regex),
+      "Error": NativeFunction(lambda this, args: self.error("Error", to_string(args[0]) if args else ""),
                       construct=lambda args: self.error("Error", to_string(args[0]) if args else "")),
-      "parseInt": Native(lambda this, args: _parse_int(args)),
-      "parseFloat": Native(lambda this, args: _parse_float(args)),
-      "isNaN": Native(lambda this, args: to_number(args[0] if args else UNDEFINED) != to_number(args[0] if args else UNDEFINED)),
-      "isFinite": Native(lambda this, args: _finite(to_number(args[0] if args else UNDEFINED))),
-      "JSON": Obj({"parse": Native(lambda this, args: self._json_parse(args)),
-                   "stringify": Native(lambda this, args: self._json_text(args))}),
+      "parseInt": NativeFunction(lambda this, args: _parse_int(args)),
+      "parseFloat": NativeFunction(lambda this, args: _parse_float(args)),
+      "isNaN": NativeFunction(lambda this, args: to_number(args[0] if args else UNDEFINED) != to_number(args[0] if args else UNDEFINED)),
+      "isFinite": NativeFunction(lambda this, args: _finite(to_number(args[0] if args else UNDEFINED))),
+      "JSON": ScriptObject({"parse": NativeFunction(lambda this, args: self._json_parse(args)),
+                   "stringify": NativeFunction(lambda this, args: self._json_text(args))}),
     }
 
   def _json_parse(self, args):
     try:
       text = to_string(args[0] if args else UNDEFINED)
-      if len(text) > MAX_STRING:
+      if len(text) > MAX_STRING_LENGTH:
         raise Exhausted("text")
       self.budget.spend_text(text)
       return _from_json(json.loads(text))
@@ -1157,37 +1140,37 @@ class Interpreter:
   def _string_methods(self):
     budget = self.budget
 
-    def method(f):
+    def method(function):
       def call(this, args):
         text = to_string(this)
         budget.spend_text(text)
-        result = f(text, args)
+        result = function(text, args)
         if type(result) is str:
           budget.spend_text(result)
-        elif type(result) is Arr:
+        elif type(result) is ScriptArray:
           budget.spend(len(result.items))
         return result
-      return Native(call)
+      return NativeFunction(call)
 
-    def substring(s, args):
-      size = len(s)
-      a = min(max(_int_arg(args, 0), 0), size)
-      b = min(max(_int_arg(args, 1, size), 0), size)
-      return s[min(a, b):max(a, b)]
+    def substring(text, args):
+      size = len(text)
+      left = min(max(_int_arg(args, 0), 0), size)
+      right = min(max(_int_arg(args, 1, size), 0), size)
+      return text[min(left, right):max(left, right)]
 
-    def substr(s, args):
-      start = _clamp_slice(_int_arg(args, 0), len(s))
-      length = _int_arg(args, 1, len(s))
-      return s[start:start + max(length, 0)]
+    def substr(text, args):
+      start = _clamp_slice(_int_arg(args, 0), len(text))
+      length = _int_arg(args, 1, len(text))
+      return text[start:start + max(length, 0)]
 
-    def slice_(s, args):
-      size = len(s)
-      a, b = _clamp_slice(_int_arg(args, 0), size), _clamp_slice(_int_arg(args, 1, size), size)
-      return s[a:b] if a < b else ""
+    def slice_(text, args):
+      size = len(text)
+      left, right = _clamp_slice(_int_arg(args, 0), size), _clamp_slice(_int_arg(args, 1, size), size)
+      return text[left:right] if left < right else ""
 
     def split(s, args):
       separator = args[0] if args else UNDEFINED
-      limit = _int_arg(args, 1, MAX_ITEMS)
+      limit = _int_arg(args, 1, MAX_ARRAY_ITEMS)
       if separator is UNDEFINED:
         parts = [s]
       elif isinstance(separator, Regex):
@@ -1195,7 +1178,7 @@ class Interpreter:
       else:
         text = to_string(separator)
         parts = list(s) if text == "" else s.split(text)
-      return Arr(parts[:limit])
+      return ScriptArray(parts[:limit])
 
     def replace(s, args):
       pattern = args[0] if args else UNDEFINED
@@ -1203,95 +1186,95 @@ class Interpreter:
       if isinstance(pattern, Regex):
         return self._regex_replace(s, pattern, replacement)
       text = to_string(pattern)
-      at = s.find(text)
-      if at < 0:
+      position = s.find(text)
+      if position < 0:
         return s
-      found = (at, at + len(text), [None])
-      return s[:at] + self._replacement(replacement, s, found) + s[at + len(text):]
+      found = (position, position + len(text), [None])
+      return s[:position] + self._replacement(replacement, s, found) + s[position + len(text):]
 
     def match(s, args):
       pattern = args[0] if args else UNDEFINED
       regex = pattern if isinstance(pattern, Regex) else self._make_regex([pattern])
       if "g" not in regex.flags:
         return self.regex_result(regex, s)
-      found = [text for text in (m[0] for m in self._all_matches(regex, s))]
-      return Arr(found) if found else None
+      found = [text for text in (match[0] for match in self._all_matches(regex, s))]
+      return ScriptArray(found) if found else None
 
-    def search(s, args):
+    def search(text, args):
       pattern = args[0] if args else UNDEFINED
       regex = pattern if isinstance(pattern, Regex) else self._make_regex([pattern])
-      found = regex.match_at(s, 0)
+      found = regex.match_at(text, 0)
       return float(found[0]) if found else -1.0
 
-    def concat(s, args):
-      result = s + "".join(to_string(arg) for arg in args)
-      if len(result) > MAX_STRING:
+    def concat(text, args):
+      result = text + "".join(to_string(arg) for arg in args)
+      if len(result) > MAX_STRING_LENGTH:
         raise Exhausted("text")
       return result
 
-    def repeat(s, args):
+    def repeat(text, args):
       count = _int_arg(args, 0)
-      if count < 0 or len(s) * count > MAX_STRING:
+      if count < 0 or len(text) * count > MAX_STRING_LENGTH:
         raise Exhausted("text")
-      return s * count
+      return text * count
 
-    def pad(s, args, left):
+    def pad(text, args, left):
       size = _int_arg(args, 0)
       filler = to_string(args[1]) if len(args) > 1 and args[1] is not UNDEFINED else " "
-      if size <= len(s) or not filler:
-        return s
-      if size > MAX_STRING:
+      if size <= len(text) or not filler:
+        return text
+      if size > MAX_STRING_LENGTH:
         raise Exhausted("text")
-      extra = (filler * (size // len(filler) + 1))[:size - len(s)]
-      return extra + s if left else s + extra
+      extra = (filler * (size // len(filler) + 1))[:size - len(text)]
+      return extra + text if left else text + extra
 
-    return {name: method(f) for name, f in {
-      "charAt": lambda s, a: (lambda i: s[i] if 0 <= i < len(s) else "")(_int_arg(a, 0)),
-      "charCodeAt": lambda s, a: (lambda i: float(ord(s[i])) if 0 <= i < len(s) else math.nan)(_int_arg(a, 0)),
-      "indexOf": lambda s, a: float(s.find(to_string(a[0] if a else UNDEFINED), min(max(_int_arg(a, 1), 0), len(s)))),
-      "lastIndexOf": lambda s, a: float(s.rfind(to_string(a[0] if a else UNDEFINED), 0,
-                                                len(s) if len(a) < 2 else max(_int_arg(a, 1), 0) + len(to_string(a[0])))),
+    return {name: method(function) for name, function in {
+      "charAt": lambda text, value: (lambda index: text[index] if 0 <= index < len(text) else "")(_int_arg(value, 0)),
+      "charCodeAt": lambda text, value: (lambda index: float(ord(text[index])) if 0 <= index < len(text) else math.nan)(_int_arg(value, 0)),
+      "indexOf": lambda text, value: float(text.find(to_string(value[0] if value else UNDEFINED), min(max(_int_arg(value, 1), 0), len(text)))),
+      "lastIndexOf": lambda text, value: float(text.rfind(to_string(value[0] if value else UNDEFINED), 0,
+                                                len(text) if len(value) < 2 else max(_int_arg(value, 1), 0) + len(to_string(value[0])))),
       "substring": substring, "substr": substr, "slice": slice_, "split": split, "replace": replace,
       "match": match, "search": search, "concat": concat, "repeat": repeat,
-      "toLowerCase": lambda s, a: s.lower(), "toUpperCase": lambda s, a: s.upper(),
-      "trim": lambda s, a: s.strip(), "toString": lambda s, a: s, "valueOf": lambda s, a: s,
-      "startsWith": lambda s, a: s.startswith(to_string(a[0] if a else UNDEFINED), max(_int_arg(a, 1), 0)),
-      "endsWith": lambda s, a: s[:_int_arg(a, 1, len(s))].endswith(to_string(a[0] if a else UNDEFINED)),
-      "includes": lambda s, a: to_string(a[0] if a else UNDEFINED) in s,
-      "padStart": lambda s, a: pad(s, a, True), "padEnd": lambda s, a: pad(s, a, False),
-      "localeCompare": lambda s, a: (lambda o: float((s > o) - (s < o)))(to_string(a[0] if a else UNDEFINED)),
+      "toLowerCase": lambda text, value: text.lower(), "toUpperCase": lambda text, value: text.upper(),
+      "trim": lambda text, value: text.strip(), "toString": lambda text, value: text, "valueOf": lambda text, value: text,
+      "startsWith": lambda text, value: text.startswith(to_string(value[0] if value else UNDEFINED), max(_int_arg(value, 1), 0)),
+      "endsWith": lambda text, value: text[:_int_arg(value, 1, len(text))].endswith(to_string(value[0] if value else UNDEFINED)),
+      "includes": lambda text, value: to_string(value[0] if value else UNDEFINED) in text,
+      "padStart": lambda text, value: pad(text, value, True), "padEnd": lambda text, value: pad(text, value, False),
+      "localeCompare": lambda text, value: (lambda target: float((text > target) - (text < target)))(to_string(value[0] if value else UNDEFINED)),
     }.items()}
 
   def _all_matches(self, regex, text):
     regex.last_index = 0.0
     found = []
-    at = 0
-    while at <= len(text):
-      match = regex.match_at(text, at)
+    position = 0
+    while position <= len(text):
+      match = regex.match_at(text, position)
       if match is None:
         break
       found.append((text[match[0]:match[1]], match))
-      at = match[1] if match[1] > match[0] else match[1] + 1
-      if len(found) > MAX_ITEMS:
+      position = match[1] if match[1] > match[0] else match[1] + 1
+      if len(found) > MAX_ARRAY_ITEMS:
         raise Exhausted("pole")
     return found
 
   def _regex_split(self, text, regex):
     if not text:
       return [] if regex.match_at(text, 0) else [""]
-    parts, last, at = [], 0, 0
-    while at < len(text):
-      match = regex.match_at(text, at)
+    parts, last, position = [], 0, 0
+    while position < len(text):
+      match = regex.match_at(text, position)
       if match is None or match[0] >= len(text):
         break
       begin, end, captures = match
       if end == last:  # an empty match where the last piece ended separates nothing yet
-        at += 1
+        position += 1
         continue
       parts.append(text[last:begin])
-      parts.extend(UNDEFINED if c is None else c for c in captures[1:])
-      last = at = end
-      if len(parts) > MAX_ITEMS:
+      parts.extend(UNDEFINED if character is None else character for character in captures[1:])
+      last = position = end
+      if len(parts) > MAX_ARRAY_ITEMS:
         raise Exhausted("pole")
     parts.append(text[last:])
     return parts
@@ -1299,7 +1282,7 @@ class Interpreter:
   def _replacement(self, replacement, text, found):
     begin, end, captures = found
     if _callable(replacement):
-      args = [text[begin:end], *(UNDEFINED if c is None else c for c in captures[1:]), float(begin), text]
+      args = [text[begin:end], *(UNDEFINED if character is None else character for character in captures[1:]), float(begin), text]
       return to_string(replacement.call(UNDEFINED, args))
     template = to_string(replacement)
     if "$" not in template:
@@ -1327,7 +1310,7 @@ class Interpreter:
 
   def _regex_replace(self, text, regex, replacement):
     if "g" in regex.flags:
-      matches = [m[1] for m in self._all_matches(regex, text)]
+      matches = [match[1] for match in self._all_matches(regex, text)]
       regex.last_index = 0.0
     else:
       found = regex.match_at(text, 0)
@@ -1338,117 +1321,117 @@ class Interpreter:
       piece = self._replacement(replacement, text, found)
       parts.extend((text[last:found[0]], piece))
       size += len(piece) + found[0] - last
-      if size > MAX_STRING:
+      if size > MAX_STRING_LENGTH:
         raise Exhausted("text")
       last = found[1]
     parts.append(text[last:])
     return "".join(parts)
 
   def _array_methods(self):
-    def method(f):
-      return Native(lambda this, args: f(self._need_array(this), args))
+    def method(function):
+      return NativeFunction(lambda this, args: function(self._need_array(this), args))
 
-    def push(a, args):
-      if len(a.items) + len(args) > MAX_ITEMS:
+    def push(value, args):
+      if len(value.items) + len(args) > MAX_ARRAY_ITEMS:
         raise Exhausted("pole")
-      a.items.extend(args)
-      return float(len(a.items))
+      value.items.extend(args)
+      return float(len(value.items))
 
-    def join(a, args):
+    def join(value, args):
       separator = to_string(args[0]) if args and args[0] is not UNDEFINED else ","
-      self.budget.spend(len(a.items))
-      result = separator.join("" if item is None or item is UNDEFINED else to_string(item) for item in a.items)
-      if len(result) > MAX_STRING:
+      self.budget.spend(len(value.items))
+      result = separator.join("" if item is None or item is UNDEFINED else to_string(item) for item in value.items)
+      if len(result) > MAX_STRING_LENGTH:
         raise Exhausted("text")
       self.budget.spend_text(result)
       return result
 
-    def slice_(a, args):
-      size = len(a.items)
+    def slice_(value, args):
+      size = len(value.items)
       self.budget.spend(size)
-      return Arr(a.items[_clamp_slice(_int_arg(args, 0), size):_clamp_slice(_int_arg(args, 1, size), size)])
+      return ScriptArray(value.items[_clamp_slice(_int_arg(args, 0), size):_clamp_slice(_int_arg(args, 1, size), size)])
 
-    def splice(a, args):
-      size = len(a.items)
+    def splice(value, args):
+      size = len(value.items)
       start = _clamp_slice(_int_arg(args, 0), size)
       count = min(max(_int_arg(args, 1, size - start), 0), size - start)
-      removed = a.items[start:start + count]
-      a.items[start:start + count] = args[2:]
+      removed = value.items[start:start + count]
+      value.items[start:start + count] = args[2:]
       self.budget.spend(size)
-      return Arr(removed)
+      return ScriptArray(removed)
 
-    def concat(a, args):
-      result = list(a.items)
+    def concat(value, args):
+      result = list(value.items)
       for arg in args:
-        if isinstance(arg, Arr):
+        if isinstance(arg, ScriptArray):
           result.extend(arg.items)
         else:
           result.append(arg)
-        if len(result) > MAX_ITEMS:
+        if len(result) > MAX_ARRAY_ITEMS:
           raise Exhausted("pole")
       self.budget.spend(len(result))
-      return Arr(result)
+      return ScriptArray(result)
 
-    def index_of(a, args):
+    def index_of(value, args):
       wanted = args[0] if args else UNDEFINED
-      self.budget.spend(len(a.items))
-      for index, item in enumerate(a.items):
+      self.budget.spend(len(value.items))
+      for index, item in enumerate(value.items):
         if strict_equal(item, wanted):
           return float(index)
       return -1.0
 
-    def last_index_of(a, args):
+    def last_index_of(value, args):
       wanted = args[0] if args else UNDEFINED
-      self.budget.spend(len(a.items))
-      for index in range(len(a.items) - 1, -1, -1):
-        if strict_equal(a.items[index], wanted):
+      self.budget.spend(len(value.items))
+      for index in range(len(value.items) - 1, -1, -1):
+        if strict_equal(value.items[index], wanted):
           return float(index)
       return -1.0
 
-    def sort(a, args):
+    def sort(value, args):
       import functools
       compare = args[0] if args and _callable(args[0]) else None
-      self.budget.spend(len(a.items) * 8)
-      def order(x, y):
-        if x is UNDEFINED or y is UNDEFINED:
-          return (x is UNDEFINED) - (y is UNDEFINED)
+      self.budget.spend(len(value.items) * 8)
+      def order(base, exponent):
+        if base is UNDEFINED or exponent is UNDEFINED:
+          return (base is UNDEFINED) - (exponent is UNDEFINED)
         if compare is not None:
-          number = to_number(compare.call(UNDEFINED, [x, y]))
+          number = to_number(compare.call(UNDEFINED, [base, exponent]))
           return 0 if number != number else (number > 0) - (number < 0)
-        x, y = to_string(x), to_string(y)
-        return (x > y) - (x < y)
-      a.items.sort(key=functools.cmp_to_key(order))
-      return a
+        base, exponent = to_string(base), to_string(exponent)
+        return (base > exponent) - (base < exponent)
+      value.items.sort(key=functools.cmp_to_key(order))
+      return value
 
-    def visit(a, args):
+    def visit(value, args):
       function = args[0] if args else UNDEFINED
       if not _callable(function):
         raise Thrown(self.error("TypeError", "not a function"))
-      for index, item in enumerate(list(a.items)):
+      for index, item in enumerate(list(value.items)):
         self.budget.tick()
-        yield item, function.call(UNDEFINED, [item, float(index), a])
+        yield item, function.call(UNDEFINED, [item, float(index), value])
 
-    def for_each(a, args):
-      for _ in visit(a, args):
+    def for_each(value, args):
+      for _ in visit(value, args):
         pass
       return UNDEFINED
 
     return {name: method(f) for name, f in {
       "push": push, "join": join, "slice": slice_, "splice": splice, "concat": concat,
       "indexOf": index_of, "lastIndexOf": last_index_of, "sort": sort, "forEach": for_each,
-      "pop": lambda a, args: a.items.pop() if a.items else UNDEFINED,
-      "shift": lambda a, args: a.items.pop(0) if a.items else UNDEFINED,
-      "unshift": lambda a, args: (a.items.__setitem__(slice(0, 0), list(args)), float(len(a.items)))[1],
-      "reverse": lambda a, args: (a.items.reverse(), a)[1],
-      "toString": lambda a, args: to_string(a),
-      "map": lambda a, args: Arr([result for _, result in visit(a, args)]),
-      "filter": lambda a, args: Arr([item for item, result in visit(a, args) if truthy(result)]),
-      "some": lambda a, args: any(truthy(result) for _, result in visit(a, args)),
-      "every": lambda a, args: all(truthy(result) for _, result in visit(a, args)),
+      "pop": lambda value, args: value.items.pop() if value.items else UNDEFINED,
+      "shift": lambda value, args: value.items.pop(0) if value.items else UNDEFINED,
+      "unshift": lambda value, args: (value.items.__setitem__(slice(0, 0), list(args)), float(len(value.items)))[1],
+      "reverse": lambda value, args: (value.items.reverse(), value)[1],
+      "toString": lambda value, args: to_string(value),
+      "map": lambda value, args: ScriptArray([result for _, result in visit(value, args)]),
+      "filter": lambda value, args: ScriptArray([item for item, result in visit(value, args) if truthy(result)]),
+      "some": lambda value, args: any(truthy(result) for _, result in visit(value, args)),
+      "every": lambda value, args: all(truthy(result) for _, result in visit(value, args)),
     }.items()}
 
   def _need_array(self, value):
-    if not isinstance(value, Arr):
+    if not isinstance(value, ScriptArray):
       raise Unsupported("metoda pole")
     return value
 
@@ -1481,7 +1464,7 @@ def _to_fixed(this, args):
   return format(Decimal(this).quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP), "f")
 
 
-def _math(function, args):
+def _math_object(function, args):
   number = to_number(args[0] if args else UNDEFINED)
   if number != number:
     return math.nan
@@ -1495,7 +1478,7 @@ def _math(function, args):
     return math.inf
 
 
-def _round(number):
+def _javascript_round(number):
   if number != number or abs(number) == math.inf:
     return number
   return float(math.floor(number + 0.5))
@@ -1535,8 +1518,8 @@ def _parse_int(args):
   if not 2 <= radix <= 36:
     return math.nan
   value = None
-  for c in text:
-    digit = int(c, 36) if c.isascii() and c.isalnum() else 99
+  for character in text:
+    digit = int(character, 36) if character.isascii() and character.isalnum() else 99
     if digit >= radix:
       break
     value = (value or 0) * radix + digit
@@ -1553,9 +1536,9 @@ def _parse_float(args):
 
 def _from_json(value):
   if isinstance(value, dict):
-    return Obj({key: _from_json(item) for key, item in value.items()})
+    return ScriptObject({key: _from_json(item) for key, item in value.items()})
   if isinstance(value, list):
-    return Arr([_from_json(item) for item in value])
+    return ScriptArray([_from_json(item) for item in value])
   if isinstance(value, bool) or value is None or isinstance(value, str):
     return value
   return float(value)
@@ -1564,11 +1547,11 @@ def _from_json(value):
 def _to_json(value):
   if value is UNDEFINED or _callable(value):
     return None
-  if isinstance(value, Arr):
+  if isinstance(value, ScriptArray):
     return [_to_json(item) for item in value.items]
   if isinstance(value, Date):
     return to_string(value)
-  if isinstance(value, Obj):
+  if isinstance(value, ScriptObject):
     return {key: _to_json(item) for key, item in value.props.items() if item is not UNDEFINED and not _callable(item)}
   if type(value) is float:
     if value != value or abs(value) == math.inf:
@@ -1577,7 +1560,6 @@ def _to_json(value):
   return value
 
 
-# ---- compiler: tokens to Python closures ----
 
 _BINARY = {
   "||": 1, "&&": 2, "|": 3, "^": 4, "&": 5, "==": 6, "!=": 6, "===": 6, "!==": 6,
@@ -1591,67 +1573,67 @@ _RESERVED = {"var", "let", "const", "function", "return", "if", "else", "for", "
              "instanceof", "null", "true", "false"}
 
 
-def _add(a, b, budget):
-  if type(a) is float and type(b) is float:
-    return a + b
-  a, b = to_primitive(a), to_primitive(b)
-  if type(a) is str or type(b) is str:
-    result = to_string(a) + to_string(b)
-    if len(result) > MAX_STRING:
+def _javascript_add(left, right, budget):
+  if type(left) is float and type(right) is float:
+    return left + right
+  left, right = to_primitive(left), to_primitive(right)
+  if type(left) is str or type(right) is str:
+    result = to_string(left) + to_string(right)
+    if len(result) > MAX_STRING_LENGTH:
       raise Exhausted("text")
     budget.spend_text(result)
     return result
-  return to_number(a) + to_number(b)
+  return to_number(left) + to_number(right)
 
 
-def _divide(a, b):
-  a, b = to_number(a), to_number(b)
-  if b == 0:
-    if a == 0 or a != a:
+def _divide(left, right):
+  left, right = to_number(left), to_number(right)
+  if right == 0:
+    if left == 0 or left != left:
       return math.nan
-    return math.copysign(math.inf, a) * math.copysign(1.0, b)
+    return math.copysign(math.inf, left) * math.copysign(1.0, right)
   try:
-    return a / b
+    return left / right
   except OverflowError:
     return math.inf
 
 
-def _remainder(a, b):
-  a, b = to_number(a), to_number(b)
-  if a != a or b != b or abs(a) == math.inf or b == 0:
+def _remainder(left, right):
+  left, right = to_number(left), to_number(right)
+  if left != left or right != right or abs(left) == math.inf or right == 0:
     return math.nan
-  if abs(b) == math.inf:
-    return a
-  return math.fmod(a, b)
+  if abs(right) == math.inf:
+    return left
+  return math.fmod(left, right)
 
 
-def _times(a, b):
-  return to_number(a) * to_number(b)
+def _times(left, right):
+  return to_number(left) * to_number(right)
 
 
-def _minus(a, b):
-  return to_number(a) - to_number(b)
+def _minus(left, right):
+  return to_number(left) - to_number(right)
 
 
-def _shift_left(a, b):
-  value = (to_int32(a) << (to_int32(b) & 31)) & 0xFFFFFFFF
+def _shift_left(left, right):
+  value = (to_int32(left) << (to_int32(right) & 31)) & 0xFFFFFFFF
   return float(value - 0x100000000 if value >= 0x80000000 else value)
 
 
 _OPERATIONS = {
   "-": _minus, "*": _times, "/": _divide, "%": _remainder,
-  "&": lambda a, b: float(to_int32(a) & to_int32(b)),
-  "|": lambda a, b: float(to_int32(a) | to_int32(b)),
-  "^": lambda a, b: float(to_int32(a) ^ to_int32(b)),
+  "&": lambda left, right: float(to_int32(left) & to_int32(right)),
+  "|": lambda left, right: float(to_int32(left) | to_int32(right)),
+  "^": lambda left, right: float(to_int32(left) ^ to_int32(right)),
   "<<": _shift_left,
-  ">>": lambda a, b: float(to_int32(a) >> (to_int32(b) & 31)),
-  ">>>": lambda a, b: float((to_int32(a) & 0xFFFFFFFF) >> (to_int32(b) & 31)),
-  "==": loose_equal, "!=": lambda a, b: not loose_equal(a, b),
-  "===": strict_equal, "!==": lambda a, b: not strict_equal(a, b),
-  "<": lambda a, b: _less(a, b) is True,
-  ">": lambda a, b: _less(b, a) is True,
-  "<=": lambda a, b: _less(b, a) is False,
-  ">=": lambda a, b: _less(a, b) is False,
+  ">>": lambda left, right: float(to_int32(left) >> (to_int32(right) & 31)),
+  ">>>": lambda left, right: float((to_int32(left) & 0xFFFFFFFF) >> (to_int32(right) & 31)),
+  "==": loose_equal, "!=": lambda left, right: not loose_equal(left, right),
+  "===": strict_equal, "!==": lambda left, right: not strict_equal(left, right),
+  "<": lambda left, right: _less_than(left, right) is True,
+  ">": lambda left, right: _less_than(right, left) is True,
+  "<=": lambda left, right: _less_than(right, left) is False,
+  ">=": lambda left, right: _less_than(left, right) is False,
 }
 
 
@@ -1668,9 +1650,8 @@ class _Compiler:
     self.functions = []
     self.nesting = 0
     budget = interpreter.budget
-    self.operations = {**_OPERATIONS, "+": lambda a, b: _add(a, b, budget)}
+    self.operations = {**_OPERATIONS, "+": lambda left, right: _javascript_add(left, right, budget)}
 
-  # -- reading --
 
   def fail(self):
     token = self.tokens[self.pos] if self.pos < len(self.tokens) else ("eof", "", False)
@@ -1710,7 +1691,6 @@ class _Compiler:
     if self.nesting > self.MAX_NESTING:
       raise Unsupported("příliš zanořený skript")
 
-  # -- functions --
 
   def compile(self):
     body = []
@@ -1739,22 +1719,21 @@ class _Compiler:
   def _skip_block(self):
     depth = 0
     tokens = self.tokens
-    at = self.pos
-    while at < self.end:
-      token = tokens[at]
+    position = self.pos
+    while position < self.end:
+      token = tokens[position]
       if token[0] == "punct":
         if token[1] == "{":
           depth += 1
         elif token[1] == "}":
           depth -= 1
           if depth == 0:
-            self.pos = at + 1
+            self.pos = position + 1
             return
-      at += 1
-    self.pos = at
+      position += 1
+    self.pos = position
     self.fail()
 
-  # -- statements --
 
   def block(self):
     self.expect("{")
@@ -1959,13 +1938,13 @@ class _Compiler:
     tick = self.it.budget.tick
     def for_in(scope):
       value = target(scope)
-      if isinstance(value, Arr):
+      if isinstance(value, ScriptArray):
         keys = [str(index) for index in range(len(value.items))]
       elif type(value) is str:
         keys = [str(index) for index in range(len(value))]
-      elif isinstance(value, Host):
+      elif isinstance(value, HostObject):
         raise Unsupported(value.name)
-      elif isinstance(value, Obj):
+      elif isinstance(value, ScriptObject):
         keys = list(value.props)
       else:
         keys = []
@@ -2098,7 +2077,6 @@ class _Compiler:
       return after if after is not None else signal
     return try_
 
-  # -- expressions --
 
   def expression(self, allow_in=True):
     first = self.assignment(allow_in)
@@ -2128,7 +2106,7 @@ class _Compiler:
     return target(token[1], value)
 
   def _target(self, left):
-    '''What an assignment writes to: the left side was compiled once, as a reading of the same place.'''
+    # What an assignment writes to: the left side was compiled once, as a reading of the same place.
     if isinstance(left, _Variable):
       return self._name_target(left.js_name)
     if isinstance(left, _Member):
@@ -2214,11 +2192,11 @@ class _Compiler:
     if operator == "in":
       def has(scope):
         key, target = left(scope), right(scope)
-        if isinstance(target, Arr):
+        if isinstance(target, ScriptArray):
           return 0 <= to_number(key) < len(target.items)
-        if isinstance(target, Host):
+        if isinstance(target, HostObject):
           return to_string(key) in target.props
-        if isinstance(target, Obj):
+        if isinstance(target, ScriptObject):
           return to_string(key) in target.props
         raise Thrown(self.it.error("TypeError", "in"))
       return has
@@ -2227,13 +2205,13 @@ class _Compiler:
         value, kind = left(scope), right(scope)
         builtins = self.it.globals.vars
         if kind is builtins.get("Array"):
-          return isinstance(value, Arr)
+          return isinstance(value, ScriptArray)
         if kind is builtins.get("Date"):
           return isinstance(value, Date)
         if kind is builtins.get("RegExp"):
           return isinstance(value, Regex)
         if kind is builtins.get("Object"):
-          return isinstance(value, (Obj, Arr, Date, Regex, Function, Native))
+          return isinstance(value, (ScriptObject, ScriptArray, Date, Regex, Function, NativeFunction))
         raise Unsupported("instanceof")
       return instance
     operation = self.operations[operator]
@@ -2290,7 +2268,7 @@ class _Compiler:
       base, key = inner.base, inner.key
       def delete(scope):
         target, name = base(scope), to_string(key(scope))
-        if isinstance(target, Host):
+        if isinstance(target, HostObject):
           raise Unsupported(target.name)
         if hasattr(target, "props"):
           target.props.pop(name, None)
@@ -2339,7 +2317,7 @@ class _Compiler:
     return _Member(self.it.get, base, key)
 
   def _call_of(self, value, base, key, args):
-    '''A call of value; when it was just read off an object (base, key), that object becomes its this.'''
+    # A call of value; when it was just read off an object (base, key), that object becomes its this.
     tick = self.it.budget.tick
     interpreter = self.it
     if base is not None:
@@ -2412,12 +2390,12 @@ class _Compiler:
     return new
 
   def _constructor(self, name, callee):
-    '''Forms of one family define their own RegExp(value, type) for validation next to code using new RegExp(pattern),
-    which only makes sense if new still reaches the language's constructor.'''
+    # Forms of one family define their own RegExp(value, type) for validation next to code using new RegExp(pattern),
+    # which only makes sense if new still reaches the language's constructor.
     builtin = self.it.builtin_constructors[name]
     def constructor(scope):
       value = callee(scope)
-      return value if isinstance(value, Native) else builtin
+      return value if isinstance(value, NativeFunction) else builtin
     return constructor
 
   def primary(self):
@@ -2490,7 +2468,7 @@ class _Compiler:
       if not self.at("]"):
         self.expect(",")
     self.nesting -= 1
-    return lambda scope: Arr([item(scope) for item in items])
+    return lambda scope: ScriptArray([item(scope) for item in items])
 
   def object_literal(self):
     self.deeper()
@@ -2505,7 +2483,7 @@ class _Compiler:
       if not self.at("}"):
         self.expect(",")
     self.nesting -= 1
-    return lambda scope: Obj({key: item(scope) for key, item in properties})
+    return lambda scope: ScriptObject({key: item(scope) for key, item in properties})
 
 
 def _constant(value):
@@ -2513,7 +2491,7 @@ def _constant(value):
 
 
 class _Member:
-  '''Reading a[b]. Stays inspectable: an assignment or ++ then writes to the same place.'''
+  # Reading a[b]. Stays inspectable: an assignment or ++ then writes to the same place.
   __slots__ = ("get", "base", "key")
   def __init__(self, get, base, key):
     self.get, self.base, self.key = get, base, key
@@ -2564,26 +2542,25 @@ def _store(scope, name, value):
   first.vars[name] = value
 
 
-# ---- what a form's scripts see of 602 ----
 
 # Not after : or /, that is an element of quoted XPath such as {../d:function}.
 _SCRIPT_MARK = re.compile(r'(?<![:/])\b(?:var\s|function\b|GetDocument\s*\(|Result\s*\()')
 
 
 def is_script(value):
-  '''Whether a bind's expression is JavaScript. Braces alone also quote XPath.'''
+  # Whether a bind's expression is JavaScript. Braces alone also quote XPath.
   return value.lstrip().startswith("{") and _SCRIPT_MARK.search(value) is not None
 
 
 def _birth_number_valid(text):
-  '''As the RCCheck of expressions in xpath_ext: 9 or 10 digits, divisible by 11.'''
+  # As the RCCheck of expressions in xpath_ext: 9 or 10 digits, divisible by 11.
   digits = text.replace("/", "").strip()
   return digits.isascii() and digits.isdigit() and 9 <= len(digits) <= 10 and int(digits) % 11 == 0
 
 
 def evaluate(interpreter, source, data_xpath, current_path="", list_item=None):
-  '''Runs a bind's script and gives the text it passed to Result, None when it did not call it.
-  data_xpath(expression) answers the script's queries with a value: text, number, boolean or None.'''
+  # Runs a bind's script and gives the text it passed to Result, None when it did not call it.
+  # data_xpath(expression) answers the script's queries with a value: text, number, boolean or None.
   results = []
 
   def to_value(answer):
@@ -2601,21 +2578,21 @@ def evaluate(interpreter, source, data_xpath, current_path="", list_item=None):
     return element
 
   element_props = {
-    "DataXpath": Native(ask),
-    "GetCurrentDataXPath": Native(lambda this, args: current_path),
+    "DataXpath": NativeFunction(ask),
+    "GetCurrentDataXPath": NativeFunction(lambda this, args: current_path),
   }
   if list_item is not None:
-    element_props["GetListItemData"] = Native(lambda this, args: list_item(*(to_string(arg) for arg in args)))
-  element = Host("element", element_props)
-  document = Host("document", {
-    "GetElement": Native(element_method),
+    element_props["GetListItemData"] = NativeFunction(lambda this, args: list_item(*(to_string(arg) for arg in args)))
+  element = HostObject("element", element_props)
+  document = HostObject("document", {
+    "GetElement": NativeFunction(element_method),
     # only tell the user that something runs: nothing here takes long enough, and nothing may be shown from a calculation
-    "SetProgressInfo": Native(lambda this, args: UNDEFINED),
+    "SetProgressInfo": NativeFunction(lambda this, args: UNDEFINED),
   })
   interpreter.run(source, {
-    "GetDocument": Native(lambda this, args: document),
-    "Result": Native(lambda this, args: results.append(to_string(args[0] if args else UNDEFINED))),
-    "DbgLog": Native(lambda this, args: UNDEFINED),
-    "RCCheck": Native(lambda this, args: _birth_number_valid(to_string(args[0] if args else UNDEFINED))),
+    "GetDocument": NativeFunction(lambda this, args: document),
+    "Result": NativeFunction(lambda this, args: results.append(to_string(args[0] if args else UNDEFINED))),
+    "DbgLog": NativeFunction(lambda this, args: UNDEFINED),
+    "RCCheck": NativeFunction(lambda this, args: _birth_number_valid(to_string(args[0] if args else UNDEFINED))),
   })
   return results[-1] if results else None

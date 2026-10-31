@@ -37,7 +37,6 @@ c.rect(200, y, 220, 60)
 c.showPage()
 c.save()
 
-# Signature field over the box drawn above.
 from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
 from pyhanko.sign import fields
 

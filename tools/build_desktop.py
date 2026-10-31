@@ -69,7 +69,6 @@ def package_linux():
     with tarfile.open(DIST / f"blanketa-{VERSION}-linux-{arch}.tar.gz", "w:gz") as tar:
         tar.add(DIST / "Blanketa", arcname="Blanketa")
         tar.add(ROOT / "packaging/linux/install.sh", arcname="Blanketa/install.sh")
-    # .deb: the app in /opt, a launcher, a menu entry, the icon and the ZFO file type.
     root = ROOT / "build/deb"
     shutil.rmtree(root, ignore_errors=True)
     shutil.copytree(DIST / "Blanketa", root / "opt/blanketa")
