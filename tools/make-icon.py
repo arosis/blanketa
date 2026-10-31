@@ -10,30 +10,45 @@ ROOT = Path(__file__).resolve().parent.parent
 S = 1024
 
 
-def draw():
-    img = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-    # Background: rounded square with a vertical blue gradient (macOS icon grid: 824 px body on 1024).
-    body = Image.new("RGBA", (S, S))
+def rounded_blue_background():
+    gradient = Image.new("RGBA", (S, S))
     top, bottom = (61, 139, 253), (10, 84, 190)
     for y in range(S):
-        t = y / S
-        ImageDraw.Draw(body).line([(0, y), (S, y)], fill=tuple(round(a + (b - a) * t) for a, b in zip(top, bottom, strict=True)))
+        share = y / S
+        color = tuple(round(start + (end - start) * share) for start, end in zip(top, bottom, strict=True))
+        ImageDraw.Draw(gradient).line([(0, y), (S, y)], fill=color)
+    # macOS icon grid: 824 px body on 1024.
     mask = Image.new("L", (S, S), 0)
     ImageDraw.Draw(mask).rounded_rectangle([100, 100, 924, 924], radius=185, fill=255)
-    img.paste(body, (0, 0), mask)
-    d = ImageDraw.Draw(img)
-    # Paper with a folded corner.
-    d.polygon([(300, 230), (630, 230), (730, 330), (730, 800), (300, 800)], fill=(255, 255, 255, 255))
-    d.polygon([(630, 230), (630, 330), (730, 330)], fill=(205, 222, 248, 255))
-    # Form fields.
-    for y, w in ((380, 300), (450, 360), (520, 250)):
-        d.rounded_rectangle([355, y, 355 + w, y + 30], radius=8, fill=(214, 228, 252, 255))
-    # Signature line and a stroke of a signature.
-    d.line([(355, 720), (675, 720)], fill=(150, 170, 200, 255), width=6)
-    points = [(370, 700), (400, 640), (425, 690), (450, 620), (470, 700), (500, 660), (540, 690), (580, 650),
+    image = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    image.paste(gradient, (0, 0), mask)
+    return image
+
+
+def draw_paper_with_folded_corner(canvas):
+    canvas.polygon([(300, 230), (630, 230), (730, 330), (730, 800), (300, 800)], fill=(255, 255, 255, 255))
+    canvas.polygon([(630, 230), (630, 330), (730, 330)], fill=(205, 222, 248, 255))
+
+
+def draw_form_fields(canvas):
+    for y, width in ((380, 300), (450, 360), (520, 250)):
+        canvas.rounded_rectangle([355, y, 355 + width, y + 30], radius=8, fill=(214, 228, 252, 255))
+
+
+def draw_signature(canvas):
+    canvas.line([(355, 720), (675, 720)], fill=(150, 170, 200, 255), width=6)
+    stroke = [(370, 700), (400, 640), (425, 690), (450, 620), (470, 700), (500, 660), (540, 690), (580, 650),
               (610, 680), (660, 640)]
-    d.line(points, fill=(10, 84, 190, 255), width=16, joint="curve")
-    return img
+    canvas.line(stroke, fill=(10, 84, 190, 255), width=16, joint="curve")
+
+
+def draw():
+    image = rounded_blue_background()
+    canvas = ImageDraw.Draw(image)
+    draw_paper_with_folded_corner(canvas)
+    draw_form_fields(canvas)
+    draw_signature(canvas)
+    return image
 
 
 def main():

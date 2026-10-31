@@ -59,7 +59,6 @@ def certificate_seeds():
 
 
 def is_form(data):
-    """Whether the input is XML at all; text that is not one is simply refused when opening."""
     try:
         return etree.fromstring(data, etree.XMLParser(huge_tree=True))
     except (etree.XMLSyntaxError, ValueError):
@@ -67,7 +66,6 @@ def is_form(data):
 
 
 def fuzz_zfo_signatures(data):
-    """The signature panel of any form that parses."""
     root = is_form(data)
     if root is not None:
         try:
@@ -78,7 +76,6 @@ def fuzz_zfo_signatures(data):
 
 
 def fuzz_zfo_description(data):
-    """The form description and scripts notice of any form that parses."""
     root = is_form(data)
     if root is not None:
         app.binds_with_unsupported_scripts(root)
@@ -86,7 +83,6 @@ def fuzz_zfo_description(data):
 
 
 def fuzz_script(data):
-    """A form's script: it either finishes or says why not, within its budget, whatever it is made of."""
     text = data.decode("utf-8", "replace")
     try:
         js602.evaluate(js602.Interpreter([text]), "{" + text + "}", lambda expression: "1", "/d:root/d:x", lambda *args: "")
@@ -95,7 +91,6 @@ def fuzz_script(data):
 
 
 def script_seeds():
-    """The scripts of the forms in samples/, which are published anyway, and of the form written for the tests."""
     found = set()
     paths = [*(ROOT / "samples").glob("*/form.zfo"), ROOT / "samples/skripty/vypocty.zfo"]
     for path in sorted(paths):
@@ -107,8 +102,6 @@ def script_seeds():
 
 
 def fuzz_pdf(data):
-    """What opening a PDF reads. A damaged file may be refused, the server then answers with a message and libraries
-    fail in many ways doing so. The finding here is a hang or running out of memory or stack."""
     for read in (pdf_sign.describe_signatures, pdf_sign.form_fields, app.pdf_info):
         try:
             read(data)
@@ -119,13 +112,11 @@ def fuzz_pdf(data):
 
 
 def fuzz_certificate(data):
-    """The trust and revocation verdicts: they promise an answer for any certificate a document carries."""
     trustlist.check_certificate(data, FOLDER)
     revocation.check_certificate_revocation(data, FOLDER, FOLDER)
 
 
 def fuzz_trust_list(data):
-    """A downloaded trusted list: refused unless authentic, without any other failure than the documented ones."""
     try:
         root = trustlist._parse_list_xml(data)
         trustlist.verify_list_signature(root, trustlist.PINNED_SIGNERS)
@@ -136,13 +127,11 @@ def fuzz_trust_list(data):
 
 
 def fuzz_revocation_list(data):
-    """A downloaded revocation list: refused unless the authority signed it, and these inputs start from another key."""
     if revocation._parse_usable_list(data, test_revocation().AUTHORITY, NOW) is not None:
         raise AssertionError("a list signed by someone else was accepted")
 
 
 def test_revocation():
-    """Test helpers build the seeds that must look real; imported late, they generate keys."""
     sys.path.insert(0, str(ROOT / "tests"))
     import test_revocation as helpers
     return helpers
@@ -175,7 +164,6 @@ def _too_slow(*_):
 
 
 def mutate(data, rng):
-    """One of the changes that break parsers: flipped bytes, removed or repeated pieces, extreme values."""
     data = bytearray(data)
     for _ in range(rng.randint(1, 8)):
         if not data:
@@ -197,7 +185,6 @@ def mutate(data, rng):
 
 
 def report(name, data, error):
-    """Keeps the input for replaying and describes the place, so a repeated failure can be recognised."""
     digest = hashlib.sha256(data).hexdigest()[:16]
     out = ROOT / "fuzz-findings" / name
     out.mkdir(parents=True, exist_ok=True)
@@ -208,7 +195,6 @@ def report(name, data, error):
 
 
 def run_random(name, target, seeds, seconds):
-    """Keeps going after a finding and reports each distinct place once, so one run shows everything it found."""
     rng, deadline, runs, seen = random.Random(int(os.environ.get("FUZZ_SEED", "1"))), time.monotonic() + seconds, 0, set()
     signal.signal(signal.SIGALRM, _too_slow)
     while time.monotonic() < deadline:
