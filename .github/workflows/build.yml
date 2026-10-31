@@ -148,6 +148,8 @@ jobs:
           python -m pip install -q --require-hashes --only-binary :all: -r requirements-build.txt
           python -m pip install -q --require-hashes --only-binary :all: --no-binary proxy-tools --no-build-isolation -r requirements-desktop.txt
       - name: Build app and packages
+        # xz takes six minutes; only a released .deb must also install on systems whose dpkg cannot read zstd.
+        env: {DEB_COMPRESSION: "${{ github.ref_type == 'tag' && 'xz' || 'zstd' }}"}
         run: python tools/build_desktop.py
       - name: Install the .deb and take a screenshot
         run: |
