@@ -34,6 +34,7 @@ import pdf_sign  # noqa: E402
 import revocation  # noqa: E402
 import trustlist  # noqa: E402
 import zfo_verify  # noqa: E402
+from zfoengine import js602  # noqa: E402
 
 FOLDER = Path(tempfile.mkdtemp(prefix="blanketa-fuzz-"))
 NOW = datetime.now(timezone.utc)
@@ -82,6 +83,27 @@ def fuzz_zfo_description(data):
     if root is not None:
         app.script_binds(root)
         app.page_geometry(root)
+
+
+def fuzz_script(data):
+    """A form's script: it either finishes or says why not, within its budget, whatever it is made of."""
+    text = data.decode("utf-8", "replace")
+    try:
+        js602.evaluate(js602.Interpreter([text]), "{" + text + "}", lambda expression: "1", "/d:root/d:x", lambda *args: "")
+    except (js602.Unsupported, js602.Exhausted, js602.Thrown):
+        pass
+
+
+def script_seeds():
+    """The scripts of the forms in samples/, which are published anyway, and of the form written for the tests."""
+    found = set()
+    paths = [*(ROOT / "samples").glob("*/form.zfo"), ROOT / "samples/skripty/vypocty.zfo"]
+    for path in sorted(paths):
+        root = etree.fromstring(zipfile.ZipFile(path).read("form.fo"), etree.XMLParser(huge_tree=True))
+        found.update(element.text.encode() for element in root.iter("{http://software602.cz/forms}script") if element.text)
+        found.update(value.encode() for bind in root.iter("{http://software602.cz/forms}bind") for value in bind.attrib.values()
+                     if js602.is_script(value))
+    return sorted(found)
 
 
 def fuzz_pdf(data):
@@ -141,6 +163,7 @@ TARGETS = {
     "zfo-signatures": (fuzz_zfo_signatures, fo_seeds),
     "zfo-description": (fuzz_zfo_description, fo_seeds),
     "pdf": (fuzz_pdf, pdf_seeds),
+    "script": (fuzz_script, script_seeds),
     "certificate": (fuzz_certificate, certificate_seeds),
     "trust-list": (fuzz_trust_list, trust_list_seeds),
     "revocation-list": (fuzz_revocation_list, revocation_list_seeds),

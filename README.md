@@ -176,7 +176,8 @@ Kontrola podpisu bez okna (používá ji i CI):
 
 ## Omezení
 
-- Výpočty psané v JavaScriptu 602 se nevyhodnocují (výpočty XPath ano); Blanketa na ně při otevření formuláře upozorní.
+- Výpočty a kontroly psané v JavaScriptu 602 běží v izolovaném interpretu bez přístupu k souborům, síti a podpisu. Co neumí, nechá beze změny a upozorní na to. Skripty tlačítek a změn polí se nespouštějí, Blanketa na ně při otevření formuláře upozorní.
+- Formuláře `.fo` bez obalu `.zfo` zatím neotevře.
 - Odesílání na portály (submit) není podporované.
 - PDF formuláře XFA nejsou podporované; Blanketa na ně při otevření upozorní.
 - Aplikace není notarizovaná (macOS) ani podepsaná certifikátem vydavatele (Windows SmartScreen ji při prvním spuštění může varovat).

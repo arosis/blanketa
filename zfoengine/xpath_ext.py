@@ -99,20 +99,26 @@ class ExtendedXpathEvaluator:
     nss = {"fm": ns.FM_URI}
     lst = self._doc.root.xpath("//fm:enum[@name='" + list_name + "']", namespaces = nss)[0]
     
-    data = context.context_node.xpath(data_xpath, 
-                                      namespaces = self._doc._get_used_ns_prefix(data_xpath))[0]
+    # zfoengine: a field not filled in yet, or not listed, has no such data instead of stopping the calculation
+    found = context.context_node.xpath(data_xpath, 
+                                       namespaces = self._doc._get_used_ns_prefix(data_xpath))
+    if not found:
+      return ""
+    data = found[0]
     
     if type(data) is etree._Element:
-      data = data.text
+      data = data.text or ""
     
     
-    items = lst.xpath("fm:list/fm:listitem[normalize-space(@value)='"+data+"']", namespaces = nss)
+    items = lst.xpath("fm:list/fm:listitem[normalize-space(@value)=$data]", namespaces = nss, data = data)
     if len(items) == 0:
-      items = lst.xpath("fm:list/fm:listitem[normalize-space(@itemtext)='"+data+"']", namespaces = nss)
+      items = lst.xpath("fm:list/fm:listitem[normalize-space(@itemtext)=$data]", namespaces = nss, data = data)
+    if len(items) == 0:
+      return ""
     item = items[0]
     
     if (attr.startswith("@")):
-      val = item.get(attr[1:])
+      val = item.get(attr[1:], "")
     else:
       val= item.xpath(attr, namespaces = nss)[0].text
     

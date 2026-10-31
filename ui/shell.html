@@ -684,7 +684,7 @@
       if (!res.ok) { setStatus('Chyba: ' + await res.text()); return; }
       for (const r of await res.json()) {
         if (r.type === 'check') {
-          showCheck(r.data);
+          showCheck(r.data, r.scripts);
         } else if (r.type === 'default') {
           applyDefault(r.data);
         } else if (r.type === 'javascript') {
@@ -788,13 +788,16 @@
     info.created && `Vytvořen: ${day(info.created)}`,
     info.modified && `Modifikován: ${day(info.modified)}`,
     __BLANK__ && 'Zobrazeny výchozí hodnoty – vyplněná data nejsou načtena.',
-    info.scripts && 'Formulář obsahuje výpočty v JavaScriptu 602, které Blanketa nevyhodnocuje.',
+    info.scripts && 'Některé výpočty nebo kontroly v JavaScriptu 602 Blanketa neumí provést.',
+    info.actions && 'Skripty tlačítek a změn polí Blanketa nespouští.',
   ].filter(Boolean).join('<br>');
-  if (info.scripts) {
+  if (info.scripts || info.actions) {
     const notice = $q('[data-notice]');
-    notice.querySelector('span').textContent = 'Tento formulář obsahuje výpočty v JavaScriptu 602, které Blanketa neumí '
-      + 'vyhodnotit. Některá pole nebo části formuláře proto mohou zůstat prázdné nebo neaktuální. Před odesláním formulář '
-      + 'zkontrolujte, spolehlivý výsledek dá Software602 Form Filler.';
+    notice.querySelector('span').textContent = (info.scripts
+      ? 'Některé výpočty nebo kontroly v tomto formuláři Blanketa neumí provést, pole proto mohou zůstat prázdná nebo neaktuální. '
+      : 'Tlačítka a změny polí v tomto formuláři spouštějí skripty, které Blanketa z bezpečnostních důvodů nespouští, '
+        + 'takže některé funkce nebudou fungovat. ')
+      + 'Před odesláním formulář zkontrolujte, spolehlivý výsledek dá Software602 Form Filler.';
     notice.querySelector('button').addEventListener('click', () => { notice.hidden = true; });
     notice.hidden = false;
   }
@@ -810,14 +813,19 @@
   };
   const clean = text => text.replace(/\s+/g, ' ').trim().slice(0, 90);
   let checkWaiter = null;
-  function showCheck(problems) {
+  function showCheck(problems, scripts = []) {
     page.querySelectorAll('.zfo-invalid').forEach(el => el.classList.remove('zfo-invalid'));
     const found = problems
       .map(p => ({...p, el: document.getElementsByName(p.field)[p.index] ?? document.getElementsByName(p.field)[0]}))
       .filter(p => p.el?.offsetParent);
     found.forEach(p => p.el.classList.add('zfo-invalid'));
     const list = $q('[data-check-list]');
-    list.innerHTML = found.length ? '' : '<div class="zfo-check-ok">Formulář je vyplněn správně.</div>';
+    list.innerHTML = found.length || scripts.length ? '' : '<div class="zfo-check-ok">Formulář je vyplněn správně.</div>';
+    if (scripts.length) {
+      const note = document.createElement('div');
+      note.textContent = 'Některé výpočty nebo kontroly tohoto formuláře Blanketa neumí provést, kontrola proto není úplná.';
+      list.append(note);
+    }
     for (const p of found) {
       const item = document.createElement('button');
       item.className = 'zfo-check-item';
@@ -828,7 +836,8 @@
     }
     $q('[data-check]').hidden = false;
     togglePanel('panel', true);
-    setStatus(found.length ? `Kontrola: ${found.length} ${found.length === 1 ? 'problém' : found.length < 5 ? 'problémy' : 'problémů'}` : 'Kontrola: formulář je vyplněn správně');
+    setStatus(found.length ? `Kontrola: ${found.length} ${found.length === 1 ? 'problém' : found.length < 5 ? 'problémy' : 'problémů'}`
+      : scripts.length ? 'Kontrola: bez nálezů, ale není úplná' : 'Kontrola: formulář je vyplněn správně');
     checkWaiter?.(found.length);
     checkWaiter = null;
   }

@@ -38,6 +38,10 @@ os.environ["ZFO_OFFLINE"] = "1"  # tests never download trusted lists
 import app  # noqa: E402
 import barcode  # noqa: E402
 import pdf_sign  # noqa: E402
+from zfoengine import api as engine  # noqa: E402
+from zfoengine import js602  # noqa: E402
+
+NS = {"d": "http://software602.cz/sample"}
 
 ITF_BY_PATTERN = {pattern: digit for digit, pattern in barcode.ITF_DIGITS.items()}
 
@@ -118,19 +122,19 @@ class UnsupportedForms(unittest.TestCase):
         chrome = re.search(r"const chrome = \[\.\.\.document\.querySelectorAll\('([^']+)'\)", app.SHELL).group(1)
         self.assertIn(".zfo-notice", chrome)
 
-    def test_javascript_calculations_are_reported(self):
-        doc = etree.fromstring(zipfile.ZipFile(ROOT / "samples/cuzk/form.zfo").read("form.fo"), etree.XMLParser(huge_tree=True))
-        self.assertEqual(app.script_binds(doc), ["s2a_vyplnene2", "s2a_vyplnene", "s2b_vyplnene"])
-
-    def test_form_without_javascript_is_not_reported(self):
-        for sample in ("cssz-onz", "olk-dotace"):
+    def test_form_with_scripts_that_run_is_not_reported(self):
+        for sample in ("cssz-onz", "olk-dotace", "cuzk"):
             doc = etree.fromstring(zipfile.ZipFile(ROOT / f"samples/{sample}/form.zfo").read("form.fo"), etree.XMLParser(huge_tree=True))
             self.assertEqual(app.script_binds(doc), [])
 
     def test_braces_alone_are_not_javascript(self):
-        doc = self.parsed('<fm:bind Id="x" calculate="{../d:a}"/><fm:bind Id="y" calculate="  { var a = 1; }"/>'
-                          '<fm:bind Id="z" constraint="{GetDocument().GetElement()}"/>')
+        doc = self.parsed('<fm:bind Id="x" calculate="{../d:a}"/><fm:bind Id="y" calculate="  { var a = SendData(); }"/>'
+                          '<fm:bind Id="z" constraint="{GetDocument().SendData()}"/><fm:bind Id="w" calculate="{ var a = 1; }"/>')
         self.assertEqual(app.script_binds(doc), ["y", "z"])
+
+    def test_script_actions_are_counted_and_xpath_ones_are_not(self):
+        doc = self.parsed('<a form602btnclick="{ SendData(); }"/><a form602onchange=" { x(); }"/><a form602btnclick="SendAppEvent(1)"/>')
+        self.assertEqual(app.script_actions(doc), 2)
 
     @staticmethod
     def pdf_with(xfa, source):
@@ -394,6 +398,222 @@ class RevocationVerdict(unittest.TestCase):
     def test_without_a_stamp_the_signers_claim_decides(self):
         self.assertEqual(self.verdict(None, None, self.BEFORE), (False, True, False))
         self.assertEqual(self.verdict(None, None, self.AFTER), (False, True, True))
+
+
+class FormScripts(unittest.TestCase):
+    """samples/skripty/vypocty.zfo comes from tools/make-script-samples.py, shaped like what offices publish."""
+
+    def setUp(self):
+        self.doc = engine.open_document(zipfile.ZipFile(ROOT / "samples/skripty/vypocty.zfo").read("form.fo"))
+
+    def value(self, name):
+        return self.doc._get_data_root().xpath(f"/d:root/d:{name}", namespaces=NS)[0].text or ""
+
+    def fill(self, name, value):
+        return engine.handle(self.doc, "store_val", {"field": name, "value": value, "input_id": name, "repe": ""})
+
+    def problems(self):
+        return engine.handle(self.doc, "check_form", "")[0]
+
+    def test_filled_check_follows_every_branch(self):
+        engine.handle(self.doc, "recalc_form", "")
+        self.assertEqual(self.value("vyplneno"), "1")
+        self.fill("jmeno", "Jana")
+        self.assertEqual(self.value("vyplneno"), "0")
+        self.fill("tisk", "0")
+        self.fill("jmeno", "")
+        self.assertEqual(self.value("vyplneno"), "0")
+
+    def test_no_result_leaves_the_value(self):
+        self.fill("tisk", "2")
+        self.fill("jmeno", "Jana")
+        before = self.value("vyplneno")
+        self.fill("prijmeni", "Nová")
+        self.assertEqual(self.value("vyplneno"), before)
+
+    def test_library_function_joins_fields(self):
+        self.fill("jmeno", "Jana")
+        self.fill("prijmeni", "Nová")
+        self.assertEqual(self.value("cele_jmeno"), "Jana Nová")
+
+    def test_birth_number_gives_a_date_and_a_later_calculation_uses_it(self):
+        self.fill("rc", "855815/0007")
+        self.assertEqual(self.value("narozen"), "1985-08-15")
+        self.assertEqual(self.value("lhuta"), "14.9.1985")
+
+    def test_invalid_birth_number_gives_nothing(self):
+        self.fill("rc", "855815/0014")
+        self.assertEqual(self.value("narozen"), "")
+
+    def test_a_forms_own_regexp_function_and_the_constructor_coexist(self):
+        self.fill("psc", "11000")
+        self.assertEqual(self.value("psc_ok"), "true")
+        self.fill("psc", "abc")
+        self.assertEqual(self.value("psc_ok"), "false")
+
+    def test_constraint_script_is_checked(self):
+        self.assertIn("Neplatná hodnota", json.dumps(self.fill("email", "neni-adresa"), ensure_ascii=False))
+        self.assertNotIn("Neplatná hodnota", json.dumps(self.fill("email", "jana@example.cz"), ensure_ascii=False))
+        self.assertEqual(self.value("email"), "jana@example.cz")
+        self.assertEqual(self.problems()["data"], [])
+
+    def test_script_reaching_for_the_network_changes_nothing_and_is_reported(self):
+        self.fill("jmeno", "Jana")
+        self.assertEqual(self.value("odeslano"), "puvodni")
+        self.assertTrue(self.problems()["scripts"])
+
+    def test_form_description_reports_what_does_not_run(self):
+        fo = etree.fromstring(zipfile.ZipFile(ROOT / "samples/skripty/vypocty.zfo").read("form.fo"))
+        self.assertEqual(app.script_binds(fo), ["odeslano"])
+        self.assertEqual(app.script_actions(fo), 1)
+
+    def test_cadastre_form_agrees_with_form_filler(self):
+        # samples/ref-filler was saved by Form Filler: with tisk=0 all three checks are 0.
+        fo = zipfile.ZipFile(ROOT / "samples/cuzk/form.zfo").read("form.fo")
+        doc = engine.open_document(fo)
+        engine.handle(doc, "recalc_form", "")
+        data = doc._get_data_root()
+        for name in ("s2a_vyplnene", "s2a_vyplnene2", "s2b_vyplnene"):
+            filled = {node.text for node in data.iter(f"{{{data.getroot().nsmap['d']}}}{name}")}
+            self.assertEqual(filled, {"0"}, name)
+        self.assertEqual(doc.script_problems, set())
+
+    def test_saved_form_keeps_earlier_layers_untouched_by_scripts(self):
+        before = zipfile.ZipFile(ROOT / "samples/cuzk/form.zfo").read("form.fo")
+        doc = engine.open_document(before)
+        engine.handle(doc, "recalc_form", "")
+        self.assertEqual(etree.tostring(engine.open_document(before).root), etree.tostring(doc.root))
+
+
+class Interpreter(unittest.TestCase):
+    """What matters about zfoengine/js602.py that a form cannot show."""
+
+    def run_script(self, source, answer="", library=()):
+        return js602.evaluate(js602.Interpreter(library), source, lambda expression: answer, "/d:root/d:x")
+
+    def test_python_stays_out_of_reach(self):
+        for source in ('Result("".__class__)', 'Result([].__class__)', 'Result(Result.__globals__)', 'Result(GetDocument.__self__)',
+                       'Result((function(){}).__code__)', 'Result("".constructor)', 'Result(({}).__proto__)', 'Result(new Date().__class__)'):
+            with self.subTest(source):
+                self.assertEqual(self.run_script("{" + source + "}"), "undefined")
+
+    def test_host_objects_offer_only_what_they_list(self):
+        for source in ("GetDocument().SendData()", "GetDocument().Print2PDF()", "GetDocument().__class__", "GetDocument().GetElement().SetData('a', 'b')",
+                       "GetDocument().GetElement().props", "GetDocument().x = 1"):
+            with self.subTest(source), self.assertRaises(js602.Unsupported):
+                self.run_script("{" + source + "}")
+
+    def test_unknown_names_stop_the_script(self):
+        for source in ("open('/etc/passwd')", "require('fs')", "eval('1')", "Function('return 1')()", "MessageBox('x')", "new ActiveXObject('x')",
+                       "__import__('os')", "print(1)"):
+            with self.subTest(source), self.assertRaises(js602.Unsupported):
+                self.run_script("{" + source + "}")
+
+    def test_runaway_scripts_are_stopped(self):
+        for source in ("while (true) {}", "for (;;) { var a = 1; }", "function f() { f(); } f();", "var a = 'x'; while (true) a += a;",
+                       "var a = []; while (true) a.push(1);", "var a = []; a[1000000000] = 1;", "/(a+)+$/.test('" + "a" * 40 + "!');",
+                       "/(a|a)*$/.test('" + "a" * 40 + "!');", "/(.*)*x/.test('" + "a" * 3000 + "');", "'abc'.repeat(1e9);", "new Array(1e9);"):
+            with self.subTest(source), self.assertRaises((js602.Exhausted, js602.Thrown)):
+                self.run_script("{" + source + "}")
+
+    def test_unreadable_scripts_are_unsupported(self):
+        for source in ("{ var }", "{ if ( }", "{ /(/.test('') }", "{ 'abc }", "{" * 500, "{ a" + "[0" * 500, "{" + "(" * 500, "{ /" + "(" * 200 + "/ }", "\x00", "{ @ }"):
+            with self.subTest(source[:20]), self.assertRaises(js602.Unsupported):
+                self.run_script(source)
+
+    def test_broken_library_script_does_not_stop_the_others(self):
+        self.assertEqual(self.run_script("{ Result(dobra()); }", library=("function ( {", "function dobra() { return 'ano'; }")), "ano")
+
+    def test_is_script_tells_xpath_from_javascript(self):
+        for value in ("{ var a = 1; }", "  { Result(1); }", "{GetDocument()}", "{\nfunction f() {}\n}"):
+            self.assertTrue(js602.is_script(value), value)
+        for value in ("{../d:a}", "../d:a + 1", 'If(DataXpath({../d:a}), 1, 2)', "", "{Result}"):
+            self.assertFalse(js602.is_script(value), value)
+
+
+@unittest.skipUnless(shutil.which("node"), "needs Node.js; CI runners have it")
+class InterpreterAgainstNode(unittest.TestCase):
+    """Our own expressions in both engines: what the language means is not this project's to decide."""
+
+    CASES = r"""
+    1 + 2; "1" + 2; 1 + "2"; "3" * "4"; "a" * 1; 7 % 3; -7 % 3; 5.5 % 2; 1 / 0; -1 / 0; 0 / 0; 0.1 + 0.2; 1e21; 1e-7; 123456789012345680000; 1.5e300 * 1e300;
+    "" == 0; "0" == 0; null == undefined; null == 0; undefined == 0; "1" == 1; true == 1; true == "1"; [] == ""; [1] == 1; "a" === "a"; 1 === 1.0; NaN == NaN; null === null;
+    "a" < "b"; "10" < "9"; "10" < 9; null >= 0; undefined >= 0; NaN < 1; "abc" < "abd";
+    !""; !"0"; !0; !null; ![]; !!{}; "" || "x"; "a" && "b"; 0 || null; 1 && 0;
+    1 & 3; 1 | 2; 5 ^ 1; ~5; 1 << 3; -8 >> 1; -8 >>> 28; 2147483648 | 0; 1.9 | 0;
+    typeof 1; typeof "a"; typeof null; typeof undefined; typeof []; typeof {}; typeof function(){}; typeof neni;
+    parseInt("12px"); parseInt("08"); parseInt("0x1f"); parseInt("z"); parseInt("101", 2); parseInt(""); parseInt("-3.9"); parseFloat("3.14abc"); parseFloat(".5"); parseFloat("x"); Number(""); Number(" 12 "); Number("1e3"); Number("12px"); Number(null); Number(true); Number("0x10");
+    isNaN("a"); isNaN("1"); isFinite("1"); isFinite(1/0); String(1); String(null); String(undefined); String(true); String([1,2]); Boolean(""); Boolean("0");
+    (1.005).toFixed(2); (2.5).toFixed(0); (1.45).toFixed(1); (0).toFixed(2); (1234.5678).toFixed(1); (255).toString(16); (10).toString(2);
+    Math.floor(-1.5); Math.ceil(-1.5); Math.round(2.5); Math.round(-2.5); Math.trunc(-1.5); Math.abs(-1); Math.max(1, 2); Math.min(); Math.max(1, "a"); Math.pow(2, 10);
+    "abc".length; "abc".charAt(1); "abc".charAt(9); "abc"[1]; "abc".charCodeAt(0); "abcabc".indexOf("c"); "abcabc".indexOf("c", 3); "abcabc".lastIndexOf("a"); "abcabc".lastIndexOf("a", 2); "abc".indexOf("");
+    "abcdef".substring(1, 3); "abcdef".substring(3, 1); "abcdef".substring(-1, 2); "abcdef".substring(4); "abcdef".substr(1, 2); "abcdef".substr(-2); "abcdef".slice(1, -1); "abcdef".slice(-2); "abcdef".slice(3, 1);
+    "AbC".toLowerCase(); "AbC".toUpperCase(); "  a ".trim(); "a,b,,c".split(","); "abc".split(""); "a1b2c".split(/[0-9]/); "a1b".split(/([0-9])/); "abc".split(); "".split(","); "a,b".split(",", 1); "a".concat("b", 1);
+    "aXbX".replace("X", "-"); "aXbX".replace(/X/, "-"); "aXbX".replace(/X/g, "-"); "abc".replace(/(a)(b)/, "$2$1"); "abc".replace(/b/, "[$&]"); "a.b".replace(/\./g, ""); "abc".replace(/b/, function(m) { return m + m; }); "$".replace("$", "$$");
+    "abc".match(/b/)[0]; "abab".match(/a/g).length; "abc".match(/x/); "abc".search(/c/); /a/.test("cat"); /^a/.test("cat"); /t$/.test("cat"); /A/i.test("cat"); /^\d+$/.test("123"); /^\d+$/.test("12a"); /\bcat\b/.test("a cat b"); /^\w+$/.test("čau"); /\s/.test("a b");
+    /^[0-9]{6}\/[0-9]{3,4}$/.test("123456/7890"); /^[1-7][0-9]{4}$/.test("11000"); /^(\-|\+)?([0-9]+|Infinity)$/.test("-5"); /(a)|(b)/.exec("b")[2]; /(a)|(b)/.exec("b")[1]; /a{2}/.test("aa"); /a{2,}/.test("a"); /a{,2}/.test("a{,2}"); /[A-z]/.test("_"); /[^0-9]/.test("5"); /a.c/.test("a\nc"); /a(?=b)/.test("ab"); /a(?!b)/.test("ab"); /(a)\1/.test("aa"); /a*?b/.exec("aab")[0]; /\//.test("/"); /[\/]/.test("/"); /[a\-z]/.test("-");
+    (function() { var r = /a/g; r.test("aa"); return r.lastIndex; })(); (function() { var r = /a/g; var n = 0; while (r.exec("aXa")) n++; return n; })(); new RegExp("^[0-9]+$").test("12"); new RegExp("a", "i").test("A");
+    [1, 2, 3].length; [1, 2, 3].join("-"); [1, [2, 3]].join(); [null, undefined, 1].join(); [3, 1, 2].sort().join(); [10, 9, 1].sort().join(); [3, 1].sort(function(a, b) { return a - b; }).join(); [1, 2].concat(3, [4]).join(); [1, 2, 3].slice(1).join(); [1, 2, 3].indexOf(2); [1, 2, 3].reverse().join(); [1, 2, 3].pop(); [1, 2, 3].shift(); [1, 2, 3].map(function(x) { return x * 2; }).join(); [1, 2, 3].filter(function(x) { return x > 1; }).length;
+    (function() { var a = [1, 2, 3]; a.splice(1, 1); return a.join(); })(); (function() { var a = []; a[3] = 1; return a.length; })(); (function() { var a = [1]; a.push(2, 3); return a.length; })(); (function() { var a = [1, 2]; a.length = 1; return a.join(); })(); Array(3).length; new Array(1, 2).length; Array.isArray([]);
+    ({a: 1}).a; ({a: 1}).b; ({"x y": 2})["x y"]; (function() { var o = {}; o.a = 1; o["b"] = 2; var s = ""; for (var k in o) s += k; return s; })(); (function() { var s = ""; for (var i in [5, 6]) s += i; return s; })(); ("a" in {a: 1}); JSON.stringify({a: [1, "x", null, true]}); JSON.parse('{"a": [1, {"b": 2}]}').a[1].b;
+    (function() { var d = new Date(2024, 0, 31); d.setMonth(1); return d.getMonth() + "/" + d.getDate(); })(); new Date(2024, 1, 29).getDate(); new Date(2023, 1, 29).getDate(); new Date(2024, 11, 31).getDay(); new Date(99, 0, 1).getFullYear(); (function() { var d = new Date(2024, 0, 1); d.setDate(d.getDate() - 1); return d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate(); })(); new Date("x").getTime(); new Date("2024-02-29").getDate();
+    (function() { var i = 0, s = ""; do { s += i; i++; } while (i < 3); return s; })(); (function() { var s = ""; for (var i = 0; i < 5; i++) { if (i == 1) continue; if (i == 3) break; s += i; } return s; })(); (function() { switch ("b") { case "a": return 1; case "b": case "c": return 2; default: return 3; } })(); (function() { var s = ""; switch (2) { case 1: s += "1"; case 2: s += "2"; case 3: s += "3"; break; default: s += "d"; } return s; })(); (function() { switch (9) { default: return "d"; case 1: return "1"; } })();
+    (function() { var f = function(n) { return n < 2 ? 1 : n * f(n - 1); }; return f(5); })(); (function(a, b) { return arguments.length + "" + b; })(1); (function() { return typeof x; var x = 1; })(); (function() { return g(); function g() { return "hoisted"; } })(); (function() { var c = 0; function add() { c++; } add(); add(); return c; })(); (function() { var o = {v: 7, f: function() { return this.v; }}; return o.f(); })();
+    (function() { try { throw "x"; } catch (e) { return e + "!"; } })(); (function() { try { null.a; } catch (e) { return "caught"; } })(); (function() { var s = ""; try { s += "t"; } finally { s += "f"; } return s; })();
+    (function() { var a = 1; a += 2; a *= 3; a -= 1; a /= 2; a %= 3; return a; })(); (function() { var i = 1; return i++ + ++i; })(); (function() { var s = "a"; s += 1; return s; })(); (function() { var o = {n: 1}; o.n++; o["n"] += 1; return o.n; })(); (1, 2); void 0; true ? "y" : "n"; "" ? "y" : "n";
+    """
+
+    @staticmethod
+    def cases():
+        # the list above is split by a small reader of our own text, not of a form's: it only has to know quotes and brackets
+        found, depth, start, quote, at = [], 0, 0, None, 0
+        text = InterpreterAgainstNode.CASES
+        while at < len(text):
+            c = text[at]
+            if quote:
+                if c == "\\":
+                    at += 1
+                elif c == quote or (quote == "/" and c == "\n"):
+                    quote = None
+            elif c in "\"'":
+                quote = c
+            elif c == "/" and text[at - 1] in " (,=!" and text[at + 1] not in " ":
+                quote = "/"
+            elif c in "([{":
+                depth += 1
+            elif c in ")]}":
+                depth -= 1
+            elif c == ";" and depth == 0:
+                found.append(text[start:at].strip())
+                start = at + 1
+            at += 1
+        return [case for case in found if case]
+
+    def test_same_answers(self):
+        cases = self.cases()
+        self.assertGreater(len(cases), 200)
+        show = "function s(v){return Array.isArray(v)?'['+v.map(s).join('|')+']':String(v)}"
+        lines = "".join(f"try{{out.push(s(eval({json.dumps('(' + case + ')')})))}}catch(e){{out.push('!'+e.name)}}\n" for case in cases)
+        script = f"var out=[];{show}\n{lines}console.log(JSON.stringify(out))"
+        expected = json.loads(subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True, env={**os.environ, "TZ": "UTC"}).stdout)
+
+        def shown(value):
+            if isinstance(value, js602.Arr):
+                return "[" + "|".join(shown(item) for item in value.items) + "]"
+            return js602.to_string(value)
+
+        interpreter = js602.Interpreter()
+        wrong = []
+        for case, wanted in zip(cases, expected, strict=True):
+            box = []
+            try:
+                interpreter.run(f"__keep(({case}));", {"__keep": js602.Native(lambda this, args: box.append(args[0]))})
+                got = shown(box[0])
+            except js602.Thrown as error:
+                got = "!" + js602.to_string(error.value.props["name"])
+            if got != wanted:
+                wrong.append(f"{case}: node {wanted!r}, here {got!r}")
+        self.assertEqual(wrong, [])
 
 
 if __name__ == "__main__":

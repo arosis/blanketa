@@ -17,7 +17,7 @@
 #*
 #*    Modified in October 2026 by Richard Winkler Bejr for "Blanketa": ported to Python 3,
 #*    separated from the GTK user interface and extended (recalculation, form check, default
-#*    values); the git history of the project records each change.
+#*    values, scripts); the git history of the project records each change.
 
 '''
 Module that handles evaluation of calculate/readonly/relevant and other attributes.
@@ -29,8 +29,65 @@ import math
 
 import lxml.etree as etree
 
-from . import expr_quoting, tools
+from . import expr_quoting, js602, tools
 from .xpath_ext import StopEvalException
+
+
+MAX_RUNAWAY_SCRIPTS = 3  # a form whose scripts keep spending their whole budget would freeze the window with each change
+
+
+def _script_answer(res):
+  '''What DataXpath gives a script for a result of an xpath evaluation.'''
+  if isinstance(res, list):
+    if not res:
+      return ""
+    res = res[0]
+    if isinstance(res, etree._Element):
+      return res.text or ""
+  if isinstance(res, bool) or res is None:
+    return res
+  if isinstance(res, float):
+    return res
+  return str(res)
+
+
+def eval_script(zfo_doc, source, path=None, node=None):
+  '''
+  Runs a bind's JavaScript. Returns the text it gave to Result, or None when it gave nothing or could not finish;
+  that is noted in zfo_doc.script_problems and the value stays as it was.
+  '''
+  if zfo_doc.runaway_scripts >= MAX_RUNAWAY_SCRIPTS:
+    return None
+
+  def ask(expression):
+    try:
+      if node is None:
+        return _script_answer(eval_expression_path(zfo_doc, expression, path))
+      return _script_answer(eval_expression_node(zfo_doc, expression, node, zfo_doc._get_used_ns_prefix(expression)))
+    except (etree.LxmlError, ValueError, TypeError, IndexError) as e:
+      raise js602.Unsupported("DataXpath") from e
+
+  def list_item(*args):
+    if len(args) < 2 or any("'" in arg for arg in args):
+      raise js602.Unsupported("GetListItemData")
+    quoted = ", ".join("'%s'" % arg for arg in args)
+    answer = _script_answer(ask("GetListItemData(%s)" % quoted))
+    return "" if answer is None else js602.to_string(answer)
+
+  current = path or ""
+  if not current and isinstance(node, etree._Element):
+    current = node.getroottree().getpath(node)
+  try:
+    return js602.evaluate(zfo_doc.script_interpreter(), source, ask, current, list_item)
+  except js602.Exhausted:
+    zfo_doc.runaway_scripts += 1
+    zfo_doc.script_problems.add("výpočet nedoběhl")
+  except js602.Unsupported as e:
+    zfo_doc.script_problems.add(str(e))
+  except js602.Thrown as e:
+    log.info("Script stopped with its own error: %s", e)
+    zfo_doc.script_problems.add("chyba ve skriptu formuláře")
+  return None
 
 
 def eval_calculate(zfo_doc, bind, path=None, node=None, nsmap=None):
@@ -49,6 +106,10 @@ def eval_calculate(zfo_doc, bind, path=None, node=None, nsmap=None):
   if xpath_expr.strip() == "":
     return None
   
+  if js602.is_script(xpath_expr):
+    res = eval_script(zfo_doc, xpath_expr, path, node)
+    return None if res is None else (bind.get("Id"), res, res)
+
   # calculate attribute is enclosed in quots - see 602 xpath documentation
   unquoted = xpath_expr
   
@@ -199,6 +260,11 @@ def eval_constraint(zfo_doc, bind, path, node=None):
     if len(expr) == 0:
       log.debug("Empty constraint = no constraint")
       return True, constr_comment
+    if js602.is_script(expr):
+      # a script that cannot finish must not stop the user: the form's notice says that it was not checked
+      if eval_script(zfo_doc, expr, path, node) == "false":
+        return False, constr_comment
+      return True, ""
     log.debug("Constraint expression: %s" % expr)
     if node is None:
       res = eval_expression_path(zfo_doc, expr, path)
