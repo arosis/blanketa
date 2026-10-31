@@ -81,7 +81,7 @@ def fuzz_zfo_description(data):
     """The form description and scripts notice of any form that parses."""
     root = is_form(data)
     if root is not None:
-        app.script_binds(root)
+        app.binds_with_unsupported_scripts(root)
         app.page_geometry(root)
 
 
