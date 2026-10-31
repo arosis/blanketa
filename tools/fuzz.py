@@ -46,7 +46,7 @@ def fo_seeds():
 
 
 def pdf_seeds():
-    return [p.read_bytes() for p in sorted((ROOT / "samples-pdf").glob("*.pdf"))]
+    return [p.read_bytes() for p in sorted((ROOT / "samples-pdf").rglob("*.pdf"))]
 
 
 def certificate_seeds():

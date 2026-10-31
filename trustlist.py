@@ -54,6 +54,7 @@ PSS_METHODS = {f"http://www.w3.org/2007/05/xmldsig-more#{n}-rsa-MGF1": h
 EC_METHODS = {MORE + "ecdsa-sha256": hashes.SHA256(), MORE + "ecdsa-sha384": hashes.SHA384(), MORE + "ecdsa-sha512": hashes.SHA512()}
 
 CA_QC = "http://uri.etsi.org/TrstSvc/Svctype/CA/QC"
+TSA_QTST = "http://uri.etsi.org/TrstSvc/Svctype/TSA/QTST"
 SUPERVISED = {"granted", "recognisedatnationallevel", "setbynationallaw", "accredited", "undersupervision", "supervisionincessation"}
 SIGNING_USES = {"ForeSignatures", "ForeSeals"}
 # Certificates carry ISO country codes, the lists name two countries differently. The UK list is closed, without updates.
@@ -377,6 +378,66 @@ def check(der, folder):
         return _judge(certificate, folder)
     except (ValueError, TypeError, UnsupportedAlgorithm, x509.InvalidVersion):  # a hostile form's certificate must not stop the form opening
         return {"trusted": False, "unverifiable": False, "reason": "Certifikát je poškozený, nelze ho ověřit."}
+
+
+def _only_for_stamping(certificate):
+    """RFC 3161 demands this of a stamping unit. Authorities listed for stamps can issue people's certificates too, and
+    their holders must not be able to stamp any time they like."""
+    try:
+        usage = certificate.extensions.get_extension_for_class(x509.ExtendedKeyUsage)
+    except x509.ExtensionNotFound:
+        return False
+    return usage.critical and list(usage.value) == [x509.ExtendedKeyUsageOID.TIME_STAMPING]
+
+
+def _stamps_qualified(root, certificate, moment):
+    """Was this certificate's time stamping unit, or the authority issuing such units, qualified at that moment?
+    Units are retired routinely and their old stamps stay good, so only the status at the stamp's time counts."""
+    if not certificate.not_valid_before_utc <= moment <= certificate.not_valid_after_utc:
+        return False
+    providers = root.findall(f"{TSL}TrustServiceProviderList/{TSL}TrustServiceProvider")
+    for service in (s for p in providers for s in p.findall(f"{TSL}TSPServices/{TSL}TSPService")):
+        information = service.find(f"{TSL}ServiceInformation")
+        if information.findtext(f"{TSL}ServiceTypeIdentifier") != TSA_QTST or _status_at(service, moment) not in SUPERVISED:
+            continue
+        for element in information.findall(f"{TSL}ServiceDigitalIdentity/{TSL}DigitalId/{TSL}X509Certificate"):
+            try:
+                listed = x509.load_der_x509_certificate(base64.b64decode(element.text))
+                if listed == certificate:
+                    return True
+                if listed.subject == certificate.issuer and _only_for_stamping(certificate):
+                    certificate.verify_directly_issued_by(listed)
+                    return True
+            except (ValueError, TypeError, InvalidSignature, UnsupportedAlgorithm):
+                continue
+    return False
+
+
+def check_stamp(der, moment, folder):
+    """Verdict for a time stamp's certificate at the stamp's time: {"qualified": bool, "unverifiable": bool, "reason": str}."""
+    refused = {"qualified": False, "unverifiable": False,
+               "reason": "Vydavatel časového razítka není kvalifikovaný podle důvěryhodného seznamu EU."}
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            certificate = x509.load_der_x509_certificate(der)
+        countries = certificate.issuer.get_attributes_for_oid(x509.NameOID.COUNTRY_NAME)
+        country = countries[0].value.upper() if countries else ""
+        territory = TERRITORIES.get(country, country)
+        if not re.fullmatch(r"[A-Z]{2}", territory) or territory in ("EU", "UK"):
+            return refused
+        with _lock:
+            if territory not in pointers(_lotl(folder)):
+                return refused
+            root = _national(folder, territory)
+        if _stamps_qualified(root, certificate, moment):
+            return {"qualified": True, "unverifiable": False, "reason": ""}
+        return refused
+    except Unavailable:
+        return {"qualified": False, "unverifiable": True,
+                "reason": "Důvěryhodný seznam EU se nepodařilo načíst, časové razítko proto nelze ověřit. Zkontrolujte připojení k internetu."}
+    except (AttributeError, IndexError, ValueError, TypeError, UnsupportedAlgorithm, x509.InvalidVersion):
+        return {**refused, "reason": "Certifikát časového razítka se nepodařilo ověřit."}
 
 
 def _judge(certificate, folder):

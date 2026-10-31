@@ -35,12 +35,14 @@ RSA_KEY = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 EC_KEY = ec.generate_private_key(ec.SECP256R1())
 
 
-def certificate(name, key, issuer=None, issuer_key=None, start=None, end=None, country="CZ", ca=True):
+def certificate(name, key, issuer=None, issuer_key=None, start=None, end=None, country="CZ", ca=True, usage=None):
     subject = x509.Name([x509.NameAttribute(x509.NameOID.COUNTRY_NAME, country), x509.NameAttribute(x509.NameOID.COMMON_NAME, name)])
     builder = (x509.CertificateBuilder().subject_name(subject).issuer_name(issuer.subject if issuer else subject)
                .public_key(key.public_key()).serial_number(x509.random_serial_number())
                .not_valid_before(start or NOW - timedelta(days=3000)).not_valid_after(end or NOW + timedelta(days=3000))
                .add_extension(x509.BasicConstraints(ca=ca, path_length=None), critical=True))
+    if usage:
+        builder = builder.add_extension(x509.ExtendedKeyUsage(usage), critical=True)
     return builder.sign(issuer_key or key, hashes.SHA256())
 
 
@@ -171,6 +173,63 @@ class TrustLists(unittest.TestCase):
         self.assertFalse(verdict["trusted"])
         self.assertTrue(verdict["unverifiable"])
         self.assertIn("pod dohledem", verdict["reason"])
+
+    def stamp_verdict(self, cert, moment, services):
+        trustlist._memory.clear()
+        self.pages[CZ_URL] = national(services, CZ_SIGNER)
+        return trustlist.check_stamp(der(cert), moment, self.folder)
+
+    def test_listed_time_stamping_unit_is_qualified(self):
+        unit = certificate("TSU", EC_KEY, AUTHORITY, RSA_KEY, ca=False)
+        verdict = self.stamp_verdict(unit, NOW - timedelta(days=1), [service(unit, kind=trustlist.TSA_QTST)])
+        self.assertEqual(verdict, {"qualified": True, "unverifiable": False, "reason": ""})
+
+    def test_unit_issued_by_a_listed_stamping_authority_is_qualified(self):
+        unit = certificate("TSU", EC_KEY, AUTHORITY, RSA_KEY, ca=False, usage=[x509.ExtendedKeyUsageOID.TIME_STAMPING])
+        self.assertTrue(self.stamp_verdict(unit, NOW - timedelta(days=1), [service(AUTHORITY, kind=trustlist.TSA_QTST)])["qualified"])
+
+    def test_person_certificate_from_a_listed_stamping_authority_is_not_qualified(self):
+        person = certificate("Person", EC_KEY, AUTHORITY, RSA_KEY, ca=False)
+        self.assertFalse(self.stamp_verdict(person, NOW - timedelta(days=1), [service(AUTHORITY, kind=trustlist.TSA_QTST)])["qualified"])
+
+    def test_certificate_with_other_uses_from_a_listed_stamping_authority_is_not_qualified(self):
+        usage = [x509.ExtendedKeyUsageOID.TIME_STAMPING, x509.ExtendedKeyUsageOID.EMAIL_PROTECTION]
+        person = certificate("Person", EC_KEY, AUTHORITY, RSA_KEY, ca=False, usage=usage)
+        self.assertFalse(self.stamp_verdict(person, NOW - timedelta(days=1), [service(AUTHORITY, kind=trustlist.TSA_QTST)])["qualified"])
+
+    def test_same_name_with_another_key_is_not_qualified(self):
+        unit = certificate("TSU", EC_KEY, AUTHORITY, EC_KEY, ca=False, usage=[x509.ExtendedKeyUsageOID.TIME_STAMPING])
+        self.assertFalse(self.stamp_verdict(unit, NOW - timedelta(days=1), [service(AUTHORITY, kind=trustlist.TSA_QTST)])["qualified"])
+
+    def test_authority_for_signatures_does_not_vouch_for_stamps(self):
+        unit = certificate("TSU", EC_KEY, AUTHORITY, RSA_KEY, ca=False)
+        self.assertFalse(self.stamp_verdict(unit, NOW - timedelta(days=1), [service(AUTHORITY)])["qualified"])
+
+    def test_stamp_from_a_unit_retired_later_stays_good(self):
+        unit = certificate("TSU", EC_KEY, AUTHORITY, RSA_KEY, ca=False)
+        retired = service(unit, "withdrawn", NOW - timedelta(days=10), [("granted", NOW - timedelta(days=3000))], kind=trustlist.TSA_QTST)
+        self.assertTrue(self.stamp_verdict(unit, NOW - timedelta(days=20), [retired])["qualified"])
+
+    def test_stamp_after_the_unit_was_retired_is_refused(self):
+        unit = certificate("TSU", EC_KEY, AUTHORITY, RSA_KEY, ca=False)
+        retired = service(unit, "withdrawn", NOW - timedelta(days=10), [("granted", NOW - timedelta(days=3000))], kind=trustlist.TSA_QTST)
+        self.assertFalse(self.stamp_verdict(unit, NOW - timedelta(days=1), [retired])["qualified"])
+
+    def test_stamp_outside_the_certificate_validity_is_refused(self):
+        unit = certificate("TSU", EC_KEY, AUTHORITY, RSA_KEY, start=NOW - timedelta(days=5), ca=False)
+        self.assertFalse(self.stamp_verdict(unit, NOW - timedelta(days=20), [service(unit, kind=trustlist.TSA_QTST)])["qualified"])
+
+    def test_stamp_cannot_be_checked_without_lists(self):
+        self.pages.clear()
+        trustlist._memory.clear()
+        unit = certificate("TSU", EC_KEY, AUTHORITY, RSA_KEY, ca=False)
+        verdict = trustlist.check_stamp(der(unit), NOW - timedelta(days=1), self.folder)
+        self.assertFalse(verdict["qualified"])
+        self.assertTrue(verdict["unverifiable"])
+
+    def test_damaged_stamp_certificate_gives_a_verdict(self):
+        verdict = trustlist.check_stamp(b"garbage", NOW, self.folder)
+        self.assertFalse(verdict["qualified"])
 
     def test_damaged_certificate_gives_a_verdict(self):
         builder = (x509.CertificateBuilder().subject_name(LEAF.subject).issuer_name(AUTHORITY.subject).public_key(EC_KEY.public_key())

@@ -55,6 +55,10 @@ Toto je hlavní zjištění z referenčního souboru vyplněného ve Form Filler
 - Uživatelský podpis pak obalí celek včetně dat, takže data jsou podepsaná uživatelem.
 - Při uložení bez podpisu se starý datový `Object` nahradí novým (`app.py: filled_form`).
 
+## Časová razítka
+
+Software602 uvádí, že formulář lze opatřit časovým razítkem, ale způsob uložení nepopisuje a žádný dostupný vzorek razítko neobsahuje. `dsig:SignatureProperties` nese jen čas uvedený podepisujícím, proto ho panel podpisů nepovažuje za potvrzený.
+
 ## 4. Datový model a vazby
 
 - **Instance:** `form:model/form:instance` je výchozí XML dat. Prvky mají vlastní jmenný prostor formuláře, např. `d:`.
