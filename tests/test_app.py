@@ -13,6 +13,7 @@ import unittest
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
@@ -248,6 +249,88 @@ class OpeningForms(unittest.TestCase):
 
     def test_page_lays_out_only_after_opening(self):
         self.assertNotIn("]:visible", app.SHELL)  # jQuery measures it, and a page still hidden has no visible field
+
+
+class TimeStamps(unittest.TestCase):
+    """samples-pdf/razitka comes from tools/make-timestamp-samples.py."""
+    FOLDER = ROOT / "samples-pdf/razitka"
+
+    def read(self, name):
+        return pdf_sign.signatures((self.FOLDER / f"{name}.pdf").read_bytes())
+
+    @staticmethod
+    def stamp(kind="signature", at="2026-01-15T10:00:00+00:00", intact=True):
+        return {"kind": kind, "intact": intact, "at": at if intact else None, "issuer": "TSA", "der": b"certificate"}
+
+    def judge(self, stamps, verdict):
+        sig = {"stamps": stamps}
+        with mock.patch.object(app.certstore, "stamp_trust", return_value=verdict) as asked:
+            app.judged_stamps(sig)
+        return sig, asked
+
+    def test_signature_without_a_stamp_has_none(self):
+        self.assertEqual(self.read("bez-razitka")[0]["stamps"], [])
+
+    def test_stamp_inside_a_signature_gives_its_time_and_authority(self):
+        found = self.read("razitko-v-podpisu")[0]
+        self.assertTrue(found["intact"])
+        self.assertEqual(found["stamps"][0]["kind"], "signature")
+        self.assertEqual(found["stamps"][0]["at"], "2026-01-15T10:00:00+00:00")
+        self.assertEqual(found["stamps"][0]["issuer"], "Blanketa TEST TSA")
+
+    def test_document_stamp_is_not_a_broken_signature(self):
+        signature, stamp = self.read("razitko-dokumentu")
+        self.assertTrue(stamp["document_stamp"])
+        self.assertTrue(stamp["intact"])
+        self.assertTrue(signature["intact"])
+
+    def test_document_stamp_proves_a_signature_it_covers(self):
+        signature = self.read("razitko-dokumentu")[0]
+        self.assertEqual([(s["kind"], s["at"]) for s in signature["stamps"]], [("document", "2026-01-16T10:00:00+00:00")])
+
+    def test_document_stamp_before_the_signature_proves_nothing(self):
+        stamp, signature = self.read("razitko-pred-podpisem")
+        self.assertTrue(stamp["document_stamp"])
+        self.assertEqual(signature["stamps"], [])
+
+    def test_stamp_of_another_document_does_not_break_the_signature(self):
+        found = self.read("razitko-jineho-dokumentu")[0]
+        self.assertTrue(found["intact"])
+        self.assertFalse(found["stamps"][0]["intact"])
+
+    def test_changed_content_breaks_a_document_stamp(self):
+        data = (self.FOLDER / "razitko-dokumentu.pdf").read_bytes()
+        at = data.index(b"/MediaBox")
+        stamp = pdf_sign.signatures(data[:at] + b"/MediaBoy" + data[at + 9:])[1]
+        self.assertFalse(stamp["intact"])
+
+    def test_qualified_stamp_is_proof(self):
+        sig, asked = self.judge([self.stamp()], {"qualified": True, "unverifiable": False, "reason": ""})
+        self.assertEqual(sig["proof"]["at"], "2026-01-15T10:00:00+00:00")
+        self.assertEqual(sig["stamp_problem"], "")
+        self.assertEqual(asked.call_args.args[1], datetime(2026, 1, 15, 10, tzinfo=timezone.utc))
+        self.assertNotIn("der", sig["proof"])
+
+    def test_earliest_good_stamp_counts(self):
+        later = self.stamp("document", "2030-01-01T00:00:00+00:00")
+        sig, _ = self.judge([later, self.stamp()], {"qualified": True, "unverifiable": False, "reason": ""})
+        self.assertEqual(sig["proof"]["kind"], "signature")
+
+    def test_untrusted_stamp_is_no_proof_and_says_why(self):
+        sig, _ = self.judge([self.stamp()], {"qualified": False, "unverifiable": False, "reason": "Není kvalifikované."})
+        self.assertIsNone(sig["proof"])
+        self.assertEqual(sig["stamp_problem"], "Není kvalifikované.")
+
+    def test_damaged_stamp_is_no_proof_and_asks_nothing(self):
+        sig, asked = self.judge([self.stamp(intact=False)], {"qualified": True, "unverifiable": False, "reason": ""})
+        self.assertIsNone(sig["proof"])
+        self.assertIn("poškozené", sig["stamp_problem"])
+        asked.assert_not_called()
+
+    def test_good_stamp_hides_a_bad_one(self):
+        sig, _ = self.judge([self.stamp(intact=False), self.stamp()], {"qualified": True, "unverifiable": False, "reason": ""})
+        self.assertIsNotNone(sig["proof"])
+        self.assertEqual(sig["stamp_problem"], "")
 
 
 if __name__ == "__main__":

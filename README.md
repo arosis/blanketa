@@ -178,7 +178,6 @@ Kontrola podpisu bez okna (používá ji i CI):
 
 - Výpočty psané v JavaScriptu 602 se nevyhodnocují (výpočty XPath ano); Blanketa na ně při otevření formuláře upozorní.
 - Odesílání na portály (submit) není podporované.
-- Formuláře s mnoha opakováními se otevírají pomalu (desítky sekund).
 - PDF formuláře XFA nejsou podporované; Blanketa na ně při otevření upozorní.
 - Aplikace není notarizovaná (macOS) ani podepsaná certifikátem vydavatele (Windows SmartScreen ji při prvním spuštění může varovat).
 - Tokeny přes PKCS#11 zatím nejsou podporované (jen soubory `.pfx`).
@@ -187,6 +186,14 @@ Kontrola podpisu bez okna (používá ji i CI):
 ## Důvěryhodnost podpisů
 
 Systémy české kvalifikované autority (PostSignum, I.CA, eIdentity) většinou neznají. Když systém certifikátu nevěří, Blanketa ho dohledá v důvěryhodných seznamech EU: stáhne seznam EU z `ec.europa.eu` a národní seznam země vydavatele, ověří jejich podpisy a uloží je v nastavení. O otevřeném formuláři ani certifikátu se tím nikam nic neposílá. Bez internetu a bez uloženého seznamu panel podpisů řekne, že důvěryhodnost nešlo ověřit. Zda vydavatel certifikát nezrušil, zjistí Blanketa až po otevření formuláře ze seznamu zrušených certifikátů vydavatele: stáhne celý seznam, takže vydavatel nepozná, čí podpis si prohlížíte. Platí to jen pro vydavatele z důvěryhodných seznamů EU. Čas podpisu uvádí podepisující a časová razítka se zatím neověřují, takže u zrušeného certifikátu nelze potvrdit, že podpis vznikl před zrušením.
+
+### Časová razítka
+
+U PDF Blanketa čte časové razítko v podpisu i razítko celého dokumentu. Čas potvrdí jen neporušené razítko služby, která byla v tu chvíli kvalifikovaná podle důvěryhodného seznamu EU. Když vydavatel certifikát zrušil, rozhoduje o platnosti podpisu právě tento čas. Razítko dokumentu pokrývá jen podpisy, které už v souboru byly, a pozdější razítko dokumentu podpis po zrušení certifikátu nezneplatní, jen čas nepotvrdí. Zda nebyl zrušen certifikát samotného razítka, se nekontroluje.
+
+U ZFO se čas podpisu dál bere z formuláře, tedy od podepisujícího. Vzorek ZFO s razítkem se nepodařilo najít a formát není veřejně popsaný, proto si ho Blanketa nedomýšlí.
+
+Vzorové soubory v `samples-pdf/razitka/` vytváří `tools/make-timestamp-samples.py` s testovací autoritou.
 
 ## Bezpečnost
 

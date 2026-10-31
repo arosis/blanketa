@@ -14,8 +14,9 @@ from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
 from pyhanko.pdf_utils.reader import PdfFileReader
 from pyhanko.pdf_utils.text import TextBoxStyle
 from pyhanko.sign import fields, signers
-from pyhanko.sign.validation import validate_pdf_signature
+from pyhanko.sign.validation import validate_pdf_signature, validate_pdf_timestamp
 from pyhanko.stamp import TextStampStyle
+from pyhanko_certvalidator import ValidationContext
 from pyhanko_certvalidator.registry import SimpleCertificateStore
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import (
@@ -29,6 +30,7 @@ from pypdf.generic import (
 # Trust is judged by certstore.trust; pyHanko's own path building only logs noise about it.
 logging.getLogger("pyhanko").setLevel(logging.CRITICAL)
 logging.getLogger("pyhanko_certvalidator").setLevel(logging.CRITICAL)
+SIGNATURE_STAMP = "1.2.840.113549.1.9.16.2.14"  # id-aa-signatureTimeStampToken
 STAMP_FONT = Path("/System/Library/Fonts/Supplemental/Arial.ttf")
 
 # pyHanko writes glyph widths and kerning in font units, but PDF counts them in thousandths of an em, so a TrueType
@@ -250,11 +252,65 @@ def _evaluate(sig):
     return intact, covers, modified, unchecked and intact and covers != "ENTIRE_FILE"
 
 
+def _stamp_details(status, kind):
+    """What a time stamp's own check found; whether its authority counts is judged later, against the trusted lists."""
+    if status is None or status.signing_cert is None or not status.intact or not status.valid:
+        return {"kind": kind, "intact": False, "at": None, "issuer": "", "der": None}
+    cert = status.signing_cert
+    return {"kind": kind, "intact": True, "at": status.timestamp.astimezone(timezone.utc).isoformat(),
+            "issuer": cert.subject.native.get("common_name") or cert.subject.human_friendly, "der": cert.dump()}
+
+
+def _signature_stamp(sig):
+    """The time stamp inside a signature, proving the signature existed by then; None when it has none."""
+    attributes = sig.signer_info["unsigned_attrs"]
+    if not attributes.native or not any(a["type"].dotted == SIGNATURE_STAMP for a in attributes):
+        return None
+    try:  # no fetching: the page must not wait for the network, and trust comes from the trusted lists
+        status = validate_pdf_signature(sig, ts_validation_context=ValidationContext(allow_fetching=False), skip_diff=True)
+        return _stamp_details(status.timestamp_validity, "signature")
+    except Exception:  # a damaged token only means the time is not confirmed, the signature is judged apart from it
+        return _stamp_details(None, "signature")
+
+
+def _document_stamp(sig):
+    """A stamp over the file as it was, recorded in the PDF as one more signature. (stamp details, status or None)"""
+    try:
+        status = validate_pdf_timestamp(sig, validation_context=ValidationContext(allow_fetching=False))
+        return _stamp_details(status, "document"), status
+    except Exception:
+        return _stamp_details(None, "document"), None
+
+
+def _document_stamp_entry(sig):
+    cert = sig.signer_cert
+    stamp, status = _document_stamp(sig)
+    return {
+        "document_stamp": True,
+        "subject": cert.subject.native.get("common_name") or cert.subject.human_friendly,
+        "issuer": cert.issuer.native.get("common_name") or cert.issuer.human_friendly,
+        "publisher": False,
+        "intact": stamp["intact"],
+        "modified": False,
+        "changes_unchecked": False,
+        "not_after": cert["tbs_certificate"]["validity"]["not_after"].native.isoformat(),
+        "signed_at": stamp["at"],
+        "field": sig.field_name,
+        "covers_whole": status is not None and status.coverage.name == "ENTIRE_FILE",
+        "der": cert.dump(),
+        "stamps": [stamp],
+    }
+
+
 def signatures(pdf):
-    """One dict per signature, in signing order, shaped like zfo_verify.describe."""
+    """One dict per signature or document time stamp, in file order, shaped like zfo_verify.describe."""
     reader = _open(pdf)
     result = []
-    for sig in reader.embedded_signatures:
+    found = reader.embedded_signatures
+    for sig in found:
+        if sig.sig_object_type == "/DocTimeStamp":
+            result.append(_document_stamp_entry(sig))
+            continue
         cert = sig.signer_cert
         intact, covers, modified, unchecked = _evaluate(sig)
         signed_at = sig.self_reported_timestamp
@@ -272,5 +328,10 @@ def signatures(pdf):
             "field": sig.field_name,
             "covers_whole": covers == "ENTIRE_FILE",
             "der": cert.dump(),
+            # A document stamp proves the signature only if the signature was already in the file it stamped.
+            "stamps": [stamp for stamp in (_signature_stamp(sig), *(_document_stamp(later)[0] for later in found
+                                                                    if later.sig_object_type == "/DocTimeStamp"
+                                                                    and later.signed_revision > sig.signed_revision))
+                       if stamp is not None],
         })
     return result

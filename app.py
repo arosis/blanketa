@@ -116,9 +116,29 @@ def render_empty():
     return SHELL.replace("__SESSION__", "").replace("__FILE__", '""').replace("__FONTS__", "").replace("__EMPTY__", "true")
 
 
+def judged_stamps(sig):
+    """Sets sig["proof"], the earliest time confirmed by a good stamp, or sig["stamp_problem"], why the stamps do not count."""
+    problem = ""
+    proofs = []
+    for stamp in sig.pop("stamps", ()):
+        der = stamp.pop("der")
+        if not stamp["intact"]:
+            problem = problem or "Časové razítko je poškozené nebo nepatří k tomuto dokumentu."
+            continue
+        verdict = certstore.stamp_trust(der, datetime.fromisoformat(stamp["at"]))
+        if verdict["qualified"]:
+            proofs.append(stamp)
+        else:
+            problem = problem or verdict["reason"]
+    sig["proof"] = min(proofs, key=lambda stamp: stamp["at"], default=None)
+    sig["stamp_problem"] = "" if proofs else problem
+
+
 def judged(found):
     """Adds trust verdicts to signatures; each keeps a certificate id the page can ask about revocation with."""
     ders = [sig.pop("der") for sig in found]
+    for sig in found:
+        judged_stamps(sig)
     for sig, der, verdict in zip(found, ders, certstore.trust(ders), strict=True):
         sig.update(trusted=verdict["trusted"], reason=verdict.get("reason", ""), trust_source=verdict["source"],
                    unverifiable=verdict["unverifiable"], certificate=hashlib.sha256(der).hexdigest())

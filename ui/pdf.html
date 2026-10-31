@@ -194,8 +194,24 @@ __SHELL_STYLE__
     bad: '<svg viewBox="0 0 24 24" fill="none" stroke="#c5221f" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/></svg>',
   };
   const fmt = iso => iso ? new Date(iso).toLocaleString('cs-CZ', {dateStyle: 'medium', timeStyle: 'short'}) : '–';
+  const stampLine = sig => sig.proof
+    ? `<div class="meta">Čas potvrzuje ${sig.proof.kind === 'signature' ? 'kvalifikované časové razítko' : 'kvalifikované časové razítko dokumentu'}: ${fmt(sig.proof.at)}, vydal ${esc(sig.proof.issuer)}.</div>`
+    : sig.stamp_problem ? `<div class="meta">Časové razítko čas nepotvrzuje. ${esc(sig.stamp_problem)}</div>` : '';
+  // A document time stamp is stored like a signature, but nobody signs anything with it.
+  const stampCard = sig => {
+    const level = !sig.intact ? 'bad' : sig.proof ? 'ok' : 'warn';
+    const state = !sig.intact ? 'Časové razítko dokumentu je poškozené'
+      : sig.proof ? 'Časové razítko dokumentu je platné' : 'Časové razítko dokumentu je neporušené, ale nedůvěryhodné';
+    return `<div class="zfo-card ${level}">
+      <div class="who">${icons[level]}${esc(sig.subject)}</div>
+      <div class="state">${state}</div>
+      ${stampLine(sig)}
+      <div class="meta">Vystavil: ${esc(sig.issuer)}</div>
+    </div>`;
+  };
   const card = sig => {
-    const expired = new Date(sig.not_after) < new Date();
+    if (sig.document_stamp) return stampCard(sig);
+    const expired = new Date(sig.not_after) < new Date(sig.proof?.at ?? Date.now());
     const revocation = window.zfoRevocation;
     const level = !sig.intact || revocation.revokedBeforeSigning(sig) ? 'bad'
       : (sig.trusted && !expired && !sig.modified && !sig.changes_unchecked && !revocation.revoked(sig)) ? 'ok' : 'warn';
@@ -212,8 +228,9 @@ __SHELL_STYLE__
       ${sig.trust_source === 'eu' ? '<div class="meta">Vydavatel je v důvěryhodném seznamu EU.</div>' : ''}
       ${sig.unverifiable ? `<div class="meta">${esc(sig.reason)}</div>` : ''}
       ${revocation.line(sig)}
-      <div class="meta">Podepsáno: ${fmt(sig.signed_at)}<br>Vystavil: ${esc(sig.issuer)}<br>
-        ${expired ? 'Platnost certifikátu skončila' : 'Certifikát platí do'} ${new Date(sig.not_after).toLocaleDateString('cs-CZ')}
+      ${stampLine(sig)}
+      <div class="meta">Podepsáno: ${fmt(sig.signed_at)}${sig.proof ? ' (uvádí podepisující)' : ''}<br>Vystavil: ${esc(sig.issuer)}<br>
+        ${new Date(sig.not_after) < new Date() ? 'Platnost certifikátu skončila' : 'Certifikát platí do'} ${new Date(sig.not_after).toLocaleDateString('cs-CZ')}
         ${sig.intact && !sig.covers_whole && !sig.changes_unchecked ? '<br>Po podpisu byla doplněna pole nebo další podpisy.' : ''}</div>
     </div>`;
   };
@@ -222,7 +239,7 @@ __SHELL_STYLE__
     $q('[data-signatures]').innerHTML =
       (changed && signatures.length ? '<div class="zfo-note">Vyplněné hodnoty se uloží jako dodatek; stávající podpisy zůstanou platné, pokud je dokument nezamyká.</div>' : '') +
       (signatures.length ? signatures.map(card).join('') : '<div class="zfo-empty">Dokument zatím není podepsaný.</div>');
-    window.zfoRevocation.ask(SESSION, signatures, renderSignatures);
+    window.zfoRevocation.ask(SESSION, signatures.filter(sig => !sig.document_stamp), renderSignatures);
   };
 
   const certificates = window.zfoCertificates(SESSION);

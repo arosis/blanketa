@@ -216,6 +216,11 @@ def trust(certificates):
     return result
 
 
+def stamp_trust(der, moment):
+    """Whether a time stamp's DER certificate was qualified at the stamp's time, by the EU trusted lists."""
+    return trustlist.check_stamp(der, moment, config_dir() / "trustlists")
+
+
 def revocation_status(der):
     """Whether the issuer revoked a DER certificate; may download its list, so never call it while rendering a page."""
     return revocation.check(der, config_dir() / "trustlists", config_dir() / "crl")
