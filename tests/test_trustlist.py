@@ -66,9 +66,9 @@ def sign(xml, cert, key=RSA_KEY):
     """Signs a list the way the real ones are: an enveloped signature over the whole document, exclusive c14n."""
     root = etree.fromstring(xml)
     digest = base64.b64encode(hashlib.sha256(etree.tostring(root, method="c14n", exclusive=True)).digest()).decode()
-    info = (f'<ds:SignedInfo xmlns:ds="{DSNS}"><ds:CanonicalizationMethod Algorithm="{trustlist.EXC}"/>'
-            f'<ds:SignatureMethod Algorithm="{trustlist.MORE}rsa-sha256"/><ds:Reference URI=""><ds:Transforms>'
-            f'<ds:Transform Algorithm="{trustlist.ENVELOPED}"/><ds:Transform Algorithm="{trustlist.EXC}"/></ds:Transforms>'
+    info = (f'<ds:SignedInfo xmlns:ds="{DSNS}"><ds:CanonicalizationMethod Algorithm="{trustlist.EXCLUSIVE_C14N}"/>'
+            f'<ds:SignatureMethod Algorithm="{trustlist.XMLDSIG_MORE}rsa-sha256"/><ds:Reference URI=""><ds:Transforms>'
+            f'<ds:Transform Algorithm="{trustlist.ENVELOPED}"/><ds:Transform Algorithm="{trustlist.EXCLUSIVE_C14N}"/></ds:Transforms>'
             f'<ds:DigestMethod Algorithm="http://www.w3.org/2001/04/xmlenc#sha256"/><ds:DigestValue>{digest}</ds:DigestValue>'
             f'</ds:Reference></ds:SignedInfo>')
     canonical = etree.tostring(etree.fromstring(info), method="c14n", exclusive=True)
@@ -122,13 +122,13 @@ LEAF = certificate("Podepisujici", EC_KEY, AUTHORITY, RSA_KEY, start=ISSUED, ca=
 
 class TrustLists(unittest.TestCase):
     def setUp(self):
-        trustlist._memory.clear()
+        trustlist._lists_in_memory.clear()
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.folder = Path(temporary.name)
         self.pages = {trustlist.LOTL_URL: self.default_lotl(), CZ_URL: national([service(AUTHORITY)], CZ_SIGNER)}
         for patcher in (mock.patch.object(trustlist, "PINNED_SIGNERS", frozenset({fingerprint(LOTL_SIGNER)})),
-                        mock.patch.object(trustlist, "download", self.download)):
+                        mock.patch.object(trustlist, "download_file", self.download)):
             patcher.start()
             self.addCleanup(patcher.stop)
 
@@ -143,8 +143,8 @@ class TrustLists(unittest.TestCase):
         return self.pages[url]
 
     def check(self, cert=LEAF):
-        trustlist._memory.clear()
-        return trustlist.check(der(cert), self.folder)
+        trustlist._lists_in_memory.clear()
+        return trustlist.check_certificate(der(cert), self.folder)
 
     def test_certificate_of_a_listed_authority_is_trusted(self):
         self.assertEqual(self.check(), {"trusted": True, "unverifiable": False, "reason": ""})
@@ -175,9 +175,9 @@ class TrustLists(unittest.TestCase):
         self.assertIn("pod dohledem", verdict["reason"])
 
     def stamp_verdict(self, cert, moment, services):
-        trustlist._memory.clear()
+        trustlist._lists_in_memory.clear()
         self.pages[CZ_URL] = national(services, CZ_SIGNER)
-        return trustlist.check_stamp(der(cert), moment, self.folder)
+        return trustlist.check_stamp_certificate(der(cert), moment, self.folder)
 
     def test_listed_time_stamping_unit_is_qualified(self):
         unit = certificate("TSU", EC_KEY, AUTHORITY, RSA_KEY, ca=False)
@@ -221,14 +221,14 @@ class TrustLists(unittest.TestCase):
 
     def test_stamp_cannot_be_checked_without_lists(self):
         self.pages.clear()
-        trustlist._memory.clear()
+        trustlist._lists_in_memory.clear()
         unit = certificate("TSU", EC_KEY, AUTHORITY, RSA_KEY, ca=False)
-        verdict = trustlist.check_stamp(der(unit), NOW - timedelta(days=1), self.folder)
+        verdict = trustlist.check_stamp_certificate(der(unit), NOW - timedelta(days=1), self.folder)
         self.assertFalse(verdict["qualified"])
         self.assertTrue(verdict["unverifiable"])
 
     def test_damaged_stamp_certificate_gives_a_verdict(self):
-        verdict = trustlist.check_stamp(b"garbage", NOW, self.folder)
+        verdict = trustlist.check_stamp_certificate(b"garbage", NOW, self.folder)
         self.assertFalse(verdict["qualified"])
 
     def test_damaged_certificate_gives_a_verdict(self):
@@ -236,12 +236,12 @@ class TrustLists(unittest.TestCase):
                    .serial_number(5).not_valid_before(ISSUED).not_valid_after(NOW + timedelta(days=9))
                    .add_extension(x509.UnrecognizedExtension(x509.oid.ExtensionOID.KEY_USAGE, b"junk"), critical=False))
         for damaged in (der(builder.sign(RSA_KEY, hashes.SHA256())), b"\x30\x03abc"):
-            self.assertFalse(trustlist.check(damaged, self.folder)["trusted"])
+            self.assertFalse(trustlist.check_certificate(damaged, self.folder)["trusted"])
 
     def test_certificate_with_an_impossible_version_gives_a_verdict(self):
         damaged = der(LEAF).replace(b"\xa0\x03\x02\x01\x02", b"\xa0\x03\x02\x01\x06", 1)
-        self.assertFalse(trustlist.check(damaged, self.folder)["trusted"])
-        self.assertIsNone(trustlist.issuer(damaged, self.folder))
+        self.assertFalse(trustlist.check_certificate(damaged, self.folder)["trusted"])
+        self.assertIsNone(trustlist.issuing_authority(damaged, self.folder))
 
     def test_unreadable_authority_does_not_hide_the_others(self):
         odd = service(AUTHORITY).replace(b64(AUTHORITY), base64.b64encode(b"junk").decode())
@@ -265,10 +265,10 @@ class TrustLists(unittest.TestCase):
         self.assertTrue(self.check()["trusted"])
         stranger = certificate("Stranger", RSA_KEY)
         (self.folder / "EU.xml").write_bytes(self.default_lotl(sequence=9, signer=stranger, eu_signers=(stranger,)))
-        trustlist._memory.clear()
+        trustlist._lists_in_memory.clear()
         self.assertNotIn(fingerprint(stranger), trustlist._lotl_signers(self.folder))
         self.assertTrue(self.check()["trusted"])  # the bad file is ignored and the list downloaded again
-        self.assertEqual(trustlist._sequence(trustlist._parse((self.folder / "EU.xml").read_bytes())), 5)
+        self.assertEqual(trustlist._sequence_number(trustlist._parse_list_xml((self.folder / "EU.xml").read_bytes())), 5)
 
     def test_authority_for_websites_only_is_not_trusted(self):
         self.pages[CZ_URL] = national([service(AUTHORITY, uses=("ForWebSiteAuthentication",))], CZ_SIGNER)
@@ -348,7 +348,7 @@ class TrustLists(unittest.TestCase):
         cached = self.folder / "CZ.xml"
 
         def age():
-            os.utime(cached, (time.time() - 2 * trustlist.REFRESH_AFTER,) * 2)
+            os.utime(cached, (time.time() - 2 * trustlist.REFRESH_AFTER_SECONDS,) * 2)
 
         def settle():
             for thread in threading.enumerate():
@@ -371,13 +371,13 @@ class TrustLists(unittest.TestCase):
         self.pages[trustlist.LOTL_URL] = self.default_lotl(eu_signers=(LOTL_SIGNER, successor))
         self.assertTrue(self.check()["trusted"])
         self.pages[trustlist.LOTL_URL] = self.default_lotl(sequence=6, signer=successor, eu_signers=(successor,))
-        os.utime(self.folder / "EU.xml", (time.time() - 2 * trustlist.REFRESH_AFTER,) * 2)
+        os.utime(self.folder / "EU.xml", (time.time() - 2 * trustlist.REFRESH_AFTER_SECONDS,) * 2)
         self.assertTrue(self.check()["trusted"])
         for thread in threading.enumerate():
             if thread is not threading.current_thread() and thread.daemon:
                 thread.join(10)
         self.assertIn(b"<SchemeTerritory>EU", (self.folder / "EU.xml").read_bytes())
-        self.assertEqual(trustlist._sequence(trustlist._parse((self.folder / "EU.xml").read_bytes())), 6)
+        self.assertEqual(trustlist._sequence_number(trustlist._parse_list_xml((self.folder / "EU.xml").read_bytes())), 6)
 
     def test_country_cannot_escape_the_folder(self):
         authority = certificate("Odd CA", RSA_KEY, country="..")
@@ -395,7 +395,7 @@ class TrustLists(unittest.TestCase):
 class Verdicts(unittest.TestCase):
     def verdicts(self, system, listed):
         with mock.patch.object(certstore, "_system_trust", return_value=[system]), \
-                mock.patch.object(certstore.trustlist, "check", return_value=listed) as check:
+                mock.patch.object(certstore.trustlist, "check_certificate", return_value=listed) as check:
             return certstore.trust([b"certificate"])[0], check
 
     def test_system_trust_needs_no_list(self):

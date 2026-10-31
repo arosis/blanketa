@@ -120,15 +120,15 @@ def fuzz_pdf(data):
 
 def fuzz_certificate(data):
     """The trust and revocation verdicts: they promise an answer for any certificate a document carries."""
-    trustlist.check(data, FOLDER)
-    revocation.check(data, FOLDER, FOLDER)
+    trustlist.check_certificate(data, FOLDER)
+    revocation.check_certificate_revocation(data, FOLDER, FOLDER)
 
 
 def fuzz_trust_list(data):
     """A downloaded trusted list: refused unless authentic, without any other failure than the documented ones."""
     try:
-        root = trustlist._parse(data)
-        trustlist.verify(root, trustlist.PINNED_SIGNERS)
+        root = trustlist._parse_list_xml(data)
+        trustlist.verify_list_signature(root, trustlist.PINNED_SIGNERS)
     except (ValueError, KeyError, TypeError, AttributeError, trustlist.InvalidSignature, trustlist.UnsupportedAlgorithm,
             x509.InvalidVersion, etree.LxmlError):
         return
@@ -137,7 +137,7 @@ def fuzz_trust_list(data):
 
 def fuzz_revocation_list(data):
     """A downloaded revocation list: refused unless the authority signed it, and these inputs start from another key."""
-    if revocation._read(data, test_revocation().AUTHORITY, NOW) is not None:
+    if revocation._parse_usable_list(data, test_revocation().AUTHORITY, NOW) is not None:
         raise AssertionError("a list signed by someone else was accepted")
 
 

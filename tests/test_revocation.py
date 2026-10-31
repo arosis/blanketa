@@ -65,14 +65,14 @@ def crl(revoked=(), key=KEY, issuer=None, last=None, following=None, extensions=
 
 class Revocation(unittest.TestCase):
     def setUp(self):
-        revocation._memory.clear()
+        revocation._lists_in_memory.clear()
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.folder = Path(temporary.name)
         self.pages = {}
         self.authority = AUTHORITY
-        for patcher in (mock.patch.object(trustlist, "download", self.download),
-                        mock.patch.object(trustlist, "issuer", lambda *_: self.authority)):
+        for patcher in (mock.patch.object(trustlist, "download_file", self.download),
+                        mock.patch.object(trustlist, "issuing_authority", lambda *_: self.authority)):
             patcher.start()
             self.addCleanup(patcher.stop)
 
@@ -82,8 +82,8 @@ class Revocation(unittest.TestCase):
         return self.pages[url]
 
     def check(self, cert=None):
-        revocation._memory.clear()
-        return revocation.check(der(cert or certificate()), self.folder / "lists", self.folder / "crl")
+        revocation._lists_in_memory.clear()
+        return revocation.check_certificate_revocation(der(cert or certificate()), self.folder / "lists", self.folder / "crl")
 
     def test_certificate_not_on_the_list_is_good(self):
         self.pages[URL] = crl()
@@ -155,18 +155,18 @@ class Revocation(unittest.TestCase):
 
     def test_issuer_outside_the_lists_downloads_nothing(self):
         self.authority = None
-        with mock.patch.object(trustlist, "download", side_effect=AssertionError("must not download")):
+        with mock.patch.object(trustlist, "download_file", side_effect=AssertionError("must not download")):
             self.assertEqual(self.check()["status"], "unknown")
 
     def test_only_web_addresses_are_used(self):
-        with mock.patch.object(trustlist, "download", side_effect=AssertionError("must not download")):
+        with mock.patch.object(trustlist, "download_file", side_effect=AssertionError("must not download")):
             self.assertEqual(self.check(certificate(urls=("file:///etc/passwd", "ldap://x/y")))["status"], "unknown")
 
     def test_certificate_without_addresses_is_unknown(self):
         self.assertEqual(self.check(certificate(urls=()))["status"], "unknown")
 
     def test_damaged_certificate_gives_a_verdict(self):
-        self.assertEqual(revocation.check(b"\x30\x03abc", self.folder, self.folder)["status"], "unknown")
+        self.assertEqual(revocation.check_certificate_revocation(b"\x30\x03abc", self.folder, self.folder)["status"], "unknown")
 
     def test_no_network_says_it_cannot_tell(self):
         verdict = self.check()
@@ -189,15 +189,15 @@ class Revocation(unittest.TestCase):
 
     def test_list_that_cannot_be_stored_is_still_used(self):
         self.pages[URL] = crl([(77, NOW - timedelta(days=3), None)])
-        with mock.patch.object(trustlist, "store", side_effect=OSError("disk full")):
+        with mock.patch.object(trustlist, "store_atomically", side_effect=OSError("disk full")):
             self.assertEqual(self.check()["status"], "revoked")
 
     def test_dead_server_is_not_asked_again_for_the_next_signature(self):
         calls = []
-        with mock.patch.object(trustlist, "download", side_effect=lambda url: calls.append(url) or (_ for _ in ()).throw(OSError())):
-            revocation._memory.clear()
+        with mock.patch.object(trustlist, "download_file", side_effect=lambda url: calls.append(url) or (_ for _ in ()).throw(OSError())):
+            revocation._lists_in_memory.clear()
             for _ in range(3):
-                revocation.check(der(certificate()), self.folder, self.folder / "crl")
+                revocation.check_certificate_revocation(der(certificate()), self.folder, self.folder / "crl")
         self.assertEqual(calls, [URL, SECOND_URL])
 
 
