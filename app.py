@@ -34,6 +34,7 @@ import pdf_sign
 import zfo_sign
 import zfo_verify
 from zfoengine import api as engine
+from zfoengine import js602
 
 ROOT = Path(__file__).resolve().parent
 RESOURCES = Path(getattr(sys, "_MEIPASS", ROOT))
@@ -51,6 +52,7 @@ DAMAGED_PAGE = ("<!doctype html><meta charset=utf-8><title>Soubor nelze otevří
                 "<body style='font:14px system-ui,sans-serif;padding:24px'><h1 style='font-size:18px'>Soubor nelze otevřít</h1>"
                 "<p>Soubor může být poškozený nebo nejde o\u00a0formulář, který Blanketa umí přečíst. Může jít i\u00a0o\u00a0chybu Blankety; "
                 "pokud ho jiná aplikace otevře, dejte nám prosím vědět.</p>")
+SCRIPT_ACTIONS = ("form602btnclick", "form602onchange", "form602attchuploadstartaction")
 SESSIONS = {}
 CERTIFICATES = {}  # certificates of the signatures shown, by id; pages only ever name them
 IMPORTS = {}
@@ -299,10 +301,34 @@ def signer(identity_id, password=None):
 
 
 def script_binds(doc):
-    """Binds whose expressions are 602 JavaScript, which the engine cannot evaluate. Braces alone also quote XPath."""
-    is_script = lambda value: value.lstrip().startswith("{") and re.search(r"\bvar\s|\bGetDocument\s*\(", value)
-    return [bind.get("Id") for bind in doc.iter("{http://software602.cz/forms}bind")
-            if any(is_script(value) for value in bind.attrib.values())]
+    """Binds with 602 JavaScript that cannot run here, found by trying each on empty answers. Branches an empty form does
+    not reach stay untried: the form check reports those it met while the form was being filled."""
+    library = [element.text for element in doc.iter("{http://software602.cz/forms}script") if element.text]
+    interpreter = js602.Interpreter(library)
+    found = []
+    for bind in doc.iter("{http://software602.cz/forms}bind"):
+        for name, value in bind.attrib.items():
+            if not js602.is_script(value):
+                continue
+            if name not in ("calculate", "constraint"):
+                found.append(bind.get("Id"))
+                break
+            try:
+                js602.evaluate(interpreter, value, lambda expression: "", "", lambda *args: "")
+            except js602.Unsupported:
+                found.append(bind.get("Id"))
+                break
+            except js602.Exhausted:  # one runaway script is enough to know: a form may have thousands
+                return [*found, bind.get("Id")]
+            except js602.Thrown:  # empty answers can trip a script up, that says nothing about what it needs
+                continue
+    return found
+
+
+def script_actions(doc):
+    """How many buttons and fields carry scripts that never run here: they could reach the network, files and signing."""
+    return sum(1 for element in doc.iter() if isinstance(element.tag, str) for name in SCRIPT_ACTIONS
+               if element.get(name, "").lstrip().startswith("{"))
 
 
 def form_info(name):
@@ -317,7 +343,7 @@ def form_info(name):
     return {"title": get(summary, "title"), "subject": get(summary, "subject"), "author": get(summary, "author"),
             "keywords": get(summary, "keywords"), "comment": get(summary, "comment"), "code": get(summary, "formcode"),
             "form_id": get(params, "form-id") or get(summary, "form-id"), "created": get(params, "creationdate"),
-            "modified": modified, "version": get(params, "xmlcore-version"), "scripts": len(script_binds(fo))}
+            "modified": modified, "version": get(params, "xmlcore-version"), "scripts": len(script_binds(fo)), "actions": script_actions(fo)}
 
 
 def filled_form(session, key=None, cert=None):

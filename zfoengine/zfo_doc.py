@@ -37,7 +37,7 @@ log = logging.getLogger("zfo.zfo_doc")
 import base64
 
 from . import evaluate as ev
-from . import msg_types, tools
+from . import js602, msg_types, tools
 
 
 class ZFO_document:
@@ -48,6 +48,11 @@ class ZFO_document:
     prefixes map (dictionary of prefix -> uri)
     '''
     self.is_changed = False
+    # zfoengine: scripts of this form, see script_interpreter()
+    self.interpreter = None
+    self.script_problems = set()
+    self.runaway_scripts = 0
+    self.script_running = False
     self.prefix_map = prefix_map    
     self.content = parsed_content 
     self.root = parsed_content.getroot()
@@ -309,6 +314,13 @@ class ZFO_document:
     model = models[0]
     return model
   
+  def script_interpreter(self):
+    '''The interpreter of this form's scripts, with their library.'''
+    if self.interpreter is None:
+      library = [element.text for element in self.root.iter("{%s}script" % ns.FM_URI) if element.text]
+      self.interpreter = js602.Interpreter(library)
+    return self.interpreter
+
   def _get_computable_data_root(self):
     '''
     Returns computation data tree. If it was not created before, is created in this function.

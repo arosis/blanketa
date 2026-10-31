@@ -275,7 +275,8 @@ def check_form(document, msg_data=None):
         ok, comment = ev.eval_constraint(document, bind, None, node=node)
         if not ok:
           problems.append({"field": bind_id, "index": index, "kind": "constraint", "message": comment})
-  return [{"type": "check", "data": problems}]
+  # zfoengine: what the form's scripts could not do also limits what this check is worth
+  return [{"type": "check", "data": problems, "scripts": sorted(document.script_problems)}]
 
 def get_readonly_binds(document, msg_data=None):
   ro_b = document.get_readonly_binds()

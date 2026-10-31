@@ -24,6 +24,7 @@ Module with implementation of XPath extension used in ZFO by 602.
 '''
 import copy
 import datetime
+import functools
 import getpass
 import hashlib
 import logging
@@ -33,7 +34,7 @@ from functools import reduce
 
 import lxml.etree as etree
 
-from . import app_events, msg_types, ns, tags, tools
+from . import app_events, js602, msg_types, ns, tags, tools
 
 log = logging.getLogger("zfo.xpath_ext")
 
@@ -99,20 +100,26 @@ class ExtendedXpathEvaluator:
     nss = {"fm": ns.FM_URI}
     lst = self._doc.root.xpath("//fm:enum[@name='" + list_name + "']", namespaces = nss)[0]
     
-    data = context.context_node.xpath(data_xpath, 
-                                      namespaces = self._doc._get_used_ns_prefix(data_xpath))[0]
+    # zfoengine: a field not filled in yet, or not listed, has no such data instead of stopping the calculation
+    found = context.context_node.xpath(data_xpath, 
+                                       namespaces = self._doc._get_used_ns_prefix(data_xpath))
+    if not found:
+      return ""
+    data = found[0]
     
     if type(data) is etree._Element:
-      data = data.text
+      data = data.text or ""
     
     
-    items = lst.xpath("fm:list/fm:listitem[normalize-space(@value)='"+data+"']", namespaces = nss)
+    items = lst.xpath("fm:list/fm:listitem[normalize-space(@value)=$data]", namespaces = nss, data = data)
     if len(items) == 0:
-      items = lst.xpath("fm:list/fm:listitem[normalize-space(@itemtext)='"+data+"']", namespaces = nss)
+      items = lst.xpath("fm:list/fm:listitem[normalize-space(@itemtext)=$data]", namespaces = nss, data = data)
+    if len(items) == 0:
+      return ""
     item = items[0]
     
     if (attr.startswith("@")):
-      val = item.get(attr[1:])
+      val = item.get(attr[1:], "")
     else:
       val= item.xpath(attr, namespaces = nss)[0].text
     
@@ -667,3 +674,28 @@ class ExtendedXpathEvaluator:
     log.warning("ReadBinDataFileAndB64Encode not implemented")
     return ""
 
+
+
+# zfoengine: what a form's script may ask for through DataXpath, unlike an expression of the form itself. Everything else
+# reads the user's environment or acts on the application, and an expression can name it in a computed string, so the
+# refusal sits here and not in the text of the query.
+_READABLE_FROM_SCRIPTS = {
+  "TempNodeContextStringLength", "RCCheck", "GetListItemData", "DataXpath", "DataXPath", "If", "IsEmpty", "StrCat", "StrCmp",
+  "Round", "And", "Or", "Not", "CurrentDate", "CurrentTime", "CurrentTimeUTC", "FormID", "GetNumSigns", "GetDataStr", "GetHash",
+  "GetNumPages", "GetAttribute", "FormCreationDate", "Is_Changed", "IntAdd", "IntMul", "FormatNumb", "Switch", "GetCurrentDataXpath",
+  "PageNo", "SectionNo", "RowNo", "CellNo",
+}
+
+
+def _refused_in_scripts(name, method):
+  @functools.wraps(method)
+  def guarded(self, *args, **kwargs):
+    if self._doc.script_running:
+      raise js602.Unsupported(name)
+    return method(self, *args, **kwargs)
+  return guarded
+
+
+for _name, _method in list(vars(ExtendedXpathEvaluator).items()):
+  if callable(_method) and not _name.startswith("_") and _name not in _READABLE_FROM_SCRIPTS:
+    setattr(ExtendedXpathEvaluator, _name, _refused_in_scripts(_name, _method))

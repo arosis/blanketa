@@ -66,7 +66,7 @@ Software602 uvádí, že formulář lze opatřit časovým razítkem, ale způso
 - **Id vazby není název prvku.** Například pole s vazbou `o1_check_adresa_pre_dorucovani` zapisuje do `d:check_adresa_pre_dorucovani`. Spojení se hledá přes `nodeset`.
 - **Opakované sekce:** odpovídají opakujícím se prvkům instance. Ve vzhledu je obalují tabulky s třídou `602-repetition-table`.
 - **Kontrola (Zkontrolovat):** povinná pole (`required`) a `constraint` se vyhodnocují pro každý uzel zvlášť.
-- **Výpočty:** `calculate` je XPath. Výpočty psané v JavaScriptu 602 (bloky `s2a_vyplnene…` apod.) aplikace zatím nevyhodnocuje.
+- **Výpočty:** `calculate` a `constraint` jsou XPath, nebo blok JavaScriptu 602 ve složených závorkách, který předá výsledek funkcí `Result`. Bloky provádí `zfoengine/js602.py`, funkce sdílené formulářem jsou ve `form:script`. Oficiální popis tohoto jazyka se nepodařilo najít, chování vychází ze skutečných formulářů. Dva předpoklady: když skript zavolá `Result` víckrát, platí poslední hodnota; a když formulář definuje vlastní funkci `RegExp`, `new RegExp` dál znamená vestavěný konstruktor.
 
 ## 5. Vzhled (XSL-FO s rozšířeními 602)
 
