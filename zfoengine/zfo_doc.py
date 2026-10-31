@@ -52,6 +52,7 @@ class ZFO_document:
     self.interpreter = None
     self.script_problems = set()
     self.runaway_scripts = 0
+    self.script_running = False
     self.prefix_map = prefix_map    
     self.content = parsed_content 
     self.root = parsed_content.getroot()

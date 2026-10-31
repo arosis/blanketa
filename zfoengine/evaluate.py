@@ -32,7 +32,6 @@ import lxml.etree as etree
 from . import expr_quoting, js602, tools
 from .xpath_ext import StopEvalException
 
-
 MAX_RUNAWAY_SCRIPTS = 3  # a form whose scripts keep spending their whole budget would freeze the window with each change
 
 
@@ -77,6 +76,7 @@ def eval_script(zfo_doc, source, path=None, node=None):
   current = path or ""
   if not current and isinstance(node, etree._Element):
     current = node.getroottree().getpath(node)
+  zfo_doc.script_running = True
   try:
     return js602.evaluate(zfo_doc.script_interpreter(), source, ask, current, list_item)
   except js602.Exhausted:
@@ -87,6 +87,8 @@ def eval_script(zfo_doc, source, path=None, node=None):
   except js602.Thrown as e:
     log.info("Script stopped with its own error: %s", e)
     zfo_doc.script_problems.add("chyba ve skriptu formuláře")
+  finally:
+    zfo_doc.script_running = False
   return None
 
 
@@ -202,10 +204,11 @@ def eval_expression_node(zfo_doc, xpath_expr, data_node, nsmap):
     xpath_expr = _replace_string_length_call(xpath_expr)
                 
     tmp = tools.create_temp_elem(parent, data_node)
-    res = tmp.xpath(xpath_expr, namespaces= nsmap)
-    
-    tools.delete_temp_elem(parent, tmp)
-    return res
+    # zfoengine: an expression that fails must not leave the helper in data that get saved
+    try:
+      return tmp.xpath(xpath_expr, namespaces= nsmap)
+    finally:
+      tools.delete_temp_elem(parent, tmp)
   else:
     res = data_node.xpath(xpath_expr, namespaces= nsmap)        
     return res
@@ -239,10 +242,11 @@ def eval_expression_path(zfo_doc, xpath_expr, data_path):
                  
     tmp = tools.create_temp_elem(parent, elem)
     xpath_expr = _replace_string_length_call(xpath_expr)
-    res = tmp.xpath(xpath_expr, namespaces= nsmap)
-    
-    tools.delete_temp_elem(parent, tmp)
-    return res
+    # zfoengine: an expression that fails must not leave the helper in data that get saved
+    try:
+      return tmp.xpath(xpath_expr, namespaces= nsmap)
+    finally:
+      tools.delete_temp_elem(parent, tmp)
   else:
     res = elem.xpath(xpath_expr, namespaces= nsmap)        
     return res

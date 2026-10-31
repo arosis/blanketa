@@ -812,6 +812,9 @@ class _Budget:
     self.left -= steps
     if self.left < 0:
       raise Exhausted("kroky")
+  def spend_text(self, text):
+    '''Long texts are paid for by size: each copy takes memory and time that one step would not show.'''
+    self.spend(len(text) >> 8)
 
 
 def _callable(value):
@@ -839,20 +842,20 @@ class Interpreter:
     self.library_loaded = True
     for source in self.library:
       try:
-        self._run_program(source)
+        self._run_program(source, self.globals)
       except (Unsupported, Thrown, Exhausted, RecursionError):
         continue
 
-  def _run_program(self, source):
+  def _run_program(self, source, scope):
     definition = self.compiled.get(source)
     if definition is None:
       tokens = _tokens(source)
       definition = _Definition("", [], tokens, 0, len(tokens) - 1)
       _Compiler(self, definition).compile()
       self.compiled[source] = definition
-    self._hoist(definition, self.globals)
+    self._hoist(definition, scope)
     for statement in definition.body:
-      signal = statement(self.globals)
+      signal = statement(scope)
       if signal is not None:
         break
 
@@ -864,7 +867,7 @@ class Interpreter:
     self.budget.left = STEP_BUDGET
     self.globals.vars.update(host)
     try:
-      self._run_program(source)
+      self._run_program(source, _Scope(self.globals))  # what one field's script declares is not another's business
     except RecursionError as error:
       raise Exhausted("zanoření") from error
     except MemoryError as error:
@@ -1138,19 +1141,33 @@ class Interpreter:
       text = to_string(args[0] if args else UNDEFINED)
       if len(text) > MAX_STRING:
         raise Exhausted("text")
+      self.budget.spend_text(text)
       return _from_json(json.loads(text))
     except (ValueError, RecursionError) as error:
       raise Thrown(self.error("SyntaxError", "JSON")) from error
 
   def _json_text(self, args):
     try:
-      return json.dumps(_to_json(args[0] if args else UNDEFINED), ensure_ascii=False, separators=(",", ":"))
+      result = json.dumps(_to_json(args[0] if args else UNDEFINED), ensure_ascii=False, separators=(",", ":"))
+      self.budget.spend_text(result)
+      return result
     except (ValueError, RecursionError) as error:
       raise Thrown(self.error("TypeError", "JSON")) from error
 
   def _string_methods(self):
+    budget = self.budget
+
     def method(f):
-      return Native(lambda this, args: f(to_string(this), args))
+      def call(this, args):
+        text = to_string(this)
+        budget.spend_text(text)
+        result = f(text, args)
+        if type(result) is str:
+          budget.spend_text(result)
+        elif type(result) is Arr:
+          budget.spend(len(result.items))
+        return result
+      return Native(call)
 
     def substring(s, args):
       size = len(s)
@@ -1260,31 +1277,20 @@ class Interpreter:
     return found
 
   def _regex_split(self, text, regex):
-    parts, last, at = [], 0, 0
     if not text:
       return [] if regex.match_at(text, 0) else [""]
+    parts, last, at = [], 0, 0
     while at < len(text):
       match = regex.match_at(text, at)
-      if match is None:
+      if match is None or match[0] >= len(text):
         break
       begin, end, captures = match
-      if begin >= len(text):
-        break
-      if end == begin:
-        if begin == last:
-          at = begin + 1
-          match_empty = regex.match_at(text, at)
-          if match_empty is None:
-            break
-          begin, end, captures = match_empty
-          if begin >= len(text):
-            break
-          if end > begin and begin == last:
-            pass
+      if end == last:  # an empty match where the last piece ended separates nothing yet
+        at += 1
+        continue
       parts.append(text[last:begin])
       parts.extend(UNDEFINED if c is None else c for c in captures[1:])
-      last = end
-      at = end if end > begin else end + 1
+      last = at = end
       if len(parts) > MAX_ITEMS:
         raise Exhausted("pole")
     parts.append(text[last:])
@@ -1354,6 +1360,7 @@ class Interpreter:
       result = separator.join("" if item is None or item is UNDEFINED else to_string(item) for item in a.items)
       if len(result) > MAX_STRING:
         raise Exhausted("text")
+      self.budget.spend_text(result)
       return result
 
     def slice_(a, args):
@@ -1584,14 +1591,15 @@ _RESERVED = {"var", "let", "const", "function", "return", "if", "else", "for", "
              "instanceof", "null", "true", "false"}
 
 
-def _add(a, b, limit=MAX_STRING):
+def _add(a, b, budget):
   if type(a) is float and type(b) is float:
     return a + b
   a, b = to_primitive(a), to_primitive(b)
   if type(a) is str or type(b) is str:
     result = to_string(a) + to_string(b)
-    if len(result) > limit:
+    if len(result) > MAX_STRING:
       raise Exhausted("text")
+    budget.spend_text(result)
     return result
   return to_number(a) + to_number(b)
 
@@ -1631,7 +1639,7 @@ def _shift_left(a, b):
 
 
 _OPERATIONS = {
-  "+": _add, "-": _minus, "*": _times, "/": _divide, "%": _remainder,
+  "-": _minus, "*": _times, "/": _divide, "%": _remainder,
   "&": lambda a, b: float(to_int32(a) & to_int32(b)),
   "|": lambda a, b: float(to_int32(a) | to_int32(b)),
   "^": lambda a, b: float(to_int32(a) ^ to_int32(b)),
@@ -1659,6 +1667,8 @@ class _Compiler:
     self.var_names = set()
     self.functions = []
     self.nesting = 0
+    budget = interpreter.budget
+    self.operations = {**_OPERATIONS, "+": lambda a, b: _add(a, b, budget)}
 
   # -- reading --
 
@@ -2106,59 +2116,25 @@ class _Compiler:
 
   def assignment(self, allow_in=True):
     self.deeper()
-    start = self.pos
     left = self.conditional(allow_in)
     token = self.tokens[self.pos]
     if token[0] != "punct" or token[1] not in _ASSIGN or self.pos >= self.end:
       self.nesting -= 1
       return left
-    target = self._target(start, self.pos)
+    target = self._target(left)
     self.pos += 1
     value = self.assignment(allow_in)
     self.nesting -= 1
     return target(token[1], value)
 
-  def _target(self, start, end):
-    '''Compiles the tokens of an assignment's left side anew, for writing.'''
-    saved = self.pos
-    self.pos = start
-    limit = self.end
-    self.end = end
-    token = self.tokens[start]
-    if end - start == 1 and token[0] == "name" and token[1] not in _RESERVED:
-      self.pos, self.end = saved, limit
-      return self._name_target(token[1])
-    # the last member decides: everything before it is read, then that member is written
-    base, key = self._member_chain()
-    if self.pos != end or base is None:
-      self.fail()
-    self.pos, self.end = saved, limit
-    return self._member_target(base, key)
-
-  def _member_chain(self):
-    '''Reads a[b].c and gives (a[b], key of c) without reading c.'''
-    value = self.primary()
-    base, key = None, None
-    while self.pos < self.end:
-      if self.accept("."):
-        next_key = self._property_name()
-        next_key = _constant(next_key)
-      elif self.accept("["):
-        next_key = self.expression()
-        self.expect("]")
-      elif self.at("("):
-        args = self.arguments()
-        value = self._call_of(value, base, key, args)
-        base, key = None, None
-        continue
-      else:
-        break
-      if base is not None:
-        value = self._read(base, key)
-      elif key is not None:
-        value = self._read(value, key)
-      base, key = value, next_key
-    return base, key
+  def _target(self, left):
+    '''What an assignment writes to: the left side was compiled once, as a reading of the same place.'''
+    if isinstance(left, _Variable):
+      return self._name_target(left.js_name)
+    if isinstance(left, _Member):
+      return self._member_target(left.base, left.key)
+    self.fail()
+    return None
 
   def _property_name(self):
     token = self.tokens[self.pos]
@@ -2168,7 +2144,7 @@ class _Compiler:
     return token[1]
 
   def _name_target(self, name):
-    operations = _OPERATIONS
+    operations = self.operations
     def build(operator, value):
       if operator == "=":
         def assign(scope):
@@ -2192,7 +2168,7 @@ class _Compiler:
           target, name = base(scope), key(scope)
           return put(target, name, value(scope))
         return assign
-      operation = _OPERATIONS[operator[:-1]]
+      operation = self.operations[operator[:-1]]
       def update(scope):
         target, name = base(scope), key(scope)
         return put(target, name, operation(get(target, name), value(scope)))
@@ -2260,7 +2236,7 @@ class _Compiler:
           return isinstance(value, (Obj, Arr, Date, Regex, Function, Native))
         raise Unsupported("instanceof")
       return instance
-    operation = _OPERATIONS[operator]
+    operation = self.operations[operator]
     return lambda scope: operation(left(scope), right(scope))
 
   def unary(self):
@@ -2282,9 +2258,7 @@ class _Compiler:
       return lambda scope: float(~to_int32(inner(scope)))
     if token[0] == "punct" and value in ("++", "--"):
       self.pos += 1
-      start = self.pos
-      self.unary()
-      return self._increment(start, self.pos, 1.0 if value == "++" else -1.0, prefix=True)
+      return self._increment(self.unary(), 1.0 if value == "++" else -1.0, prefix=True)
     if token[0] == "name" and value == "typeof":
       self.pos += 1
       next_token = self.tokens[self.pos]
@@ -2310,14 +2284,10 @@ class _Compiler:
       return void
     if token[0] == "name" and value == "delete":
       self.pos += 1
-      saved, limit = self.pos, self.end
-      self.unary()
-      end = self.pos
-      self.pos, self.end = saved, end
-      base, key = self._member_chain()
-      self.pos, self.end = end, limit
-      if base is None:
+      inner = self.unary()
+      if not isinstance(inner, _Member):
         self.fail()
+      base, key = inner.base, inner.key
       def delete(scope):
         target, name = base(scope), to_string(key(scope))
         if isinstance(target, Host):
@@ -2329,30 +2299,24 @@ class _Compiler:
     return self.postfix()
 
   def postfix(self):
-    start = self.pos
     value = self.member()
     token = self.tokens[self.pos]
     if token[0] == "punct" and token[1] in ("++", "--") and not token[2] and self.pos < self.end:
-      end = self.pos
       self.pos += 1
-      return self._increment(start, end, 1.0 if token[1] == "++" else -1.0, prefix=False)
+      return self._increment(value, 1.0 if token[1] == "++" else -1.0, prefix=False)
     return value
 
-  def _increment(self, start, end, step, prefix):
-    saved, limit = self.pos, self.end
-    token = self.tokens[start]
-    if end - start == 1 and token[0] == "name" and token[1] not in _RESERVED:
-      name = token[1]
+  def _increment(self, place, step, prefix):
+    if isinstance(place, _Variable):
+      name = place.js_name
       def bump(scope):
         old = to_number(_load(scope, name))
         _store(scope, name, old + step)
         return old + step if prefix else old
       return bump
-    self.pos, self.end = start, end
-    base, key = self._member_chain()
-    self.pos, self.end = saved, limit
-    if base is None:
+    if not isinstance(place, _Member):
       self.fail()
+    base, key = place.base, place.key
     get, put = self.it.get, self.it.put
     def bump_member(scope):
       target, name = base(scope), key(scope)
@@ -2372,8 +2336,7 @@ class _Compiler:
     return args
 
   def _read(self, base, key):
-    get = self.it.get
-    return lambda scope: get(base(scope), key(scope))
+    return _Member(self.it.get, base, key)
 
   def _call_of(self, value, base, key, args):
     '''A call of value; when it was just read off an object (base, key), that object becomes its this.'''
@@ -2381,7 +2344,6 @@ class _Compiler:
     interpreter = self.it
     if base is not None:
       get = self.it.get
-      label = None
       def method_call(scope):
         tick()
         this = base(scope)
@@ -2550,6 +2512,15 @@ def _constant(value):
   return lambda scope: value
 
 
+class _Member:
+  '''Reading a[b]. Stays inspectable: an assignment or ++ then writes to the same place.'''
+  __slots__ = ("get", "base", "key")
+  def __init__(self, get, base, key):
+    self.get, self.base, self.key = get, base, key
+  def __call__(self, scope):
+    return self.get(self.base(scope), self.key(scope))
+
+
 class _Variable:
   __slots__ = ("js_name",)
   def __init__(self, name):
@@ -2595,7 +2566,8 @@ def _store(scope, name, value):
 
 # ---- what a form's scripts see of 602 ----
 
-_SCRIPT_MARK = re.compile(r'\bvar\s|\bfunction\b|\bGetDocument\s*\(|\bResult\s*\(|\breturn\b')
+# Not after : or /, that is an element of quoted XPath such as {../d:function}.
+_SCRIPT_MARK = re.compile(r'(?<![:/])\b(?:var\s|function\b|GetDocument\s*\(|Result\s*\()')
 
 
 def is_script(value):

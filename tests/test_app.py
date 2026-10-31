@@ -38,10 +38,15 @@ os.environ["ZFO_OFFLINE"] = "1"  # tests never download trusted lists
 import app  # noqa: E402
 import barcode  # noqa: E402
 import pdf_sign  # noqa: E402
+import zfo_verify  # noqa: E402
 from zfoengine import api as engine  # noqa: E402
 from zfoengine import js602  # noqa: E402
 
 NS = {"d": "http://software602.cz/sample"}
+FORM_WITH_ATTRIBUTE = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#" Id="_1"><dsig:Object Id="_2" MimeType="text/xml">
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:fm="http://software602.cz/forms" xmlns:d="http://software602.cz/sample">
+<fm:formparams><fm:model><fm:instance><d:root><d:e a=""/></d:root></fm:instance><fm:bind Id="k" nodeset="/d:root"><fm:bind Id="e" nodeset="d:e">
+<fm:bind Id="a" nodeset="@a" calculate='%s'/></fm:bind></fm:bind></fm:model></fm:formparams></fo:root></dsig:Object></dsig:Signature>"""
 
 ITF_BY_PATTERN = {pattern: digit for digit, pattern in barcode.ITF_DIGITS.items()}
 
@@ -462,6 +467,29 @@ class FormScripts(unittest.TestCase):
         self.assertEqual(self.value("odeslano"), "puvodni")
         self.assertTrue(self.problems()["scripts"])
 
+    def test_failing_expression_leaves_no_helper_in_the_data(self):
+        form = FORM_WITH_ATTRIBUTE % '{ Result(GetDocument().GetElement().DataXpath("(((")); }'
+        doc = engine.open_document(form.encode())
+        engine.handle(doc, "recalc_form", "")
+        self.assertNotIn(b"tmp", etree.tostring(doc._get_data_root().getroot()))
+        self.assertTrue(doc.script_problems)
+
+    def test_scripts_get_nothing_of_the_application_through_xpath(self):
+        for call in ('GetEnvVariable(\\"HOME\\")', "CurrentUserName()", 'SendAppEvent(\\"saveformsign\\")', 'SaveAs(\\"x\\")',
+                     'SetAttribute(\\"a\\", \\"b\\")', 'GetListItemData(\\"x\\", concat(\\"Get\\", \\"EnvVariable()\\"), \\"@a\\")'):
+            with self.subTest(call):
+                form = FORM_WITH_ATTRIBUTE % ('{ Result(GetDocument().GetElement().DataXpath("%s")); }' % call)
+                doc = engine.open_document(form.encode())
+                engine.handle(doc, "recalc_form", "")
+                self.assertEqual(doc._get_data_root().getroot()[0].get("a"), "", call)
+                self.assertFalse(doc.script_running)
+
+    def test_xpath_calculation_may_still_ask_for_them(self):
+        doc = engine.open_document((FORM_WITH_ATTRIBUTE % "CurrentUserName()").encode())
+        engine.handle(doc, "recalc_form", "")
+        self.assertNotEqual(doc._get_data_root().getroot()[0].get("a"), None)
+        self.assertFalse(doc.script_problems)
+
     def test_form_description_reports_what_does_not_run(self):
         fo = etree.fromstring(zipfile.ZipFile(ROOT / "samples/skripty/vypocty.zfo").read("form.fo"))
         self.assertEqual(app.script_binds(fo), ["odeslano"])
@@ -479,10 +507,19 @@ class FormScripts(unittest.TestCase):
         self.assertEqual(doc.script_problems, set())
 
     def test_saved_form_keeps_earlier_layers_untouched_by_scripts(self):
-        before = zipfile.ZipFile(ROOT / "samples/cuzk/form.zfo").read("form.fo")
-        doc = engine.open_document(before)
-        engine.handle(doc, "recalc_form", "")
-        self.assertEqual(etree.tostring(engine.open_document(before).root), etree.tostring(doc.root))
+        fo = zipfile.ZipFile(ROOT / "samples/cuzk/form.zfo").read("form.fo")
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "form.zfo"
+            with zipfile.ZipFile(path, "w") as archive:
+                archive.writestr("form.fo", fo)
+            app.FORMS[path.stem] = path
+            session = {"name": path.stem, "doc": engine.open_document(fo)}
+            engine.handle(session["doc"], "recalc_form", "")
+            saved = etree.fromstring(app.filled_form(session), etree.XMLParser(huge_tree=True))
+            layer = etree.tostring(app.publisher_layer(saved).find("{http://www.w3.org/2000/09/xmldsig#}SignatureValue"))
+            original = etree.fromstring(fo, etree.XMLParser(huge_tree=True))
+            self.assertEqual(layer, etree.tostring(app.publisher_layer(original).find("{http://www.w3.org/2000/09/xmldsig#}SignatureValue")))
+            self.assertEqual(zfo_verify.describe(saved)[0]["intact"], True)
 
 
 class Interpreter(unittest.TestCase):
@@ -516,6 +553,29 @@ class Interpreter(unittest.TestCase):
             with self.subTest(source), self.assertRaises((js602.Exhausted, js602.Thrown)):
                 self.run_script("{" + source + "}")
 
+    def test_deep_assignments_compile_at_once(self):
+        for chain in ("a[" * 60 + "0" + "]=0" * 60, "++a[" * 60 + "0" + "]" * 60, "a[" * 60 + "0" + "]++" * 60, "delete a[" * 50 + "0" + "]" * 50):
+            with self.subTest(chain[:12]):
+                started = time.monotonic()
+                try:
+                    self.run_script("{ var a = []; " + chain + "; }")
+                except (js602.Unsupported, js602.Thrown, js602.Exhausted):
+                    pass
+                self.assertLess(time.monotonic() - started, 5)
+
+    def test_big_texts_are_paid_for_by_size(self):
+        for source in ('var s = "x".repeat(3000000), b = []; while (true) b.push(s + "y");',
+                       'var s = "x".repeat(3000000); while (true) s.toUpperCase();',
+                       'var s = "x".repeat(3000000); while (true) s.indexOf("q");',
+                       'var s = "x".repeat(3000000); var a = [s]; while (true) a.join();'):
+            with self.subTest(source[-25:]), self.assertRaises(js602.Exhausted):
+                self.run_script("{" + source + "}")
+
+    def test_one_scripts_variables_do_not_reach_another(self):
+        interpreter = js602.Interpreter()
+        js602.evaluate(interpreter, '{ var a = "zustava"; }', lambda expression: "", "")
+        self.assertEqual(js602.evaluate(interpreter, '{ var a; Result(a + ""); }', lambda expression: "", ""), "undefined")
+
     def test_unreadable_scripts_are_unsupported(self):
         for source in ("{ var }", "{ if ( }", "{ /(/.test('') }", "{ 'abc }", "{" * 500, "{ a" + "[0" * 500, "{" + "(" * 500, "{ /" + "(" * 200 + "/ }", "\x00", "{ @ }"):
             with self.subTest(source[:20]), self.assertRaises(js602.Unsupported):
@@ -527,7 +587,7 @@ class Interpreter(unittest.TestCase):
     def test_is_script_tells_xpath_from_javascript(self):
         for value in ("{ var a = 1; }", "  { Result(1); }", "{GetDocument()}", "{\nfunction f() {}\n}"):
             self.assertTrue(js602.is_script(value), value)
-        for value in ("{../d:a}", "../d:a + 1", 'If(DataXpath({../d:a}), 1, 2)', "", "{Result}"):
+        for value in ("{../d:a}", "../d:a + 1", 'If(DataXpath({../d:a}), 1, 2)', "", "{Result}", "{../d:function}", "{d:var x}", "{../d:return}"):
             self.assertFalse(js602.is_script(value), value)
 
 
@@ -607,7 +667,8 @@ class InterpreterAgainstNode(unittest.TestCase):
         for case, wanted in zip(cases, expected, strict=True):
             box = []
             try:
-                interpreter.run(f"__keep(({case}));", {"__keep": js602.Native(lambda this, args: box.append(args[0]))})
+                keep = js602.Native(lambda this, args, kept=box: kept.append(args[0]))
+                interpreter.run(f"__keep(({case}));", {"__keep": keep})
                 got = shown(box[0])
             except js602.Thrown as error:
                 got = "!" + js602.to_string(error.value.props["name"])
