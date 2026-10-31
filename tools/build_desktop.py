@@ -88,7 +88,8 @@ def package_linux():
         shutil.copy(ROOT / f"packaging/linux/{script}", root / f"DEBIAN/{script}")
         (root / f"DEBIAN/{script}").chmod(0o755)
     deb = DIST / f"blanketa_{VERSION}_{arch}.deb"
-    subprocess.run(["dpkg-deb", "--root-owner-group", "--build", str(root), str(deb)], check=True)
+    level = os.environ.get("DEB_COMPRESSION_LEVEL")
+    subprocess.run(["dpkg-deb", "--root-owner-group", *([f"-z{level}"] if level else []), "--build", str(root), str(deb)], check=True)
     print("built", deb)
 
 
