@@ -13,6 +13,7 @@ IS_WINDOWS = sys.platform == "win32"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 SERVER_START_ATTEMPTS = 300
 MAX_RECENT_FILES = 10
+OPEN_DIALOG_FILE_TYPES = ("Formuláře 602XML a PDF (*.zfo;*.fo;*.pdf)", "Všechny soubory (*.*)")
 
 
 def server_command(args):
@@ -160,7 +161,7 @@ class DesktopApp:
 
     def open_dialog(self, window):
         chosen = window.create_file_dialog(self.webview.FileDialog.OPEN, allow_multiple=True,
-                                           file_types=("Formuláře ZFO, FO a PDF (*.zfo;*.fo;*.pdf)", "Všechny soubory (*.*)"))
+                                           file_types=OPEN_DIALOG_FILE_TYPES)
         for path in chosen or []:
             self.open_window(Path(path))
 

@@ -3,6 +3,7 @@ import hashlib
 import io
 import sys
 import zipfile
+from pathlib import Path
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -23,7 +24,7 @@ def is_zip_form(path):
 
 
 def read_form_fo(path):
-    data = open(path, "rb").read()
+    data = Path(path).read_bytes()
     if data.startswith(ZIP_MAGIC):
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
             return archive.read("form.fo")

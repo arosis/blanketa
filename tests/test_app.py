@@ -39,6 +39,7 @@ os.environ["ZFO_OFFLINE"] = "1"  # tests never download trusted lists
 
 import app  # noqa: E402
 import barcode  # noqa: E402
+import desktop  # noqa: E402
 import pdf_sign  # noqa: E402
 import zfo_verify  # noqa: E402
 from zfoengine import api as engine  # noqa: E402
@@ -127,7 +128,7 @@ class PlainFoForms(unittest.TestCase):
         self.zfo = ROOT / "samples/cuzk/form.zfo"
         self.path = self.folder / "form.fo"
         self.path.write_bytes(zipfile.ZipFile(self.zfo).read("form.fo"))
-        for patcher in (mock.patch.dict(app.FORMS, {"plain": self.path, "zipped": self.zfo}),
+        for patcher in (mock.patch.dict(app.FORMS, {"plain": self.path}),
                         mock.patch.object(app, "SINGLE_FILE", True)):
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -162,7 +163,15 @@ class PlainFoForms(unittest.TestCase):
         self.assertEqual(result["saved"], str(self.path))
         self.assertTrue(self.path.read_bytes().startswith(b"<?xml"))
         self.assertTrue(all(signature["intact"] for signature in result["signatures"]))
-        self.assertTrue(app.render_zfo_page("plain"))
+
+    def test_filled_value_survives_saving_and_opening_again(self):
+        self.path.write_bytes(zipfile.ZipFile(ROOT / "samples/dva-ucastnici/form.zfo").read("form.fo"))
+        session = self.open_session()
+        engine.handle(session["doc"], "store_val", {"field": "o1_prijmeni", "value": "Nováková", "input_id": "o1_prijmeni",
+                                                    "repe": "table---opak1-rep-0"})
+        app.save_zfo(session)
+        reopened = engine.data_element(self.open_session()["doc"])
+        self.assertEqual(reopened.xpath("//d:o1_prijmeni", namespaces=NS)[0].text, "Nováková")
 
     def test_signing_writes_a_plain_signed_copy_beside_the_form(self):
         session = self.open_session()
@@ -193,6 +202,10 @@ class PlainFoForms(unittest.TestCase):
         self.assertFalse(zipfile.is_zipfile(xml_named_zfo))
 
 
+# Copied from webview.util.parse_file_type: pywebview raises ValueError on anything else, and the tests run without it.
+PYWEBVIEW_FILE_TYPE_PATTERN = r"^([\w ]+)\((\*(?:\.(?:\w+|\*))*(?:;\*(?:\.(?:\w+|\*))*)*)\)$"
+
+
 class FileAssociations(unittest.TestCase):
     FO_MIME_TYPE = "application/vnd.software602.filler.form+xml"
 
@@ -216,7 +229,9 @@ class FileAssociations(unittest.TestCase):
             self.assertIn('<glob pattern="*.fo" weight="60"/>', (ROOT / "packaging/linux" / name).read_text(encoding="utf-8"), name)
 
     def test_file_dialogs_offer_the_extension(self):
-        self.assertIn("*.fo", (ROOT / "desktop.py").read_text(encoding="utf-8"))
+        self.assertTrue(any("*.fo" in file_type for file_type in desktop.OPEN_DIALOG_FILE_TYPES))
+        for file_type in desktop.OPEN_DIALOG_FILE_TYPES:
+            self.assertRegex(file_type, PYWEBVIEW_FILE_TYPE_PATTERN)
         self.assertIn('UTType(filenameExtension: "fo")', (ROOT / "macapp/main.swift").read_text(encoding="utf-8"))
 
 

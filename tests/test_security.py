@@ -32,6 +32,7 @@ import zfo_verify  # noqa: E402
 DS = zfo_verify.DS
 FM = "http://software602.cz/forms"
 SIGNED = ROOT / "samples/mac-vyplneny/form.zfo"
+OUTSIDE_FILE_TEXT = "OBSAH-CIZIHO-SOUBORU"
 
 
 def form_root(path):
@@ -216,14 +217,18 @@ class LocalServer(unittest.TestCase):
 
     def test_external_entity_is_not_read_into_the_page(self):
         with tempfile.TemporaryDirectory() as folder:
-            secret = Path(folder) / "secret.txt"
-            secret.write_text("TAJNY-OBSAH-SOUBORU", encoding="utf-8")
+            outside_file = Path(folder) / "outside.txt"
+            outside_file.write_text(OUTSIDE_FILE_TEXT, encoding="utf-8")
             original = zipfile.ZipFile(ROOT / "samples/cuzk/form.zfo").read("form.fo").decode("utf-8")
             declaration, body = original.split("?>", 1)
-            hostile = f'{declaration}?><!DOCTYPE x [<!ENTITY e SYSTEM "{secret.as_uri()}">]>{body}'
-            hostile = hostile.replace("</dsig:Signature>", "&e;</dsig:Signature>", 1)
-            _, page = self.serve_file(hostile.encode("utf-8"))
-        self.assertNotIn(b"TAJNY-OBSAH-SOUBORU", page)
+            hostile = f'{declaration}?><!DOCTYPE x [<!ENTITY e SYSTEM "{outside_file.as_uri()}">]>{body}'
+            hostile = hostile.replace("</dsig:Signature>", "&e;</dsig:Signature>", 1).encode("utf-8")
+            status, _ = self.serve_file(hostile)
+            self.assertEqual(status, 422)
+            with self.assertRaises(etree.XMLSyntaxError):
+                app.parse_fo(hostile)
+            with self.assertRaises(etree.XMLSyntaxError):
+                zfo_verify.load_form_root(app.FORMS["hostile"])
 
     def test_entity_bomb_is_refused(self):
         entities = '<!ENTITY a0 "xxxxxxxxxx">' + "".join(f'<!ENTITY a{i} "{f"&a{i - 1};" * 10}">' for i in range(1, 10))
