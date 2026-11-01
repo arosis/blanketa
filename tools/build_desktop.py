@@ -90,7 +90,7 @@ def package_linux():
         (root / f"DEBIAN/{script}").chmod(0o755)
     deb = DIST / f"blanketa_{VERSION}_{arch}.deb"
     level = os.environ.get("DEB_COMPRESSION_LEVEL")
-    # xz, because dpkg before 1.21.18 cannot read zstd and would never reach the check of Depends that names the reason.
+    # xz, because dpkg on Debian 11 cannot read zstd and would never reach the check of Depends that names the reason.
     subprocess.run(["dpkg-deb", "--root-owner-group", "-Zxz", *([f"-z{level}"] if level else []), "--build", str(root), str(deb)], check=True)
     print("built", deb)
 

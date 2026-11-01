@@ -3,7 +3,7 @@ Version: @VERSION@
 Architecture: @ARCH@
 Maintainer: Richard Winkler Bejr <rivel.arosis@gmail.com>
 Installed-Size: @SIZE@
-Depends: libc6 (>= 2.35), libstdc++6 (>= 12), libegl1, libgl1, libwayland-cursor0, libwayland-egl1, libwayland-server0, libpulse0,libxcb-cursor0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-randr0, libxcb-render-util0, libxcb-shape0, libxcb-xinerama0, libxcb-xkb1, libxkbcommon-x11-0, libnss3, libasound2t64 | libasound2, libxfixes3, libsnappy1v5, libopus0, libminizip1t64 | libminizip1, xdg-utils
+Depends: libc6 (>= 2.35), libstdc++6 (>= 12), libegl1, libgl1, libwayland-cursor0, libwayland-egl1, libwayland-server0, libpulse0, libxcb-cursor0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-randr0, libxcb-render-util0, libxcb-shape0, libxcb-xinerama0, libxcb-xkb1, libxkbcommon-x11-0, libnss3, libasound2t64 | libasound2, libxfixes3, libsnappy1v5, libopus0, libminizip1t64 | libminizip1, xdg-utils
 Section: utils
 Priority: optional
 Homepage: https://github.com/arosis/blanketa
