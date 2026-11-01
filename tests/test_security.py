@@ -15,6 +15,7 @@ import unittest
 import zipfile
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -28,10 +29,21 @@ import app  # noqa: E402
 import certstore  # noqa: E402
 import desktop  # noqa: E402
 import zfo_verify  # noqa: E402
+from zfoengine import api as engine  # noqa: E402
 
 DS = zfo_verify.DS
 FM = "http://software602.cz/forms"
 SIGNED = ROOT / "samples/mac-vyplneny/form.zfo"
+
+
+XSL_STYLESHEET = '<xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" xmlns:exsl="http://exslt.org/common" ' \
+                 'extension-element-prefixes="exsl" version="1.0"><xsl:output method="text"/>%s</xsl:stylesheet>'
+
+FORM_WITH_CALCULATION = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#" Id="_1"><dsig:Object Id="_2" MimeType="text/xml">
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:fm="http://software602.cz/forms" xmlns:d="http://software602.cz/sample">
+<fm:formparams><fm:template name="sablona">%s</fm:template><fm:model><fm:instance><d:root><d:e a="puvodni"/></d:root></fm:instance>
+<fm:bind Id="k" nodeset="/d:root"><fm:bind Id="e" nodeset="d:e"><fm:bind Id="a" nodeset="@a" calculate='%s'/></fm:bind></fm:bind>
+</fm:model></fm:formparams></fo:root></dsig:Object></dsig:Signature>"""
 
 
 def form_root(path):
@@ -66,6 +78,85 @@ class PageInjection(unittest.TestCase):
         self.assertNotIn("window.pwned", html)
         self.assertNotIn('"</style>', html)
         self.assertIn('font-family: "Good Font"', html)
+
+
+class FormExpressions(unittest.TestCase):
+    """What an XPath expression written in a form can reach while the form is recalculated."""
+
+    def recalculated_field(self, calculation, template="<a/>"):
+        doc = engine.open_document((FORM_WITH_CALCULATION % (template, calculation)).encode())
+        doc.opened_from_path = "/Users/nekdo/Dokumenty/formular.zfo"
+        engine.handle(doc, "recalc_form", "")
+        return doc._get_data_root().getroot()[0]
+
+    def test_nothing_of_the_computer_gets_into_the_data(self):
+        for call in ("GetEnvVariable(HOME)", "CurrentUserName()", "CurrentFileName()"):
+            with self.subTest(call):
+                self.assertEqual(self.recalculated_field(f'"{call}"').get("a"), "")
+
+    def test_calculation_cannot_set_other_attributes_of_the_data(self):
+        self.assertIsNone(self.recalculated_field('"SetAttribute(uniklo, ano)"').get("uniklo"))
+
+    def test_calculation_cannot_save_the_form(self):
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / "ulozeno.zfo"
+            for call in ("Save", "SaveSigned", "SaveAs", "SaveAsSigned"):
+                with self.subTest(call):
+                    with mock.patch("zfoengine.zfo_doc.ZFO_document.save_to_file") as save_to_file:
+                        self.recalculated_field(f'"{call}({target})"')
+                    save_to_file.assert_not_called()
+
+    def test_calculation_cannot_send_an_application_event(self):
+        self.assertEqual(self.recalculated_field('"SendAppEvent(saveformsign)"').get("a"), "")
+
+    def test_button_can_still_send_an_application_event(self):
+        doc = engine.open_document((FORM_WITH_CALCULATION % ("<a/>", "1")).encode())
+        engine.handle(doc, "recalc_form", "")
+        self.assertEqual(doc.perform_click_action("SendAppEvent(checkdata)")[0].tag, "checkdata")
+        self.assertFalse(doc.user_action_running)
+
+    def test_failed_button_does_not_open_the_way_for_calculations(self):
+        doc = engine.open_document((FORM_WITH_CALCULATION % ("<a/>", "1")).encode())
+        with self.assertRaises(ValueError):
+            doc.perform_click_action("RCCheck(neni-cislo)")
+        self.assertFalse(doc.user_action_running)
+
+    def test_form_template_cannot_read_a_file(self):
+        with tempfile.TemporaryDirectory() as folder:
+            secret = Path(folder) / "tajne.xml"
+            secret.write_text("<x>TAJNE</x>")
+            template = XSL_STYLESHEET % f'<xsl:template match="/"><xsl:value-of select="document(&apos;{secret.as_uri()}&apos;)"/></xsl:template>'
+            field = self.recalculated_field('"DataTransform(sablona, /d:root)"', template)
+        self.assertNotIn("TAJNE", field.get("a"))
+
+    def test_form_template_cannot_write_a_file(self):
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / "zapsano.txt"
+            template = XSL_STYLESHEET % f'<xsl:template match="/"><exsl:document href="{target}" method="text">X</exsl:document></xsl:template>'
+            self.recalculated_field('"DataTransform(sablona, /d:root)"', template)
+            self.assertFalse(target.exists())
+
+    def test_form_template_cannot_import_a_file(self):
+        with tempfile.TemporaryDirectory() as folder:
+            imported = Path(folder) / "import.xsl"
+            imported.write_text(XSL_STYLESHEET % '<xsl:template match="/">TAJNE</xsl:template>')
+            template = f'<xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0"><xsl:import href="{imported.as_uri()}"/></xsl:stylesheet>'
+            field = self.recalculated_field('"DataTransform(sablona, /d:root)"', template)
+        self.assertNotIn("TAJNE", field.get("a"))
+
+    def test_template_working_only_with_the_form_data_still_transforms(self):
+        template = XSL_STYLESHEET % '<xsl:template match="/"><xsl:value-of select="count(//*)"/></xsl:template>'
+        self.assertNotIn(self.recalculated_field('"DataTransform(sablona, /d:root)"', template).get("a"), ("", "puvodni"))
+
+    def test_public_templates_transform_as_without_the_limit(self):
+        fo = zipfile.ZipFile(ROOT / "samples/cssz-onz/form.zfo").read("form.fo")
+        doc = engine.open_document(fo)
+        engine.handle(doc, "recalc_form", "")
+        data = doc._get_data_root().getroot()
+        for name in ("ico", "nvs", "rc2birthdate_uprav", "vs"):
+            with self.subTest(name):
+                unlimited = str(etree.XSLT(doc.get_template_text(name))(data))
+                self.assertEqual(data.xpath(f"DataTransform('{name}', '.')"), unlimited)
 
 
 class SignatureWrapping(unittest.TestCase):
