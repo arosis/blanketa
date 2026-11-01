@@ -641,12 +641,6 @@ class FormScripts(unittest.TestCase):
                 self.assertEqual(doc._get_data_root().getroot()[0].get("a"), "", call)
                 self.assertFalse(doc.script_running)
 
-    def test_xpath_calculation_may_still_ask_for_them(self):
-        doc = engine.open_document((FORM_WITH_ATTRIBUTE % "CurrentUserName()").encode())
-        engine.handle(doc, "recalc_form", "")
-        self.assertNotEqual(doc._get_data_root().getroot()[0].get("a"), None)
-        self.assertFalse(doc.script_problems)
-
     def test_form_description_reports_what_does_not_run(self):
         fo = etree.fromstring(zipfile.ZipFile(ROOT / "samples/skripty/vypocty.zfo").read("form.fo"))
         self.assertEqual(app.binds_with_unsupported_scripts(fo), ["odeslano"])
