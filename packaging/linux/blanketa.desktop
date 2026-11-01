@@ -7,4 +7,4 @@ Exec=blanketa %F
 Icon=blanketa
 Terminal=false
 Categories=Office;Viewer;
-MimeType=application/vnd.software602.filler.form-xml-zip;application/pdf;
+MimeType=application/vnd.software602.filler.form-xml-zip;application/vnd.software602.filler.form+xml;application/pdf;

@@ -19,7 +19,9 @@ Veřejné zdroje:
 | `summary/summary.xml` | popis pro správce souborů: `summary/@title`, `@author` aj. |
 | `thumbnails/…` | náhledy (nepovinné) |
 
-Samostatný soubor `.fo` je totéž XML bez ZIPu.
+Samostatný soubor `.fo` je totéž XML bez ZIPu a podpisy jsou v něm stejné. Blanketa pozná obal podle obsahu souboru a ukládá ve stejné podobě, v jaké formulář otevřela. Soubor `.fo` nemá `summary.xml` ani čas uložení v archivu, proto panel ukazuje čas změny souboru.
+
+V Linuxu má `*.fo` v souboru MIME vyšší váhu (60) než výchozích 50, protože `shared-mime-info` stejnou příponu přiřazuje typu XSL-FO `text/x-xslfo`.
 
 ## 2. Vrstvy podpisů v `form.fo`
 

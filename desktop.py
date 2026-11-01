@@ -160,7 +160,7 @@ class DesktopApp:
 
     def open_dialog(self, window):
         chosen = window.create_file_dialog(self.webview.FileDialog.OPEN, allow_multiple=True,
-                                           file_types=("Formuláře ZFO a PDF (*.zfo;*.pdf)", "Všechny soubory (*.*)"))
+                                           file_types=("Formuláře ZFO, FO a PDF (*.zfo;*.fo;*.pdf)", "Všechny soubory (*.*)"))
         for path in chosen or []:
             self.open_window(Path(path))
 

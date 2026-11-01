@@ -196,6 +196,49 @@ class LocalServer(unittest.TestCase):
         body = json.dumps({"data": "", "password": ""})
         self.assertEqual(self.request("POST", "/add-certificate", body=body)[0], 404)
 
+    def serve_file(self, content, suffix=".fo"):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        path = Path(folder.name) / f"hostile{suffix}"
+        path.write_bytes(content)
+        app.FORMS["hostile"] = path
+        self.addCleanup(app.FORMS.pop, "hostile", None)
+        return self.request("GET", "/?form=hostile")
+
+    def test_damaged_files_end_in_a_message(self):
+        original = zipfile.ZipFile(ROOT / "samples/cuzk/form.zfo").read("form.fo")
+        for content in (b"", b"not xml", b"<html><body>page</body></html>", original[:len(original) // 2],
+                        b"PK\x03\x04 broken archive", b"\xff\xfe\x00garbage"):
+            with self.subTest(content=content[:20]):
+                status, page = self.serve_file(content)
+                self.assertEqual(status, 422)
+                self.assertIn("Soubor nelze otevřít".encode(), page)
+
+    def test_external_entity_is_not_read_into_the_page(self):
+        with tempfile.TemporaryDirectory() as folder:
+            secret = Path(folder) / "secret.txt"
+            secret.write_text("TAJNY-OBSAH-SOUBORU", encoding="utf-8")
+            original = zipfile.ZipFile(ROOT / "samples/cuzk/form.zfo").read("form.fo").decode("utf-8")
+            declaration, body = original.split("?>", 1)
+            hostile = f'{declaration}?><!DOCTYPE x [<!ENTITY e SYSTEM "{secret.as_uri()}">]>{body}'
+            hostile = hostile.replace("</dsig:Signature>", "&e;</dsig:Signature>", 1)
+            _, page = self.serve_file(hostile.encode("utf-8"))
+        self.assertNotIn(b"TAJNY-OBSAH-SOUBORU", page)
+
+    def test_entity_bomb_is_refused(self):
+        entities = '<!ENTITY a0 "xxxxxxxxxx">' + "".join(f'<!ENTITY a{i} "{f"&a{i - 1};" * 10}">' for i in range(1, 10))
+        status, _ = self.serve_file(f'<?xml version="1.0"?><!DOCTYPE l [{entities}]><l>&a9;</l>'.encode())
+        self.assertEqual(status, 422)
+
+    def test_changed_form_shows_a_broken_signature(self):
+        root = etree.fromstring(zipfile.ZipFile(ROOT / "samples/cuzk/form.zfo").read("form.fo"), etree.XMLParser(huge_tree=True))
+        layout_block = root.find(".//{http://www.w3.org/1999/XSL/Format}block")
+        layout_block.set("changed", "1")
+        status, page = self.serve_file(etree.tostring(root))
+        self.assertEqual(status, 200)
+        signatures = json.loads(re.search(r"let signatures = (\[.*?\]);\n", page.decode()).group(1))
+        self.assertTrue(signatures and not all(signature["intact"] for signature in signatures))
+
 
 class CertificateIds(unittest.TestCase):
     def test_identity_id_cannot_name_another_file(self):

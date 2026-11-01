@@ -95,10 +95,6 @@ def output_path(name):
     return candidate
 
 
-def read_form_fo(path):
-    return zipfile.ZipFile(path).read("form.fo")
-
-
 def parse_fo(fo):
     return etree.fromstring(fo, etree.XMLParser(huge_tree=True))
 
@@ -216,7 +212,7 @@ def published_form_with_data(fo, data):
 
 
 def render_zfo_page(name, blank=False, data=None):
-    fo = read_form_fo(form_path(name))
+    fo = zfo_verify.read_form_fo(form_path(name))
     if blank or data is not None:
         fo = published_form_with_data(fo, data)
     session = new_session({"name": name, "doc": engine.open_document(fo)})
@@ -321,12 +317,18 @@ def count_never_run_scripts(doc):
                if element.get(attribute, "").lstrip().startswith("{"))
 
 
-def form_info(name):
-    with zipfile.ZipFile(form_path(name)) as archive:
+def summary_and_modification_time(path):
+    if not zfo_verify.is_zip_form(path):
+        return None, datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds")
+    with zipfile.ZipFile(path) as archive:
         summary = etree.fromstring(archive.read("summary/summary.xml")).find("summary") if "summary/summary.xml" in archive.namelist() else None
         # The forms carry no modification date; Form Filler stamps form.fo in the archive when it saves.
-        modified = datetime(*archive.getinfo("form.fo").date_time).isoformat()
-    fo = parse_fo(read_form_fo(form_path(name)))
+        return summary, datetime(*archive.getinfo("form.fo").date_time).isoformat()
+
+
+def form_info(name):
+    summary, modified = summary_and_modification_time(form_path(name))
+    fo = parse_fo(zfo_verify.read_form_fo(form_path(name)))
     params = fo.find(f".//{{{FM}}}formparams")
     return {"title": attribute_or_default(summary, "title"), "subject": attribute_or_default(summary, "subject"),
             "author": attribute_or_default(summary, "author"), "keywords": attribute_or_default(summary, "keywords"),
@@ -338,7 +340,7 @@ def form_info(name):
 
 
 def filled_form(session, key=None, cert=None):
-    doc = publisher_layer(parse_fo(read_form_fo(form_path(session["name"]))))
+    doc = publisher_layer(parse_fo(zfo_verify.read_form_fo(form_path(session["name"]))))
     remove_data_objects(doc)
     etree.SubElement(doc, f"{{{DS}}}Object").append(copy.deepcopy(engine.data_element(session["doc"])))
     if key is None:
@@ -350,6 +352,13 @@ def stamped_with_saving_time(zip_info):
     stamped = copy.copy(zip_info)
     stamped.date_time = time.localtime()[:6]
     return stamped
+
+
+def write_form(name, fo, target):
+    if zfo_verify.is_zip_form(form_path(name)):
+        write_zfo(name, fo, target)
+    else:
+        target.write_bytes(fo)
 
 
 def write_zfo(name, fo, target):
@@ -392,8 +401,8 @@ def save_zfo(session, identity_id=None, password=None):
         target = output_path(name)
     else:
         fo = filled_form(session)
-        target = form_path(name) if SINGLE_FILE else ROOT / "out" / f"{name}-ulozeny.zfo"
-    write_zfo(name, fo, target)
+        target = form_path(name) if SINGLE_FILE else ROOT / "out" / f"{name}-ulozeny{form_path(name).suffix}"
+    write_form(name, fo, target)
     return {"saved": str(target), "signatures": zfo_signatures(fo)}
 
 
