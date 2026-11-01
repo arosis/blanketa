@@ -3,6 +3,7 @@ import hashlib
 import io
 import sys
 import zipfile
+from pathlib import Path
 
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -13,15 +14,25 @@ DS = "http://www.w3.org/2000/09/xmldsig#"
 C14N = "http://www.w3.org/TR/2001/REC-xml-c14n-20010315"
 EXC = "http://www.w3.org/2001/10/xml-exc-c14n#"
 DIGEST_FUNCTIONS = {DS + "sha1": hashlib.sha1, "http://www.w3.org/2001/04/xmlenc#sha256": hashlib.sha256}
+ZIP_MAGIC = b"PK"
 SIGNATURE_HASHES = {DS + "rsa-sha1": hashes.SHA1(), "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256": hashes.SHA256()}
 
 
-def load_form_root(path):
-    data = open(path, "rb").read()
-    if data[:2] == b"PK":
+def is_zip_form(path):
+    with open(path, "rb") as form:
+        return form.read(len(ZIP_MAGIC)) == ZIP_MAGIC
+
+
+def read_form_fo(path):
+    data = Path(path).read_bytes()
+    if data.startswith(ZIP_MAGIC):
         with zipfile.ZipFile(io.BytesIO(data)) as archive:
-            data = archive.read("form.fo")
-    return etree.fromstring(data, etree.XMLParser(huge_tree=True))
+            return archive.read("form.fo")
+    return data
+
+
+def load_form_root(path):
+    return etree.fromstring(read_form_fo(path), etree.XMLParser(huge_tree=True))
 
 
 def canonicalize(element, algorithm):

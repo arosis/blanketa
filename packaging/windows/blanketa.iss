@@ -1,7 +1,7 @@
 ; Inno Setup installer for Blanketa on Windows (built by tools/build_desktop.py):
 ;   iscc /DVersion=0.2.1 /DSource=dist\Blanketa /Odist packaging\windows\blanketa.iss
 ; Installs for the current user without admin rights (or for everyone if chosen), adds Blanketa to
-; "Otevřít v programu" for .zfo and .pdf and, as an optional task, makes it the default for .zfo files.
+; "Otevřít v programu" for .zfo, .fo and .pdf and, as an optional task, makes it the default for .zfo and .fo files.
 
 #ifndef Version
   #define Version "0.0.0"
@@ -32,7 +32,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 Name: "czech"; MessagesFile: "compiler:Languages\Czech.isl"
 
 [Tasks]
-Name: "zfodefault"; Description: "Otevírat soubory .zfo v Blanketě (místo Form Filleru)"
+Name: "zfodefault"; Description: "Otevírat soubory .zfo a .fo v Blanketě (místo Form Filleru)"
 Name: "desktopicon"; Description: "Zástupce na ploše"; Flags: unchecked
 
 [Files]
@@ -48,6 +48,11 @@ Root: HKA; Subkey: "Software\Classes\Blanketa.zfo\DefaultIcon"; ValueType: strin
 Root: HKA; Subkey: "Software\Classes\Blanketa.zfo\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Blanketa.exe"" ""%1"""
 Root: HKA; Subkey: "Software\Classes\.zfo\OpenWithProgids"; ValueType: string; ValueName: "Blanketa.zfo"; ValueData: ""; Flags: uninsdeletevalue
 Root: HKA; Subkey: "Software\Classes\.zfo"; ValueType: string; ValueName: ""; ValueData: "Blanketa.zfo"; Tasks: zfodefault; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\Blanketa.fo"; ValueType: string; ValueName: ""; ValueData: "Formulář 602XML (FO)"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\Blanketa.fo\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\Blanketa.exe,0"
+Root: HKA; Subkey: "Software\Classes\Blanketa.fo\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Blanketa.exe"" ""%1"""
+Root: HKA; Subkey: "Software\Classes\.fo\OpenWithProgids"; ValueType: string; ValueName: "Blanketa.fo"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.fo"; ValueType: string; ValueName: ""; ValueData: "Blanketa.fo"; Tasks: zfodefault; Flags: uninsdeletevalue
 Root: HKA; Subkey: "Software\Classes\Blanketa.pdf"; ValueType: string; ValueName: ""; ValueData: "Dokument PDF"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\Blanketa.pdf\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Blanketa.exe"" ""%1"""
 Root: HKA; Subkey: "Software\Classes\.pdf\OpenWithProgids"; ValueType: string; ValueName: "Blanketa.pdf"; ValueData: ""; Flags: uninsdeletevalue
