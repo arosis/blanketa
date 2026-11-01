@@ -90,6 +90,34 @@ def fuzz_script(data):
         pass
 
 
+FORM_FOR_ACTIONS = b"""<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#" Id="_1"><dsig:Object Id="_2" MimeType="text/xml">
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:fm="http://software602.cz/forms" xmlns:d="http://software602.cz/sample">
+<fm:formparams><fm:model><fm:instance><d:root><d:a>1</d:a><d:sekce><d:b/></d:sekce></d:root></fm:instance>
+<fm:bind Id="k" nodeset="/d:root"><fm:bind Id="a" nodeset="d:a"/><fm:bind Id="sekce" nodeset="d:sekce"><fm:bind Id="b" nodeset="d:b"/></fm:bind></fm:bind></fm:model></fm:formparams>
+<fo:block form602ct="rep" form602bind="sekce" form602id="s"/><fo:inline form602ct="btn" form602bind="a" form602btnclick="{}"/></fo:root></dsig:Object></dsig:Signature>"""
+
+
+def fuzz_form_action(data):
+    from zfoengine import api, form_scripts
+    text = data.decode("utf-8", "replace")
+    doc = api.open_document(FORM_FOR_ACTIONS)
+    before = etree.tostring(doc._get_data_root())
+    button = form_scripts.button_elements(doc.root)[0]
+    try:
+        button.set("form602btnclick", "{" + text + "}")
+    except ValueError:  # a form that parsed cannot hold such characters
+        return
+    result = form_scripts.run_button_script(doc, 0, "", [])
+    if "refused" in result or "question" in result:
+        assert etree.tostring(doc._get_data_root()) == before, "a stopped script left its changes"
+
+
+def action_seeds():
+    return [b"GetDocument().GetElement().SetDataTo('a', 'x');", b"GetDocument().GetElement().InsertSection('//*[@form602id=\"s\"]');",
+            b"var e = GetDocument().GetElement(); e.SetData('/d:root/d:a', 'a', e.DataXpath('count(//*)')); GetDocument().SendData(1);",
+            b"if (MessageBox('x', 'y', MB_YESNO) == IDYES) GetDocument().GetElement().RemoveSection('.');", b"while (true) MessageBox('x');"]
+
+
 def script_seeds():
     found = set()
     paths = [*(ROOT / "samples").glob("*/form.zfo"), ROOT / "samples/skripty/vypocty.zfo"]
@@ -153,6 +181,7 @@ TARGETS = {
     "zfo-description": (fuzz_zfo_description, fo_seeds),
     "pdf": (fuzz_pdf, pdf_seeds),
     "script": (fuzz_script, script_seeds),
+    "form-action": (fuzz_form_action, action_seeds),
     "certificate": (fuzz_certificate, certificate_seeds),
     "trust-list": (fuzz_trust_list, trust_list_seeds),
     "revocation-list": (fuzz_revocation_list, revocation_list_seeds),

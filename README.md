@@ -180,7 +180,8 @@ Kontrola podpisu bez okna (používá ji i CI):
 
 ## Omezení
 
-- Výpočty a kontroly psané v JavaScriptu 602 běží v izolovaném interpretu bez přístupu k souborům, síti a podpisu. Co neumí, nechá beze změny a upozorní na to. Skripty tlačítek a změn polí se nespouštějí, Blanketa na ně při otevření formuláře upozorní.
+- Výpočty a kontroly psané v JavaScriptu 602 běží v izolovaném interpretu bez přístupu k souborům, síti a podpisu. Stejně běží skripty tlačítek a změn polí: zapisují jen do dat formuláře, přepínají kroky průvodce a přidávají a odebírají sekce. Odeslat, uložit, vytisknout ani podepsat nemůžou. Co interpret neumí, nechá beze změny a upozorní na to.
+- Formulář nedostane síť. Číselníky a našeptávače stahované z internetu se nenačtou a pole se vyplňují ručně, adresy se v registru RÚIAN neověřují. Blanketa na to upozorní, ale úřad může takové podání odmítnout. Nová sekce přidaná skriptem se vždy zařadí na konec.
 - Formuláře `.fo` bez obalu `.zfo` zatím neotevře.
 - Odesílání na portály (submit) není podporované.
 - PDF formuláře XFA nejsou podporované; Blanketa na ně při otevření upozorní.

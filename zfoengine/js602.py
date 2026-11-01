@@ -814,6 +814,7 @@ class Interpreter:
   def __init__(self, library=()):
     self.budget = _Budget()
     self.depth = 0
+    self.runs_in_progress = 0
     self.globals = _Scope(None, self._builtins())
     self.builtin_constructors = {name: self.globals.vars[name] for name in _CONSTRUCTORS}
     self.string_methods = self._string_methods()
@@ -847,11 +848,17 @@ class Interpreter:
         break
 
   def run(self, source, host):
-    self.budget.left = STEP_BUDGET
-    self.depth = 0
-    self._load_library()
-    self.budget.left = STEP_BUDGET
+    # A calculation can run inside a button's script, when the script writes a value. It spends the budget of that script:
+    # with a fresh budget for each one, a loop of writes would never be stopped.
+    is_outermost = self.runs_in_progress == 0
+    if is_outermost:
+      self.budget.left = STEP_BUDGET
+      self.depth = 0
+      self._load_library()
+      self.budget.left = STEP_BUDGET
+    replaced_globals = {name: self.globals.vars[name] for name in host if name in self.globals.vars}
     self.globals.vars.update(host)
+    self.runs_in_progress += 1
     try:
       self._run_program(source, _Scope(self.globals))  # what one field's script declares is not another's business
     except RecursionError as error:
@@ -862,6 +869,9 @@ class Interpreter:
       raise
     except Exception as error:  # a slip of this interpreter must not take the window down over a hostile file
       raise Unsupported("skript") from error
+    finally:
+      self.runs_in_progress -= 1
+      self.globals.vars.update(replaced_globals)
 
   def _hoist(self, definition, scope):
     variables = scope.vars
@@ -2596,3 +2606,84 @@ def evaluate(interpreter, source, data_xpath, current_path="", list_item=None):
     "RCCheck": NativeFunction(lambda this, args: _birth_number_valid(to_string(args[0] if args else UNDEFINED))),
   })
   return results[-1] if results else None
+
+
+_FORM_ACTION_CONSTANTS = {
+  "PI_BEGINPROGRESS": 0.0, "PI_SETTEXT": 1.0, "PI_ENDPROGRESS": 2.0,
+  "MB_OK": 0.0, "MB_YESNO": 4.0, "MB_ICONWARNING": 48.0, "MB_ICONINFORMATION": 64.0, "MB_DEFAULTBTN2": 256.0,
+  "MB_HTMLCONTENT": 65536.0, "MB_ICON2WARNINGRED": 131072.0, "MB_ICON2CHECK": 262144.0,
+  "IDOK": 1.0, "IDYES": 6.0, "IDNO": 7.0,
+  "VarStr": 0.0, "VarFXML": 1.0, "VarFPdf": 2.0, "VarFFo": 3.0, "VarFUndef": 4.0, "VarCUTF8": 5.0,
+  "GFD_INCLUDINGIRRELEVANT": 1.0, "GFD_CUTNAMESPACES": 2.0, "GFD_ORIGINAL": 4.0, "GFD_SIGNDATA": 8.0,
+}
+MB_YESNO = _FORM_ACTION_CONSTANTS["MB_YESNO"]
+IDOK, IDYES, IDNO = _FORM_ACTION_CONSTANTS["IDOK"], _FORM_ACTION_CONSTANTS["IDYES"], _FORM_ACTION_CONSTANTS["IDNO"]
+
+
+def run_form_action(interpreter, source, host):
+  # Runs the script of a button or of a field change against host (form_scripts.FormActionHost). What the application
+  # offered beyond these names, sending, saving, printing and signing above all, is absent here, so it stops the script.
+  # A script can keep these functions in a global: they refuse outside the run they were made for, and in the calculations
+  # nested in it.
+  run_level = interpreter.runs_in_progress + 1
+  is_finished = []
+
+  def native(function):
+    def guarded(this, args):
+      if is_finished or interpreter.runs_in_progress != run_level:
+        raise Unsupported("skript mimo tlačítko")
+      return function(*args)
+    return NativeFunction(guarded)
+
+  def text(value=UNDEFINED):
+    return to_string(value)
+
+  def object_factory():
+    return NativeFunction(lambda this, args: ScriptObject(), construct=lambda args: ScriptObject({"data": ""}))
+
+  def message_box(content=UNDEFINED, title=UNDEFINED, flags=0.0):
+    return host.show_message(text(content), "" if title is UNDEFINED else text(title), to_number(flags))
+
+  def data_xpath(expression=UNDEFINED):
+    answer = host.data_xpath(text(expression))
+    return to_string("" if answer is None else answer)
+
+  def form_data(parameters=UNDEFINED):
+    xsl_name = interpreter.get(parameters, "xslName") if isinstance(parameters, ScriptObject) else UNDEFINED
+    return ScriptObject({"data": host.form_data(to_string(xsl_name))})
+
+  element = HostObject("element", {
+    "DataXpath": native(data_xpath),
+    "GetCurrentDataXPath": native(host.current_path),
+    "GetListItemData": native(lambda *args: host.list_item(*(to_string(arg) for arg in args))),
+    "GetAttribute": native(lambda name=UNDEFINED, path=UNDEFINED: host.attribute(text(name), text(path))),
+    "SetData": native(lambda path=UNDEFINED, bind=UNDEFINED, value=UNDEFINED: host.set_data(text(path), text(bind), text(value)) or UNDEFINED),
+    "SetDataTo": native(lambda bind=UNDEFINED, value=UNDEFINED: host.set_data_to(text(bind), text(value)) or UNDEFINED),
+    "InsertSection": native(lambda path=UNDEFINED: host.insert_section(text(path))),
+    "RemoveSection": native(lambda path=UNDEFINED: host.remove_section(text(path))),
+    "ActivateField": native(lambda path=UNDEFINED, *_: host.activate_field(text(path)) or UNDEFINED),
+    "ActivateFieldEx": native(lambda path=UNDEFINED, *_: host.activate_field(text(path)) or UNDEFINED),
+  })
+  document = HostObject("document", {
+    "GetElement": native(lambda *_: element),
+    "SetProgressInfo": native(lambda *_: UNDEFINED),
+    "CheckData": native(lambda *_: host.check_data()),
+    "GetFormData": native(form_data),
+  })
+  named_parameters = host.named_parameters
+  globals_for_action = {
+    **_FORM_ACTION_CONSTANTS,
+    "GetDocument": native(lambda *_: document),
+    "MessageBox": native(message_box),
+    "DbgLog": native(lambda *_: UNDEFINED),
+    "RCCheck": native(lambda value=UNDEFINED, *_: _birth_number_valid(text(value))),
+    "GetNamedParam": native(lambda name=UNDEFINED, *_: named_parameters.get(text(name), "")),
+    "SetNamedParam": native(lambda name=UNDEFINED, value=UNDEFINED, *_: host.set_named_parameter(text(name), text(value)) or UNDEFINED),
+    "GetCustomItem": native(lambda *_: ""),
+    "Variant": object_factory(),
+    "DataParam": object_factory(),
+  }
+  try:
+    interpreter.run(source, globals_for_action)
+  finally:
+    is_finished.append(True)

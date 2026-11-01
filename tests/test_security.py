@@ -15,6 +15,7 @@ import unittest
 import zipfile
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from xml.sax.saxutils import quoteattr
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -28,6 +29,8 @@ import app  # noqa: E402
 import certstore  # noqa: E402
 import desktop  # noqa: E402
 import zfo_verify  # noqa: E402
+from zfoengine import api as engine  # noqa: E402
+from zfoengine import form_scripts  # noqa: E402
 
 DS = zfo_verify.DS
 FM = "http://software602.cz/forms"
@@ -125,6 +128,148 @@ class DamagedSignatures(unittest.TestCase):
             root.find(f".//{{{zfo_verify.DS}}}X509Certificate").text = "not base64"
         with self.assertRaises(ValueError):
             self.damaged(change)
+
+
+FORM_WITH_SCRIPT = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#" Id="_1"><dsig:Object Id="_2" MimeType="text/xml">
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:fm="http://software602.cz/forms" xmlns:d="http://software602.cz/sample">
+<fm:formparams><fm:model><fm:instance><d:root><d:a>puvodni</d:a><d:soucet/><d:sekce><d:b/></d:sekce></d:root></fm:instance>
+<fm:bind Id="k" nodeset="/d:root"><fm:bind Id="a" nodeset="d:a"/><fm:bind Id="soucet" nodeset="d:soucet" depends="a" calculate="concat(../d:a, '!')"/>
+<fm:bind Id="sekce" nodeset="d:sekce"><fm:bind Id="b" nodeset="d:b"/></fm:bind></fm:bind></fm:model>
+<fm:script name="knihovna" usage="1"><![CDATA[%s]]></fm:script></fm:formparams>
+<fo:block form602ct="rep" form602bind="sekce" form602id="s"><fo:inline form602ct="txt" form602bind="b"/></fo:block>
+<fo:inline form602ct="btn" form602bind="a"><![CDATA[Tlacitko]]></fo:inline>
+</fo:root></dsig:Object></dsig:Signature>"""
+BUTTON_SCRIPT_MARK = "<fo:inline form602ct=\"btn\" form602bind=\"a\">"
+
+
+def form_running(script, library=""):
+    button = BUTTON_SCRIPT_MARK.replace(">", f" form602btnclick={quoteattr('{' + script + '}')}>")
+    return engine.open_document((FORM_WITH_SCRIPT % library).replace(BUTTON_SCRIPT_MARK, button).encode())
+
+
+def click(doc, answers=()):
+    return form_scripts.run_button_script(doc, 0, "", list(answers))
+
+
+def value_of_a(doc):
+    return doc.get_value("a")
+
+
+WRITE = "GetDocument().GetElement().SetDataTo('a', 'zmeneno');"
+
+
+class HostileFormScripts(unittest.TestCase):
+    def test_what_reaches_outside_the_form_stops_the_script_and_undoes_it(self):
+        for call in ("GetDocument().SendData(1, 2)", "GetDocument().SendDataToEPortal(1)", "GetDocument().SaveData(1)", "GetDocument().Print2PDF(1)",
+                     "GetDocument().PrepareSignature(1)", "GetDocument().FinalizeSignature(1)", "GetDocument().ChooseCert()",
+                     "GetDocument().Close()", "GetDocument().CloseApp()", "GetDocument().OpenAux('x')", "GetDocument().LoadFormData(1)",
+                     "GetDocument().GetElement().OpenLink('http://example.org')", "GetDocument().GetElement().SetBinData('.', 1)",
+                     "new SendParam()", "new XMLHttpRequest()", "eval('1')", "require('os')", "__import__('os')"):
+            with self.subTest(call):
+                doc = form_running(WRITE + call + ";")
+                result = click(doc)
+                self.assertIn("refused", result)
+                self.assertEqual(value_of_a(doc), "puvodni")
+                self.assertFalse(doc.get_value("soucet"))
+
+    def test_a_script_cannot_catch_being_refused(self):
+        doc = form_running(WRITE + "try { GetDocument().SendData(1); } catch (e) { GetDocument().GetElement().SetDataTo('b', 'x'); }")
+        self.assertIn("refused", click(doc))
+        self.assertEqual(value_of_a(doc), "puvodni")
+
+    def test_a_script_gets_no_python_object(self):
+        for reach in ("GetDocument.__class__", "GetDocument().__class__", "GetDocument().GetElement.__globals__", "GetDocument().GetElement().constructor"):
+            with self.subTest(reach):
+                result = click(form_running(f"var x = {reach}; if (x) GetDocument().SendData(x);"))
+                self.assertTrue(result is not None and ("refused" in result or result["values"] == {}))
+
+    def test_endless_loop_of_writes_stops_and_is_undone(self):
+        doc = form_running("while (true) { GetDocument().GetElement().SetDataTo('a', 'x'); }")
+        self.assertIn("refused", click(doc))
+        self.assertEqual(value_of_a(doc), "puvodni")
+
+    def test_calculations_inside_a_script_do_not_renew_its_budget(self):
+        doc = form_running("var i = 0; while (true) { i = i + 1; if (i % 1000 == 0) GetDocument().GetElement().SetDataTo('a', '' + i); }")
+        self.assertIn("refused", click(doc))
+
+    def test_growing_data_stops(self):
+        doc = form_running("var s = 'x'; for (var i = 0; i < 30; i++) s = s + s; GetDocument().GetElement().SetDataTo('a', s);")
+        self.assertIn("refused", click(doc))
+        self.assertEqual(value_of_a(doc), "puvodni")
+
+    def test_copies_of_a_section_stop_growing(self):
+        doc = form_running("while (true) GetDocument().GetElement().InsertSection('//*[@form602id=\"s\"]');")
+        self.assertIn("refused", click(doc))
+        self.assertEqual(len(doc._get_data_root().getroot().findall("{http://software602.cz/sample}sekce")), 1)
+
+    def test_dialogs_stop_flooding(self):
+        self.assertIn("refused", click(form_running("while (true) MessageBox('x');")))
+
+    def test_questions_stop_repeating(self):
+        script = "while (true) MessageBox('x', 'y', MB_YESNO);"
+        doc = form_running(script)
+        answers = []
+        for _ in range(form_scripts.MAX_QUESTIONS_PER_RUN):
+            self.assertIn("question", click(doc, answers))
+            answers.append(True)
+        self.assertIn("refused", click(doc, answers))
+
+    def test_kept_functions_refuse_in_later_calculations_and_runs(self):
+        doc = form_running("kept = GetDocument().GetElement();")
+        self.assertNotIn("refused", click(doc))
+        interpreter = doc.script_interpreter()
+        with self.assertRaises(form_scripts.js602.Unsupported):
+            form_scripts.js602.evaluate(interpreter, "{ kept.SetDataTo('a', 'z'); }", lambda expression: "", "", lambda *args: "")
+        self.assertEqual(value_of_a(doc), "puvodni")
+
+    def test_kept_functions_refuse_in_a_nested_calculation(self):
+        form = (FORM_WITH_SCRIPT % "").replace("calculate=\"concat(../d:a, '!')\"", "calculate=\"{ var x = 1; kept.SetDataTo('a', 'z'); Result('c'); }\"")
+        form = form.replace(BUTTON_SCRIPT_MARK, BUTTON_SCRIPT_MARK.replace(">", " form602btnclick=\"{ kept = GetDocument().GetElement(); kept.SetDataTo('a', 'y'); }\">"))
+        doc = engine.open_document(form.encode())
+        click(doc)
+        self.assertEqual(value_of_a(doc), "y")
+
+    def test_xpath_cannot_reach_application_functions(self):
+        doc = form_running("GetDocument().GetElement().DataXpath('SendAppEvent(\"store\")');")
+        self.assertIn("refused", click(doc))
+
+    def test_script_guard_comes_back_after_a_calculation(self):
+        doc = form_running(WRITE + "GetDocument().GetElement().DataXpath('SendAppEvent(\"store\")');")
+        self.assertIn("refused", click(doc))
+        self.assertFalse(doc.script_running)
+
+    def test_page_cannot_hand_over_a_script_of_its_own(self):
+        doc = form_running(WRITE)
+        for message in ({"button": 99}, {"button": -1}, {"field": "a') or ('"}, {"field": {"x": 1}}):
+            answers = engine.handle(doc, "run_form_script", message)
+            self.assertFalse([answer for answer in answers if "form_script_callback" in str(answer.get("data"))], message)
+        self.assertEqual(value_of_a(doc), "puvodni")
+        engine.handle(doc, "run_form_script", {"button": 0, "command": "{ GetDocument().GetElement().SetDataTo('a', 'jine'); }"})
+        self.assertEqual(value_of_a(doc), "zmeneno")
+
+    def test_message_reaches_the_page_only_as_json_data(self):
+        doc = form_running("MessageBox('</script><img src=x onerror=alert(1)>\\u2028\"); alert(1); (\"');")
+        answer = engine.handle(doc, "run_form_script", {"button": 0})[0]["data"]
+        arguments = answer[len("form_script_callback("):-1]
+        self.assertIn("onerror", json.loads(arguments)["messages"][0]["text"])
+
+    def test_page_shows_messages_only_as_text(self):
+        self.assertIn("const plainTextOf = markup => new DOMParser()", app.SHELL)
+        callback = app.SHELL[app.SHELL.index("window.form_script_callback"):app.SHELL.index("const icons = {")]
+        self.assertNotIn("innerHTML", callback)
+
+    def test_opening_the_form_runs_no_script(self):
+        doc = form_running("GetDocument().SendData(1);", library="kept_at_open = 1;")
+        self.assertEqual(value_of_a(doc), "puvodni")
+        self.assertNotIn("kept_at_open", doc.script_interpreter().globals.vars)
+
+    def test_value_only_loaded_by_the_page_runs_no_change_script(self):
+        form = (FORM_WITH_SCRIPT % "").replace(BUTTON_SCRIPT_MARK, BUTTON_SCRIPT_MARK.replace(">", " form602onchange=\"{ GetDocument().GetElement().SetDataTo('b', 'spusteno'); }\">"))
+        doc = engine.open_document(form.encode())
+        engine.handle(doc, "store_val", {"field": "a", "value": "puvodni", "input_id": "x", "repe": ""})
+        self.assertNotEqual(doc.get_value("b"), "spusteno")
+        engine.handle(doc, "store_val", {"field": "a", "value": "nove", "input_id": "x", "repe": ""})
+        self.assertEqual(doc.get_value("b"), "spusteno")
 
 
 class LocalServer(unittest.TestCase):

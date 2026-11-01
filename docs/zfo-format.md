@@ -67,6 +67,7 @@ Software602 uvádí, že formulář lze opatřit časovým razítkem, ale způso
 - **Opakované sekce:** odpovídají opakujícím se prvkům instance. Ve vzhledu je obalují tabulky s třídou `602-repetition-table`.
 - **Kontrola (Zkontrolovat):** povinná pole (`required`) a `constraint` se vyhodnocují pro každý uzel zvlášť.
 - **Výpočty:** `calculate` a `constraint` jsou XPath, nebo blok JavaScriptu 602 ve složených závorkách, který předá výsledek funkcí `Result`. Bloky provádí `zfoengine/js602.py`, funkce sdílené formulářem jsou ve `form:script`. Oficiální popis tohoto jazyka se nepodařilo najít, chování vychází ze skutečných formulářů. Dva předpoklady: když skript zavolá `Result` víckrát, platí poslední hodnota; a když formulář definuje vlastní funkci `RegExp`, `new RegExp` dál znamená vestavěný konstruktor.
+- **Skripty tlačítek a změn polí:** `form602btnclick` a `form602onchange` jsou bloky JavaScriptu 602, které běží v `zfoengine/form_scripts.py` jako celek: když se skript zastaví, data se vrátí. Kroky průvodce jsou `multi-switch` řízený hodnotou v datech. Opakovanou sekci některé formuláře značí jen `form602ct="rep"` a `form602bind` bez `form602repe`. Form Filler při otevření doplní jazyk do `/d:root/@xml:lang` a formuláře podle něj vybírají texty dialogů.
 
 ## 5. Vzhled (XSL-FO s rozšířeními 602)
 

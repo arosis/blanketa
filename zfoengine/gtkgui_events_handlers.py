@@ -36,7 +36,7 @@ import logging
 
 import lxml.etree as etree
 
-from . import app_events, msg_types, msgs, ns, tags, tools
+from . import app_events, form_scripts, msg_types, msgs, ns, tags, tools
 from . import evaluate as ev
 from . import msg_class as mc
 
@@ -134,6 +134,8 @@ def store_val(document, msg_data):
   constr_comment, old_val, calculated_binds = document.store_value(field, value, repe_name)
         
   if constr_ok:
+     # zfoengine: the page also sends values it only loaded, those are no change of the field
+     script_answer = _field_change_script_answer(document, field, msg_data["repe"], []) if stored_val != old_val else []
      res = {}
      # shorten the value for the message
      if len(stored_val) > LOG_MSG_MAX_LEN: 
@@ -143,7 +145,8 @@ def store_val(document, msg_data):
      res["repe"] = msg_data["repe"]
      res["calculated"] = calculated_binds    
      return _construct_web_response("field_changed_ok_callback(%s)" % json.dumps(res)) +\
-            _construct_gtk_info_response(msgs.FIELD_VALUE_STORED.format(stored_val, to_bind), area="message_area")
+            _construct_gtk_info_response(msgs.FIELD_VALUE_STORED.format(stored_val, to_bind), area="message_area") +\
+            script_answer
    
   else:     
      res = {}
@@ -155,6 +158,20 @@ def store_val(document, msg_data):
      
      return _construct_web_response("field_changed_error_callback(%s)" % json.dumps(res)) + \
             _construct_gtk_info_response(constr_comment, area="message_area", type=msg_types.ERROR)
+
+def _script_answer(result):
+  return _construct_web_response("form_script_callback(%s)" % json.dumps(result)) if result else []
+
+def _field_change_script_answer(document, field, repe, answers):
+  return _script_answer(form_scripts.run_field_change_script(document, field, repe, answers))
+
+def run_form_script(document, msg_data):
+  # zfoengine: the page names a button or a field of the form, never the text of a script
+  answers = msg_data.get("answers") or []
+  repe = msg_data.get("repe") or ""
+  if "field" in msg_data:
+    return _field_change_script_answer(document, msg_data["field"], repe, answers)
+  return _script_answer(form_scripts.run_button_script(document, int(msg_data["button"]), repe, answers))
 
 def delete_attachment(document, msg_data):
   '''
@@ -257,24 +274,7 @@ def default_value(document, msg_data):
 def check_form(document, msg_data=None):
   # zfoengine: Form Filler's "Zkontrolovat" (Shift+F9) - required fields and constraints,
   # one problem per data node; index is the node's position among the bind's repetitions
-  problems = []
-  for bind in document.root.xpath("//fm:bind[@required or @constraint]", namespaces={"fm": ns.FM_URI}):
-    bind_id = bind.get("Id")
-    path = document._get_abs_data_path(bind)
-    nsmap = document._get_used_ns_prefix(path)
-    for index, node in enumerate(document._get_data_root().xpath(path, namespaces=nsmap)):
-      value = node if isinstance(node, str) else (node.text or "")
-      required = bind.get("required")
-      if required is not None and not str(value).strip():
-        is_required = True if required == "" else \
-          ev.eval_expression_node(document, required, node, document._get_used_ns_prefix(required))
-        if is_required:
-          problems.append({"field": bind_id, "index": index, "kind": "required", "message": ""})
-          continue
-      if bind.get("constraint"):
-        ok, comment = ev.eval_constraint(document, bind, None, node=node)
-        if not ok:
-          problems.append({"field": bind_id, "index": index, "kind": "constraint", "message": comment})
+  problems = document.find_form_problems()
   # zfoengine: what the form's scripts could not do also limits what this check is worth
   return [{"type": "check", "data": problems, "scripts": sorted(document.script_problems)}]
 

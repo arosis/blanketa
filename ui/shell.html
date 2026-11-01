@@ -243,6 +243,7 @@
   /* A repeating block's +/- buttons sit in the margin beside the paper, so the block keeps its place on the page
      (some forms draw their text as a picture the fields have to line up with). */
   .zfo-page [class~="602-repetition-block"] { position: relative; }
+  .zfo-page .zfo-section-with-own-buttons > :is(button[onclick^="clone_div"], button[onclick^="del_div"], br) { display: none !important; }
   .zfo-page [class~="602-repetition-block"] > button[onclick^="clone_div"],
   .zfo-page [class~="602-repetition-block"] > button[onclick^="del_div"] {
     position: absolute; left: -28px; width: 20px; height: 20px; padding: 0; border: 1px solid #adadad; border-radius: 2px;
@@ -694,6 +695,60 @@
     });
   };
 
+  const plainTextOf = markup => new DOMParser().parseFromString(String(markup), 'text/html').body.textContent;
+  const repeatingSectionsNamed = (name, parent) => [...(parent ?? document).querySelectorAll('[name^="' + CSS.escape(name) + '-rep-"]')]
+    .filter(section => section.getAttribute('name').slice(name.length + 5).match(/^\d+$/));
+  const removeSurplusSections = (sections, parent = null) => {
+    for (const [name, copies] of Object.entries(sections)) {
+      const drawn = repeatingSectionsNamed(name, parent);
+      drawn.slice(copies.length).forEach(section => section.remove());
+      copies.forEach((sectionCopy, index) => drawn[index] && removeSurplusSections(sectionCopy.sub_rs, drawn[index]));
+    }
+  };
+  const redrawSections = result => {
+    const templates = Object.fromEntries(Object.entries(result.templates).map(([name, reference]) => [name, sectionHtml.get(reference)]));
+    populate_repeating_sections(null, {sections: result.sections, templates});
+    removeSurplusSections(result.sections);
+    identify_inputs(null);
+    identify_date_inputs(null);
+    prepare_date_inputs(null);
+    identify_repe_sections();
+  };
+  const focusField = (bind, isInNewSection) => {
+    const fields = [...document.getElementsByName(bind)].filter(candidate => candidate.offsetParent);
+    const field = isInNewSection ? fields.at(-1) : fields[0];
+    field?.scrollIntoView({block: 'center'});
+    field?.focus();
+  };
+  window.run_form_button = button => send(JSON.stringify({type: 'run_form_script', data: {button: Number(button.dataset.formButton), repe: get_parent_repe(button)}}));
+  window.form_script_callback = result => {
+    if (result.question) {
+      const {text, title, retry} = result.question;
+      const answer = confirm(plainTextOf(title ? `${title}\n\n${text}` : text));
+      send(JSON.stringify({type: 'run_form_script', data: {...retry, answers: [...retry.answers, answer]}}));
+      return;
+    }
+    if (result.refused) {
+      setStatus(`Tuto akci formuláře Blanketa neumí provést (${result.refused}), data zůstala beze změny.`);
+      return;
+    }
+    if (result.sections) redrawSections(result);
+    for (const [bind, value] of Object.entries(result.values)) {
+      const fields = [...document.getElementsByName(bind)];
+      fields.filter(field => field.type !== 'radio').forEach(field => set_input_value(field, value));
+      if (fields.some(field => field.type === 'radio')) set_radio_value(bind, value);
+    }
+    calc_repeatable_sections();
+    set_readonly_inputs();
+    set_multiswitch_controls();
+    result.messages.map(({text, title}) => plainTextOf(title ? `${title}\n\n${text}` : text).trim()).filter(Boolean).forEach(message => alert(message));
+    if (result.notices.length) setStatus(result.notices.join(' '));
+    queue.then(() => {
+      if (result.problems?.length) showCheck(result.problems);
+      if (result.focus) focusField(result.focus, Boolean(result.sections));
+    });
+  };
+
   const icons = {
     ok: '<svg viewBox="0 0 24 24" fill="none" stroke="#1e8e3e" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>',
     warn: '<svg viewBox="0 0 24 24" fill="none" stroke="#b26a00" stroke-width="2"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17v.5"/></svg>',
@@ -774,14 +829,15 @@
     info.modified && `Modifikován: ${formatDay(info.modified)}`,
     __BLANK__ && 'Zobrazeny výchozí hodnoty – vyplněná data nejsou načtena.',
     info.scripts && 'Některé výpočty nebo kontroly v JavaScriptu 602 Blanketa neumí provést.',
-    info.actions && 'Skripty tlačítek a změn polí Blanketa nespouští.',
+    info.actions && 'Skripty spouštěné při nahrání přílohy Blanketa nespouští.',
+    info.downloaded_lists && 'Číselníky, které si formulář stahuje z\u00a0internetu, Blanketa nenačítá.',
   ].filter(Boolean).join('<br>');
-  if (info.scripts || info.actions) {
+  if (info.scripts || info.actions || info.downloaded_lists) {
     const notice = queryOne('[data-notice]');
     notice.querySelector('span').textContent = (info.scripts
       ? 'Některé výpočty nebo kontroly v tomto formuláři Blanketa neumí provést, pole proto mohou zůstat prázdná nebo neaktuální. '
-      : 'Tlačítka a změny polí v tomto formuláři spouštějí skripty, které Blanketa z bezpečnostních důvodů nespouští, '
-        + 'takže některé funkce nebudou fungovat. ')
+      : info.actions ? 'Při nahrání přílohy tento formulář spouští skripty, které Blanketa z\u00a0bezpečnostních důvodů nespouští. '
+      : 'Formulář si stahuje číselníky a ověřuje adresy na internetu, což Blanketa formulářům nepovoluje. Tyto položky vyplňte ručně. ')
       + 'Před odesláním formulář zkontrolujte, spolehlivý výsledek dá Software602 Form Filler.';
     notice.querySelector('button').addEventListener('click', () => { notice.hidden = true; });
     notice.hidden = false;

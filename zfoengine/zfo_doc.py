@@ -40,6 +40,9 @@ from . import evaluate as ev
 from . import js602, msg_types, tools
 
 
+XML_NAMESPACE = "http://www.w3.org/XML/1998/namespace"
+
+
 class ZFO_document:
   
   def __init__(self, parsed_content, prefix_map, file_name, comes_from_zip):
@@ -53,6 +56,7 @@ class ZFO_document:
     self.script_problems = set()
     self.runaway_scripts = 0
     self.script_running = False
+    self.script_named_parameters = {}
     self.prefix_map = prefix_map    
     self.content = parsed_content 
     self.root = parsed_content.getroot()
@@ -620,7 +624,8 @@ class ZFO_document:
       value = str(value)
     # this is not a checkbox, handle it as an regular value 
     if att_name is not None:
-      data_node.set(att_name, value)
+      # zfoengine: lxml takes a namespace only in Clark notation, a form may bind xml:lang
+      data_node.set(att_name.replace("xml:", "{%s}" % XML_NAMESPACE, 1) if att_name.startswith("xml:") else att_name, value)
     else:
       data_node.text = value
   
@@ -986,6 +991,28 @@ class ZFO_document:
     return result
    
   
+  def find_form_problems(self):
+    # zfoengine: required fields and constraints, one problem per data node; index is the node's position among the bind's repetitions
+    problems = []
+    for bind in self.root.xpath("//fm:bind[@required or @constraint]", namespaces={"fm": ns.FM_URI}):
+      bind_id = bind.get("Id")
+      path = self._get_abs_data_path(bind)
+      nsmap = self._get_used_ns_prefix(path)
+      for index, node in enumerate(self._get_data_root().xpath(path, namespaces=nsmap)):
+        value = node if isinstance(node, str) else (node.text or "")
+        required = bind.get("required")
+        if required is not None and not str(value).strip():
+          is_required = True if required == "" else \
+            ev.eval_expression_node(self, required, node, self._get_used_ns_prefix(required))
+          if is_required:
+            problems.append({"field": bind_id, "index": index, "kind": "required", "message": ""})
+            continue
+        if bind.get("constraint"):
+          ok, comment = ev.eval_constraint(self, bind, None, node=node)
+          if not ok:
+            problems.append({"field": bind_id, "index": index, "kind": "constraint", "message": comment})
+    return problems
+
   def get_multiswitch_values(self):
     '''
     Finds all multiswitches, looks for their value in the model.

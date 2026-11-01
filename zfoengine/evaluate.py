@@ -50,6 +50,27 @@ def _script_answer(res):
   return str(res)
 
 
+def script_data_query(zfo_doc, path=None, node=None):
+  def ask(expression):
+    try:
+      if node is None:
+        return _script_answer(eval_expression_path(zfo_doc, expression, path))
+      return _script_answer(eval_expression_node(zfo_doc, expression, node, zfo_doc._get_used_ns_prefix(expression)))
+    except (etree.LxmlError, ValueError, TypeError, IndexError) as e:
+      raise js602.Unsupported("DataXpath") from e
+  return ask
+
+
+def script_list_item_query(ask):
+  def list_item(*args):
+    if len(args) < 2 or any("'" in arg for arg in args):
+      raise js602.Unsupported("GetListItemData")
+    quoted = ", ".join("'%s'" % arg for arg in args)
+    answer = _script_answer(ask("GetListItemData(%s)" % quoted))
+    return "" if answer is None else js602.to_string(answer)
+  return list_item
+
+
 def eval_script(zfo_doc, source, path=None, node=None):
   '''
   Runs a bind's JavaScript. Returns the text it gave to Result, or None when it gave nothing or could not finish;
@@ -58,24 +79,12 @@ def eval_script(zfo_doc, source, path=None, node=None):
   if zfo_doc.runaway_scripts >= MAX_RUNAWAY_SCRIPTS:
     return None
 
-  def ask(expression):
-    try:
-      if node is None:
-        return _script_answer(eval_expression_path(zfo_doc, expression, path))
-      return _script_answer(eval_expression_node(zfo_doc, expression, node, zfo_doc._get_used_ns_prefix(expression)))
-    except (etree.LxmlError, ValueError, TypeError, IndexError) as e:
-      raise js602.Unsupported("DataXpath") from e
-
-  def list_item(*args):
-    if len(args) < 2 or any("'" in arg for arg in args):
-      raise js602.Unsupported("GetListItemData")
-    quoted = ", ".join("'%s'" % arg for arg in args)
-    answer = _script_answer(ask("GetListItemData(%s)" % quoted))
-    return "" if answer is None else js602.to_string(answer)
-
+  ask = script_data_query(zfo_doc, path, node)
+  list_item = script_list_item_query(ask)
   current = path or ""
   if not current and isinstance(node, etree._Element):
     current = node.getroottree().getpath(node)
+  was_script_running = zfo_doc.script_running
   zfo_doc.script_running = True
   try:
     return js602.evaluate(zfo_doc.script_interpreter(), source, ask, current, list_item)
@@ -88,7 +97,7 @@ def eval_script(zfo_doc, source, path=None, node=None):
     log.info("Script stopped with its own error: %s", e)
     zfo_doc.script_problems.add("chyba ve skriptu formuláře")
   finally:
-    zfo_doc.script_running = False
+    zfo_doc.script_running = was_script_running
   return None
 
 
@@ -131,7 +140,7 @@ def eval_calculate(zfo_doc, bind, path=None, node=None, nsmap=None):
   if type(res) is float:
     # store value if it is not a nan
     if not math.isnan(res):      
-      return  (b_id, str(res), str(res))
+      return (b_id, js602.number_text(res), js602.number_text(res))
   elif type(res) is list:
     if len(res) == 0:     
       return (b_id, '', '')
