@@ -115,6 +115,26 @@ class FormExpressions(unittest.TestCase):
         self.assertEqual(doc.perform_click_action("SendAppEvent(checkdata)")[0].tag, "checkdata")
         self.assertFalse(doc.user_action_running)
 
+    def form_whose_root_names_a_field(self):
+        doc = engine.open_document((FORM_WITH_CALCULATION % ("<a/>", "")).encode())
+        root = doc._get_data_root().getroot()
+        root.set("form602bindref", "e")
+        return doc, root, root[0]
+
+    def test_calculation_cannot_store_values(self):
+        doc, root, field = self.form_whose_root_names_a_field()
+        root.xpath("SetMultipleDataTo('a', 'vlozeno')")
+        root.xpath("SetValueToData('vlozeno')")
+        self.assertEqual(field.get("a"), "puvodni")
+        self.assertIsNone(field.text)
+
+    def test_button_can_still_store_values(self):
+        doc, _, field = self.form_whose_root_names_a_field()
+        doc.perform_click_action("SetMultipleDataTo(a, vlozeno)")
+        doc.perform_click_action("SetValueToData(vlozeno)")
+        self.assertEqual(field.get("a"), "vlozeno")
+        self.assertEqual(field.text, "vlozeno")
+
     def test_failed_button_does_not_open_the_way_for_calculations(self):
         doc = engine.open_document((FORM_WITH_CALCULATION % ("<a/>", "1")).encode())
         with self.assertRaises(ValueError):

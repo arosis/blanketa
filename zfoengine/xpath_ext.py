@@ -36,12 +36,9 @@ from . import app_events, js602, msg_types, ns, tags, tools
 log = logging.getLogger("zfo.xpath_ext")
 
 
-XSLT_URI = "http://www.w3.org/1999/XSL/Transform"
-
-
 def _stylesheet_loads_other_stylesheets(template):
   # zfoengine: libxslt loads these while compiling, which XSLTAccessControl does not cover: it applies to the run only.
-  return next(template.iter("{%s}import" % XSLT_URI, "{%s}include" % XSLT_URI), None) is not None
+  return next(template.iter("{%s}import" % ns.XSLT_URI, "{%s}include" % ns.XSLT_URI), None) is not None
 
 
 class StopEvalException(Exception):
@@ -359,8 +356,20 @@ class ExtendedXpathEvaluator:
     Sets data to binds, arguments are logical couples of
     bind identifier and value 
     '''
-    log.warning("SetMultipleDataTo not implemented")
-    return
+    if not self._doc.user_action_running:
+      log.warning("SetMultipleDataTo outside a user's action")
+      return
+    res = {}
+    is_value = False
+    bind_id = None
+    for arg in args:
+      if is_value:
+        self._doc.store_value(bind_id, arg)
+        res[bind_id] = arg
+      else:
+        bind_id = arg
+      
+      is_value = not(is_value)
       
   def GetAttribute(self, context, att_name, node=None):
     '''
@@ -371,9 +380,6 @@ class ExtendedXpathEvaluator:
     
   
   def SetAttribute(self, context, att_name, value):
-    '''
-    Sets attribute value on context node.
-    '''
     log.warning("SetAttribute not implemented")
     return
   
@@ -608,8 +614,34 @@ class ExtendedXpathEvaluator:
     return path
   
   def SetValueToData(self, context, value):
-    log.warning("SetValueToData not implemented")
-    return
+    if not self._doc.user_action_running:
+      log.warning("SetValueToData outside a user's action")
+      return
+    # get form602bindref attribute
+    bindref = context.context_node.get("form602bindref")
+    if bindref is None:
+      return
+    else:
+      # get the referenced bind
+      bind = self._doc._find_bind_elem(bindref)
+      if not len(bind):
+        return
+      else:
+        bind = bind[0]
+        path = self._doc._get_abs_data_path(bind)
+        # get the data node
+        datanode = self._doc._get_data_root().xpath(path,
+                                                    namespaces = self._doc._get_used_ns_prefix(path))
+        if not len(datanode):
+          return
+        else:
+          # store value to that node
+          datanode = datanode[0]
+          att = self._doc._path_contains_att(path)
+          if att is None:
+            datanode.text = str(value)
+          else:
+            datanode.set(att, str(value))
            
   def SetListDataTo(self, context, node, bindXpath):
     log.warning("SetListDataTo not implemented")
@@ -654,9 +686,8 @@ class ExtendedXpathEvaluator:
 
 
 
-# zfoengine: what a form's script may ask for through DataXpath, unlike an expression of the form itself. Everything else
-# reads the user's environment or acts on the application, and an expression can name it in a computed string, so the
-# refusal sits here and not in the text of the query.
+# zfoengine: what a form's script may ask for through DataXpath. An expression can name a function in a computed string, so
+# the refusal sits here and not in the text of the query.
 _READABLE_FROM_SCRIPTS = {
   "TempNodeContextStringLength", "RCCheck", "GetListItemData", "DataXpath", "DataXPath", "If", "IsEmpty", "StrCat", "StrCmp",
   "Round", "And", "Or", "Not", "CurrentDate", "CurrentTime", "CurrentTimeUTC", "FormID", "GetNumSigns", "GetDataStr", "GetHash",

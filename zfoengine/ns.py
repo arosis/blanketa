@@ -24,6 +24,7 @@ Module with namespaces used in zfo
 '''
 
 FO_URI = "http://www.w3.org/1999/XSL/Format"
+XSLT_URI = "http://www.w3.org/1999/XSL/Transform"
 FO = "{%s}" % FO_URI
 
 FM_URI = "http://software602.cz/forms"
