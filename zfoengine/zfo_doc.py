@@ -53,6 +53,7 @@ class ZFO_document:
     self.script_problems = set()
     self.runaway_scripts = 0
     self.script_running = False
+    self.user_action_running = False
     self.prefix_map = prefix_map    
     self.content = parsed_content 
     self.root = parsed_content.getroot()
@@ -1319,7 +1320,11 @@ class ZFO_document:
     '''
     if not expression.strip().startswith('"'):
       expression = '"' + expression + '"'
-    r = ev.eval_action_command(self, expression)
+    self.user_action_running = True
+    try:
+      r = ev.eval_action_command(self, expression)
+    finally:
+      self.user_action_running = False
         
     return r
   

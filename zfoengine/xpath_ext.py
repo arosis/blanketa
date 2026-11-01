@@ -25,11 +25,8 @@ Module with implementation of XPath extension used in ZFO by 602.
 import copy
 import datetime
 import functools
-import getpass
 import hashlib
 import logging
-import os
-import os.path
 from functools import reduce
 
 import lxml.etree as etree
@@ -37,6 +34,11 @@ import lxml.etree as etree
 from . import app_events, js602, msg_types, ns, tags, tools
 
 log = logging.getLogger("zfo.xpath_ext")
+
+
+def _stylesheet_loads_other_stylesheets(template):
+  # zfoengine: libxslt loads these while compiling, which XSLTAccessControl does not cover: it applies to the run only.
+  return next(template.iter("{%s}import" % ns.XSLT_URI, "{%s}include" % ns.XSLT_URI), None) is not None
 
 
 class StopEvalException(Exception):
@@ -212,12 +214,14 @@ class ExtendedXpathEvaluator:
     log.warning("CmdLineParam not implemented")
     return ""
 
+  # zfoengine: a form is untrusted and whatever it calculates leaves with the filled-in data, so it learns nothing of the computer
   def CurrentUserName(self, context):
-    # zfoengine: os.getlogin() fails without a controlling terminal
-    return getpass.getuser()
+    log.warning("CurrentUserName is not given to forms")
+    return ""
   
   def CurrentFileName(self, context):    
-    return self._doc.opened_from_path
+    log.warning("CurrentFileName is not given to forms")
+    return ""
     
   def CurrentDate(self, context, format=None):
     return datetime.datetime.now().strftime("%Y-%m-%d")
@@ -278,10 +282,8 @@ class ExtendedXpathEvaluator:
     return len(sigs)
   
   def GetEnvVariable(self, context, var_name):
-    try:
-      return os.environ[var_name]
-    except:
-      return ""
+    log.warning("GetEnvVariable is not given to forms")
+    return ""
     
   def GetSignProperty(self, context, sigIndex, sigParam, oid):
     log.warning("GetSignProperty not implemented")
@@ -354,6 +356,9 @@ class ExtendedXpathEvaluator:
     Sets data to binds, arguments are logical couples of
     bind identifier and value 
     '''
+    if not self._doc.user_action_running:
+      log.warning("SetMultipleDataTo outside a user's action")
+      return
     res = {}
     is_value = False
     bind_id = None
@@ -375,10 +380,8 @@ class ExtendedXpathEvaluator:
     
   
   def SetAttribute(self, context, att_name, value):
-    '''
-    Sets attribute value on context node.
-    '''
-    context.context_node.set(str(att_name), str(value))
+    log.warning("SetAttribute not implemented")
+    return
   
   def CleanForm(self, context):
     log.warning("CleanForm not implemented")    
@@ -394,6 +397,9 @@ class ExtendedXpathEvaluator:
     return ""
   
   def SendAppEvent(self, context, event_name, *args):    
+    if not self._doc.user_action_running:
+      log.warning("Application event outside a user's action: %s" % event_name)
+      return ""
     try:
       # in case of 'print' event
       if event_name == "print":
@@ -417,7 +423,11 @@ class ExtendedXpathEvaluator:
         
     data = context.context_node.xpath(data_xpath, 
                                       namespaces = self._doc._get_used_ns_prefix(data_xpath))[0]
-    transform = etree.XSLT(template)
+    if _stylesheet_loads_other_stylesheets(template):
+      log.warning("DataTransform template that loads other stylesheets is refused")
+      return ""
+    # zfoengine: without this a form's stylesheet reads files and addresses with document() and writes files with exsl:document
+    transform = etree.XSLT(template, access_control=etree.XSLTAccessControl.DENY_ALL)
     result = transform(data)   
     result = str(result)
     log.info("DataTransform result: {0}".format(result))
@@ -441,11 +451,12 @@ class ExtendedXpathEvaluator:
     return
   
   def Save(self, context, fileName=None):
-    self._doc.save_to_file(fileName)
+    log.warning("Save not implemented")
+    return
   
   def SaveSigned(self, context, fileName=None):
-    log.warning("SaveSigned implemented as non-signed version")
-    self._doc.save_to_file(fileName)
+    log.warning("SaveSigned not implemented")
+    return
       
   def RefreshElements(self, context, xpath):
     log.warning("RefreshElements not implemented")
@@ -453,15 +464,11 @@ class ExtendedXpathEvaluator:
   
   def SaveAs(self, context, fileName):
     log.warning("SaveAs not implemented")
-    res = self._doc.save_to_file(fileName)
-    if res["type"] == msg_types.INFO:
-      return res["filename"]
-    else:
-      return ""
+    return ""
   
   def SaveAsSigned(self, context, fileName):    
-    log.warning("SaveSigned implemented as non-signed version")    
-    return self.SaveAs(context, fileName)
+    log.warning("SaveAsSigned not implemented")
+    return ""
   
   def GetTmpFileName(self, context, fileName=None):
     log.warning("GetTmpFileName not implemented")
@@ -607,6 +614,9 @@ class ExtendedXpathEvaluator:
     return path
   
   def SetValueToData(self, context, value):
+    if not self._doc.user_action_running:
+      log.warning("SetValueToData outside a user's action")
+      return
     # get form602bindref attribute
     bindref = context.context_node.get("form602bindref")
     if bindref is None:
@@ -676,9 +686,8 @@ class ExtendedXpathEvaluator:
 
 
 
-# zfoengine: what a form's script may ask for through DataXpath, unlike an expression of the form itself. Everything else
-# reads the user's environment or acts on the application, and an expression can name it in a computed string, so the
-# refusal sits here and not in the text of the query.
+# zfoengine: what a form's script may ask for through DataXpath. An expression can name a function in a computed string, so
+# the refusal sits here and not in the text of the query.
 _READABLE_FROM_SCRIPTS = {
   "TempNodeContextStringLength", "RCCheck", "GetListItemData", "DataXpath", "DataXPath", "If", "IsEmpty", "StrCat", "StrCmp",
   "Round", "And", "Or", "Not", "CurrentDate", "CurrentTime", "CurrentTimeUTC", "FormID", "GetNumSigns", "GetDataStr", "GetHash",
