@@ -269,6 +269,10 @@ def value_of_a(doc):
 WRITE = "GetDocument().GetElement().SetDataTo('a', 'zmeneno');"
 
 
+def load_part(content, path):
+    return f'var part = new Variant(VarStr, ""); part.format = VarFXML; part.data = "{content}"; GetDocument().LoadFormDataPart(part, "{path}");'
+
+
 class HostileFormScripts(unittest.TestCase):
     def test_what_reaches_outside_the_form_stops_the_script_and_undoes_it(self):
         for call in ("GetDocument().SendData(1, 2)", "GetDocument().SendDataToEPortal(1)", "GetDocument().SaveData(1)", "GetDocument().Print2PDF(1)",
@@ -282,6 +286,27 @@ class HostileFormScripts(unittest.TestCase):
                 self.assertIn("refused", result)
                 self.assertEqual(value_of_a(doc), "puvodni")
                 self.assertFalse(doc.get_value("soucet"))
+
+    def test_loading_an_empty_part_restores_it_as_published(self):
+        doc = form_running("var e = GetDocument().GetElement(); e.SetDataTo('b', 'vyplneno');" + load_part("<sekce></sekce>", "/d:root/d:sekce"))
+        result = click(doc)
+        self.assertNotIn("refused", result)
+        self.assertFalse(doc.get_value("b"))
+        self.assertIn("sekce", result["sections"])
+
+    def test_only_an_empty_part_of_the_same_name_loads(self):
+        for content, path in (("<sekce><b>cizi</b></sekce>", "/d:root/d:sekce"), ("<sekce b='cizi'/>", "/d:root/d:sekce"),
+                              ("<jina></jina>", "/d:root/d:sekce"), ("cizi", "/d:root/d:sekce"), ("<!DOCTYPE x><sekce/>", "/d:root/d:sekce"),
+                              ("<sekce></sekce>", "/d:root/d:neni"), ("<sekce></sekce>", "/d:root/d:sekce/text()"), ("<sekce></sekce>", "(((")):
+            with self.subTest(content=content, path=path):
+                doc = form_running(WRITE + load_part(content, path))
+                self.assertIn("refused", click(doc))
+                self.assertEqual(value_of_a(doc), "puvodni")
+
+    def test_an_empty_part_does_not_clear_several_copies_at_once(self):
+        doc = form_running("var e = GetDocument().GetElement(); e.InsertSection('//*[@form602id=\"s\"]');" + WRITE + load_part("<sekce/>", "/d:root/d:sekce"))
+        self.assertIn("refused", click(doc))
+        self.assertEqual(value_of_a(doc), "puvodni")
 
     def test_a_script_cannot_catch_being_refused(self):
         doc = form_running(WRITE + "try { GetDocument().SendData(1); } catch (e) { GetDocument().GetElement().SetDataTo('b', 'x'); }")

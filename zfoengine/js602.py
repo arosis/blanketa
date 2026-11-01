@@ -2652,6 +2652,11 @@ def run_form_action(interpreter, source, host):
     xsl_name = interpreter.get(parameters, "xslName") if isinstance(parameters, ScriptObject) else UNDEFINED
     return ScriptObject({"data": host.form_data(to_string(xsl_name))})
 
+  def load_form_data_part(part=UNDEFINED, path=UNDEFINED):
+    content = interpreter.get(part, "data") if isinstance(part, ScriptObject) else UNDEFINED
+    host.load_empty_data_part(text(content), text(path))
+    return UNDEFINED
+
   element = HostObject("element", {
     "DataXpath": native(data_xpath),
     "GetCurrentDataXPath": native(host.current_path),
@@ -2669,6 +2674,7 @@ def run_form_action(interpreter, source, host):
     "SetProgressInfo": native(lambda *_: UNDEFINED),
     "CheckData": native(lambda *_: host.check_data()),
     "GetFormData": native(form_data),
+    "LoadFormDataPart": native(load_form_data_part),
   })
   named_parameters = host.named_parameters
   globals_for_action = {

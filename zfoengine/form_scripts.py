@@ -39,6 +39,7 @@ DATA_ROOT_PATH = "/*"
 XML_LANG_ATTRIBUTE = "{http://www.w3.org/XML/1998/namespace}lang"
 FO_NAMESPACES = {"fo": ns.FO_URI, "fm": ns.FM_URI}
 TRAILING_POSITION = re.compile(r"^(.*)\[(\d+)\]$", re.S)
+EMPTY_ELEMENT = re.compile(r"<([\w.\-]+)\s*(?:/>|></\1\s*>)")
 
 
 class _AnswerNeeded(js602.Unsupported):
@@ -204,6 +205,31 @@ class FormActionHost:
     self._charge_section_change()
     document.delete_section(f"{bind_id}-rep-{position}", _repe_text({**others, bind_id: position}))
     return True
+
+  def _only_data_element(self, tree, path):
+    document = self.document
+    try:
+      found = tree.xpath(path, namespaces=document._get_used_ns_prefix(path))
+    except (etree.LxmlError, ValueError, TypeError) as error:
+      raise js602.Unsupported("document.LoadFormDataPart") from error
+    if not isinstance(found, list) or len(found) != 1 or not etree.iselement(found[0]):
+      raise js602.Unsupported("document.LoadFormDataPart")
+    return found[0]
+
+  def _replace_with_published(self, tree, path, published):
+    current = self._only_data_element(tree, path)
+    current.getparent().replace(current, copy.deepcopy(published))
+
+  def load_empty_data_part(self, content, path):
+    # Forms clear a part of their data by loading it empty. Any other content would come from a file or the network.
+    empty_element = EMPTY_ELEMENT.fullmatch(content)
+    document = self.document
+    published = self._only_data_element(document.original_model, path)
+    if not empty_element or empty_element.group(1) != etree.QName(published).localname or published.getparent() is None:
+      raise js602.Unsupported("document.LoadFormDataPart")
+    self._charge_section_change()
+    self._replace_with_published(document._get_data_root(), path, published)
+    self._replace_with_published(document._get_computable_data_root(), path, published)
 
   def activate_field(self, path):
     found = self._form_elements(path)
