@@ -39,7 +39,6 @@ import base64
 from . import evaluate as ev
 from . import js602, msg_types, tools
 
-
 XML_NAMESPACE = "http://www.w3.org/XML/1998/namespace"
 
 

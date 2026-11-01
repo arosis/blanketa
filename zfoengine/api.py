@@ -26,8 +26,8 @@ import logging
 import threading
 import zipfile
 
-from . import gtkgui_events_handlers as geh
 from . import form_scripts, msg_types, msgs, zfo_parser
+from . import gtkgui_events_handlers as geh
 from .global_var import Global
 
 log = logging.getLogger("zfo.api")

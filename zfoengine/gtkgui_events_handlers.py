@@ -36,8 +36,7 @@ import logging
 
 import lxml.etree as etree
 
-from . import app_events, form_scripts, msg_types, msgs, ns, tags, tools
-from . import evaluate as ev
+from . import app_events, form_scripts, msg_types, msgs, tags, tools
 from . import msg_class as mc
 
 log = logging.getLogger("zfo.gtkgui_events_handlers")
