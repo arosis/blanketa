@@ -26,8 +26,8 @@ import logging
 import threading
 import zipfile
 
+from . import form_scripts, msg_types, msgs, zfo_parser
 from . import gtkgui_events_handlers as geh
-from . import msg_types, msgs, zfo_parser
 from .global_var import Global
 
 log = logging.getLogger("zfo.api")
@@ -67,6 +67,7 @@ def open_document(fo_bytes):
   '''
   with _LOCK:
     doc = zfo_parser.parse_fo(fo_bytes, comes_from_zip=True)
+    form_scripts.name_repeating_sections_by_bind(doc.root)
     _activate(doc)
     # build the data model now (the GTK app did it lazily on the first message)
     doc._get_data_root()

@@ -25,7 +25,7 @@ import pdf_sign
 import zfo_sign
 import zfo_verify
 from zfoengine import api as engine
-from zfoengine import js602
+from zfoengine import form_scripts, js602
 
 ROOT = Path(__file__).resolve().parent
 RESOURCES = Path(getattr(sys, "_MEIPASS", ROOT))
@@ -45,8 +45,7 @@ DAMAGED_PAGE = ("<!doctype html><meta charset=utf-8><title>Soubor nelze otevří
                 "<body style='font:14px system-ui,sans-serif;padding:24px'><h1 style='font-size:18px'>Soubor nelze otevřít</h1>"
                 "<p>Soubor může být poškozený nebo nejde o formulář, který Blanketa umí přečíst. Může jít i o chybu Blankety; "
                 "pokud ho jiná aplikace otevře, dejte nám prosím vědět.</p>")
-# These scripts never run here: they could reach the network, files and signing.
-NEVER_RUN_SCRIPT_ATTRIBUTES = ("form602btnclick", "form602onchange", "form602attchuploadstartaction")
+NEVER_RUN_SCRIPT_ATTRIBUTES = ("form602attchuploadstartaction",)
 SESSIONS = {}
 SHOWN_CERTIFICATES_BY_ID = {}
 IMPORTS = {}
@@ -217,6 +216,8 @@ def render_zfo_page(name, blank=False, data=None):
         fo = published_form_with_data(fo, data)
     session = new_session({"name": name, "doc": engine.open_document(fo)})
     doc = parse_fo(fo)
+    form_scripts.name_buttons_for_page(doc)
+    form_scripts.name_repeating_sections_by_bind(doc)
     for hidden in doc.xpath("//dsig:SignatureProperties | //dsig:Object[not(@Id)]", namespaces={"dsig": DS}):
         hidden.getparent().remove(hidden)
     html = etree.tostring(XSLT(etree.ElementTree(doc), PATH_TO_JS="'/static/scripts/'",
@@ -317,6 +318,10 @@ def count_never_run_scripts(doc):
                if element.get(attribute, "").lstrip().startswith("{"))
 
 
+def has_downloaded_lists(doc):
+    return any(element.get("updateurl") for element in doc.iter(f"{{{FM}}}enum"))
+
+
 def summary_and_modification_time(path):
     if not zfo_verify.is_zip_form(path):
         return None, datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds")
@@ -336,7 +341,7 @@ def form_info(name):
             "form_id": attribute_or_default(params, "form-id") or attribute_or_default(summary, "form-id"),
             "created": attribute_or_default(params, "creationdate"), "modified": modified,
             "version": attribute_or_default(params, "xmlcore-version"), "scripts": len(binds_with_unsupported_scripts(fo)),
-            "actions": count_never_run_scripts(fo)}
+            "actions": count_never_run_scripts(fo), "downloaded_lists": has_downloaded_lists(fo)}
 
 
 def filled_form(session, key=None, cert=None):

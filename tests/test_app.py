@@ -256,7 +256,8 @@ class UnsupportedForms(unittest.TestCase):
         self.assertEqual(app.binds_with_unsupported_scripts(doc), ["y", "z"])
 
     def test_script_actions_are_counted_and_xpath_ones_are_not(self):
-        doc = self.parsed('<a form602btnclick="{ SendData(); }"/><a form602onchange=" { x(); }"/><a form602btnclick="SendAppEvent(1)"/>')
+        doc = self.parsed('<a form602attchuploadstartaction="{ SendData(); }"/><a form602attchuploadstartaction=" { x(); }"/>'
+                          '<a form602attchuploadstartaction="SendAppEvent(1)"/><a form602btnclick="{ SendData(); }"/>')
         self.assertEqual(app.count_never_run_scripts(doc), 2)
 
     @staticmethod
@@ -644,7 +645,12 @@ class FormScripts(unittest.TestCase):
     def test_form_description_reports_what_does_not_run(self):
         fo = etree.fromstring(zipfile.ZipFile(ROOT / "samples/skripty/vypocty.zfo").read("form.fo"))
         self.assertEqual(app.binds_with_unsupported_scripts(fo), ["odeslano"])
-        self.assertEqual(app.count_never_run_scripts(fo), 1)
+        self.assertEqual(app.count_never_run_scripts(fo), 0)
+
+    def test_xpath_number_is_stored_as_xpath_writes_it(self):
+        doc = engine.open_document((FORM_WITH_ATTRIBUTE % "1 + 1").encode())
+        engine.handle(doc, "recalc_form", "")
+        self.assertEqual(doc._get_data_root().getroot()[0].get("a"), "2")
 
     def test_cadastre_form_agrees_with_form_filler(self):
         # samples/ref-filler was saved by Form Filler: with tisk=0 all three checks are 0.

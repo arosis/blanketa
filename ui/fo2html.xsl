@@ -26,6 +26,67 @@
     </input>
   </xsl:template>
 
+  <!-- Some forms download a code list when they open, and a form gets no network here. The field stays fillable by hand:
+       as an empty list it could never be filled, and a required one would stop the form at each check. -->
+  <xsl:template name="create-select">
+    <xsl:param name="list-name"/>
+    <xsl:param name="list-bindname"/>
+    <xsl:param name="tooltip"/>
+    <xsl:variable name="items" select="//fm:enum[@name=$list-name]/fm:list/fm:listitem"/>
+    <xsl:choose>
+      <xsl:when test="$items">
+        <select title="{$tooltip}" style="width: 100%;" name="{@form602bind}">
+          <xsl:call-template name="draw-list">
+            <xsl:with-param name="items" select="$items"/>
+          </xsl:call-template>
+        </select>
+      </xsl:when>
+      <xsl:otherwise>
+        <input type="text" title="{$tooltip}" style="width: 100%;" name="{@form602bind}"/>
+      </xsl:otherwise>
+    </xsl:choose>
+  </xsl:template>
+
+  <xsl:template match="fo:inline[@form602ct='acm']">
+    <input type="text" title="{@form602tooltip}" style="width: 100%;" name="{@form602bind}"/>
+  </xsl:template>
+
+  <!-- A button with a script names itself by its position: the script stays on the server and runs from there. -->
+  <xsl:template name="button-input">
+    <button type="button" title="{@form602tooltip}" zfo-app-event="{@form602btnclick}">
+      <xsl:choose>
+        <xsl:when test="@blanketa-button">
+          <xsl:attribute name="onclick">run_form_button(this)</xsl:attribute>
+          <xsl:attribute name="data-form-button"><xsl:value-of select="@blanketa-button"/></xsl:attribute>
+        </xsl:when>
+        <xsl:otherwise>
+          <xsl:attribute name="onclick">perform_click_action(this)</xsl:attribute>
+          <xsl:attribute name="value"><xsl:value-of select="@form602btnclick"/></xsl:attribute>
+        </xsl:otherwise>
+      </xsl:choose>
+      <xsl:apply-templates/>
+    </button>
+  </xsl:template>
+
+  <xsl:template match="fo:instream-foreign-object[@blanketa-button]">
+    <button type="button" class="zfo-picture-button" title="{@form602tooltip}" zfo-app-event="{@form602btnclick}"
+            onclick="run_form_button(this)" data-form-button="{@blanketa-button}">
+      <xsl:apply-templates/>
+    </button>
+  </xsl:template>
+
+  <!-- A section named only by its bind has buttons of the form's own, the page's + and - would double them. -->
+  <xsl:template match="fo:block[@blanketa-section-by-bind]">
+    <div name="div-rep-container">
+      <div name="{@form602repe}-rep-0" class="602-repetition-block zfo-section-with-own-buttons">
+        <button onclick="clone_div(this.parentNode)" type="button">+</button>
+        <button onclick="del_div(this.parentNode)" type="button">-</button>
+        <br/>
+        <xsl:apply-templates mode="check-for-pre"/>
+      </div>
+    </div>
+  </xsl:template>
+
   <!-- Barcode the form draws itself (zfo-editor drops it): an SVG from barcode.py; its text when it cannot be drawn. -->
   <xsl:template match="fm:barcode">
     <xsl:variable name="src" select="bl:barcode(string(@symbology), normalize-space(.), string(@barcode-height),
