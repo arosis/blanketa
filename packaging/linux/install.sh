@@ -16,7 +16,7 @@ Exec=$DATA/blanketa/Blanketa %F
 Icon=blanketa
 Terminal=false
 Categories=Office;Viewer;
-MimeType=application/vnd.software602.filler.form-xml-zip;application/pdf;
+MimeType=application/vnd.software602.filler.form-xml-zip;application/vnd.software602.filler.form+xml;application/pdf;
 DESKTOP
 cp "$HERE/_internal/assets/blanketa.png" "$DATA/icons/hicolor/512x512/apps/blanketa.png"
 cat > "$DATA/mime/packages/blanketa.xml" <<'XML'
@@ -25,6 +25,11 @@ cat > "$DATA/mime/packages/blanketa.xml" <<'XML'
   <mime-type type="application/vnd.software602.filler.form-xml-zip">
     <comment>Formulář 602XML (ZFO)</comment>
     <glob pattern="*.zfo"/>
+  </mime-type>
+  <mime-type type="application/vnd.software602.filler.form+xml">
+    <comment>Formulář 602XML (FO)</comment>
+    <sub-class-of type="application/xml"/>
+    <glob pattern="*.fo" weight="60"/>
   </mime-type>
 </mime-info>
 XML

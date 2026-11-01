@@ -1,7 +1,7 @@
 """Builds Blanketa for Windows or Linux on that system (PyInstaller cannot cross-compile) into dist/:
 
     Windows: dist/Blanketa/ (Blanketa.exe), Blanketa-<version>-windows-x64.zip, and with Inno Setup installed
-             Blanketa-<version>-setup.exe (installer that opens .zfo files with Blanketa)
+             Blanketa-<version>-setup.exe (installer that opens .zfo and .fo files with Blanketa)
     Linux:   dist/Blanketa/, blanketa_<version>_<arch>.deb (Ubuntu, Debian, Mint …) and blanketa-<version>-linux-<arch>.tar.gz
 
     python tools/build_desktop.py

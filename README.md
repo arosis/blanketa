@@ -5,7 +5,7 @@
 **Web: [blanketa.cz](https://blanketa.cz)** · autor: [Richard Winkler Bejr](https://winkler-bejrovi.cz)
 
 Aplikace pro macOS, Windows a Linux (Ubuntu, Debian, Mint …) na vyplňování a elektronické podepisování:
-- **formulářů 602XML (`.zfo`)**, které jinak otevře jen Software602 Form Filler pro Windows (např. ČÚZK návrh na vklad, formuláře ČSSZ a krajů);
+- **formulářů 602XML (`.zfo` a `.fo`)**, které jinak otevře jen Software602 Form Filler pro Windows (např. ČÚZK návrh na vklad, formuláře ČSSZ a krajů);
 - **PDF formulářů (AcroForm)**.
 
 Podepisuje se certifikátem:
@@ -32,7 +32,7 @@ Hotové balíčky vytváří GitHub Actions (`.github/workflows/build.yml`) při
 | Systém | Soubor | Instalace |
 |---|---|---|
 | macOS | `Blanketa-<verze>-macos.dmg` (nebo `.zip`) | přetáhnout do Aplikací; poprvé otevřít přes pravé tlačítko → Otevřít (není notarizovaná) |
-| Windows 10/11 | `Blanketa-<verze>-setup.exe` | instalátor bez práv správce; nabídne otevírání `.zfo` v Blanketě. Přenosná verze: `…-windows-x64.zip` |
+| Windows 10/11 | `Blanketa-<verze>-setup.exe` | instalátor bez práv správce; nabídne otevírání `.zfo` a `.fo` v Blanketě. Přenosná verze: `…-windows-x64.zip` |
 | Ubuntu 22.04 a novější, Debian 12 a novější, Mint 21 a novější | `blanketa_<verze>_amd64.deb` | `sudo apt install ./blanketa_<verze>_amd64.deb` |
 | jiný Linux s glibc 2.35 a novější | `blanketa-<verze>-linux-amd64.tar.gz` | rozbalit a spustit `Blanketa/install.sh` (bez roota, do domovské složky) |
 
@@ -183,7 +183,6 @@ Kontrola podpisu bez okna (používá ji i CI):
 - Výpočty a kontroly psané v JavaScriptu 602 běží v izolovaném interpretu bez přístupu k souborům, síti a podpisu. Stejně běží skripty tlačítek a změn polí: zapisují jen do dat formuláře, přepínají kroky průvodce a přidávají a odebírají sekce. Odeslat, uložit, vytisknout ani podepsat nemůžou. Co interpret neumí, nechá beze změny a upozorní na to.
 - Formulář nedostane síť. Číselníky a našeptávače stahované z internetu se nenačtou a pole se vyplňují ručně, adresy se v registru RÚIAN neověřují. Blanketa na to upozorní, ale úřad může takové podání odmítnout. Nová sekce přidaná skriptem se vždy zařadí na konec.
 - Výrazy XPath ve formuláři se k počítači uživatele nedostanou: proměnné prostředí, jméno uživatele a cesta k souboru jsou pro ně prázdné a šablony XSLT nesmějí číst ani zapisovat soubory. Události aplikace (`SendAppEvent`) spouští jen tlačítko, na které uživatel klikne.
-- Formuláře `.fo` bez obalu `.zfo` zatím neotevře.
 - Odesílání na portály (submit) není podporované.
 - PDF formuláře XFA nejsou podporované; Blanketa na ně při otevření upozorní.
 - Aplikace není notarizovaná (macOS) ani podepsaná certifikátem vydavatele (Windows SmartScreen ji při prvním spuštění může varovat).

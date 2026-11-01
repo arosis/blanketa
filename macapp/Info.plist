@@ -48,6 +48,25 @@
 				<string>application/vnd.software602.filler.form-xml-zip</string>
 			</dict>
 		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>cz.software602.filler.form-xml</string>
+			<key>UTTypeDescription</key>
+			<string>Formulář 602XML (FO)</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.xml</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>fo</string>
+				</array>
+				<key>public.mime-type</key>
+				<string>application/vnd.software602.filler.form+xml</string>
+			</dict>
+		</dict>
 	</array>
 	<key>CFBundleDocumentTypes</key>
 	<array>
@@ -61,6 +80,18 @@
 			<key>LSItemContentTypes</key>
 			<array>
 				<string>cz.software602.filler.form-xml-zip</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Formulář 602XML (FO)</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>cz.software602.filler.form-xml</string>
 			</array>
 		</dict>
 		<dict>

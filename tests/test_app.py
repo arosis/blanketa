@@ -6,6 +6,7 @@ import copy
 import io
 import json
 import os
+import plistlib
 import re
 import shutil
 import subprocess
@@ -38,6 +39,7 @@ os.environ["ZFO_OFFLINE"] = "1"  # tests never download trusted lists
 
 import app  # noqa: E402
 import barcode  # noqa: E402
+import desktop  # noqa: E402
 import pdf_sign  # noqa: E402
 import zfo_verify  # noqa: E402
 from zfoengine import api as engine  # noqa: E402
@@ -116,6 +118,121 @@ class FormDescription(unittest.TestCase):
                 other = [n for n in original.namelist() if n != "form.fo"][0]
                 self.assertEqual(saved.getinfo(other).date_time, original.getinfo(other).date_time)
                 self.assertEqual(saved.read("form.fo"), original.read("form.fo"))
+
+
+class PlainFoForms(unittest.TestCase):
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.folder = Path(folder.name)
+        self.zfo = ROOT / "samples/cuzk/form.zfo"
+        self.path = self.folder / "form.fo"
+        self.path.write_bytes(zipfile.ZipFile(self.zfo).read("form.fo"))
+        for patcher in (mock.patch.dict(app.FORMS, {"plain": self.path}),
+                        mock.patch.object(app, "SINGLE_FILE", True)):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def open_session(self, name="plain"):
+        page = app.render_zfo_page(name)
+        return app.SESSIONS[re.search(r"const SESSION = '([\w-]+)'", page).group(1)]
+
+    def signing_identity(self):
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        name = x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME, "Test")])
+        cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
+                .serial_number(x509.random_serial_number()).not_valid_before(datetime(2020, 1, 1))
+                .not_valid_after(datetime(2040, 1, 1)).sign(key, hashes.SHA256()))
+        return key, cert
+
+    def test_publisher_signatures_verify_as_in_zfo(self):
+        plain = app.zfo_signatures(self.path.read_bytes())
+        zipped = app.zfo_signatures(zipfile.ZipFile(self.zfo).read("form.fo"))
+        self.assertTrue(plain and all(signature["intact"] for signature in plain))
+        self.assertEqual(plain, zipped)
+
+    def test_description_has_the_file_time_and_no_summary(self):
+        os.utime(self.path, (1_700_000_000, 1_700_000_000))
+        info = app.form_info("plain")
+        self.assertEqual(info["title"], "")
+        self.assertEqual(info["modified"], datetime.fromtimestamp(1_700_000_000).isoformat())
+        self.assertTrue(info["form_id"])
+
+    def test_saving_keeps_plain_xml_in_the_same_file(self):
+        result = app.save_zfo(self.open_session())
+        self.assertEqual(result["saved"], str(self.path))
+        self.assertTrue(self.path.read_bytes().startswith(b"<?xml"))
+        self.assertTrue(all(signature["intact"] for signature in result["signatures"]))
+
+    def test_filled_value_survives_saving_and_opening_again(self):
+        self.path.write_bytes(zipfile.ZipFile(ROOT / "samples/dva-ucastnici/form.zfo").read("form.fo"))
+        session = self.open_session()
+        engine.handle(session["doc"], "store_val", {"field": "o1_prijmeni", "value": "Nováková", "input_id": "o1_prijmeni",
+                                                    "repe": "table---opak1-rep-0"})
+        app.save_zfo(session)
+        reopened = engine.data_element(self.open_session()["doc"])
+        self.assertEqual(reopened.xpath("//d:o1_prijmeni", namespaces=NS)[0].text, "Nováková")
+
+    def test_signing_writes_a_plain_signed_copy_beside_the_form(self):
+        session = self.open_session()
+        with mock.patch.object(app.certstore, "load_identity", return_value=self.signing_identity()):
+            result = app.save_zfo(session, "test")
+        target = self.folder / "form-podepsany.fo"
+        self.assertEqual(result["saved"], str(target))
+        self.assertFalse(zipfile.is_zipfile(target))
+        layers = zfo_verify.describe_signature_layers(zfo_verify.load_form_root(target))
+        self.assertEqual(layers[0]["subject"], "Test")
+        self.assertTrue(all(layer["intact"] for layer in layers))
+
+    def test_saving_outside_a_single_file_window_keeps_the_extension(self):
+        (self.folder / "out").mkdir()
+        with mock.patch.object(app, "SINGLE_FILE", False), mock.patch.object(app, "ROOT", self.folder):
+            result = app.save_zfo(self.open_session())
+        self.assertEqual(result["saved"], str(self.folder / "out/plain-ulozeny.fo"))
+
+    def test_the_content_decides_the_container_not_the_extension(self):
+        zip_named_fo = self.folder / "zip.fo"
+        zip_named_fo.write_bytes(self.zfo.read_bytes())
+        xml_named_zfo = self.folder / "xml.zfo"
+        xml_named_zfo.write_bytes(self.path.read_bytes())
+        with mock.patch.dict(app.FORMS, {"zip-named-fo": zip_named_fo, "xml-named-zfo": xml_named_zfo}):
+            app.save_zfo(self.open_session("zip-named-fo"))
+            app.save_zfo(self.open_session("xml-named-zfo"))
+        self.assertTrue(zipfile.is_zipfile(zip_named_fo))
+        self.assertFalse(zipfile.is_zipfile(xml_named_zfo))
+
+
+# Copied from webview.util.parse_file_type: pywebview raises ValueError on anything else, and the tests run without it.
+PYWEBVIEW_FILE_TYPE_PATTERN = r"^([\w ]+)\((\*(?:\.(?:\w+|\*))*(?:;\*(?:\.(?:\w+|\*))*)*)\)$"
+
+
+class FileAssociations(unittest.TestCase):
+    FO_MIME_TYPE = "application/vnd.software602.filler.form+xml"
+
+    def test_macos_declares_the_type_and_the_document(self):
+        with open(ROOT / "macapp/Info.plist", "rb") as info:
+            plist = plistlib.load(info)
+        declared = next(item for item in plist["UTImportedTypeDeclarations"]
+                        if item["UTTypeTagSpecification"]["public.filename-extension"] == ["fo"])
+        document_types = [content_type for item in plist["CFBundleDocumentTypes"] for content_type in item["LSItemContentTypes"]]
+        self.assertIn(declared["UTTypeIdentifier"], document_types)
+
+    def test_windows_registers_the_extension(self):
+        script = (ROOT / "packaging/windows/blanketa.iss").read_text(encoding="utf-8")
+        self.assertIn(r'Software\Classes\.fo\OpenWithProgids"; ValueType: string; ValueName: "Blanketa.fo"', script)
+        self.assertIn(r'Software\Classes\Blanketa.fo\shell\open\command', script)
+
+    def test_linux_packages_declare_the_type(self):
+        for name in ("blanketa.desktop", "install.sh"):
+            self.assertIn(self.FO_MIME_TYPE, (ROOT / "packaging/linux" / name).read_text(encoding="utf-8"), name)
+        for name in ("blanketa-mime.xml", "install.sh"):
+            self.assertIn('<glob pattern="*.fo" weight="60"/>', (ROOT / "packaging/linux" / name).read_text(encoding="utf-8"), name)
+
+    def test_file_dialogs_offer_the_extension(self):
+        self.assertTrue(any("*.fo" in file_type for file_type in desktop.OPEN_DIALOG_FILE_TYPES))
+        for file_type in desktop.OPEN_DIALOG_FILE_TYPES:
+            self.assertRegex(file_type, PYWEBVIEW_FILE_TYPE_PATTERN)
+        self.assertIn('UTType(filenameExtension: "fo")', (ROOT / "macapp/main.swift").read_text(encoding="utf-8"))
 
 
 class UnsupportedForms(unittest.TestCase):
