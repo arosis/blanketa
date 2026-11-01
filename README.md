@@ -33,8 +33,8 @@ Hotové balíčky vytváří GitHub Actions (`.github/workflows/build.yml`) při
 |---|---|---|
 | macOS | `Blanketa-<verze>-macos.dmg` (nebo `.zip`) | přetáhnout do Aplikací; poprvé otevřít přes pravé tlačítko → Otevřít (není notarizovaná) |
 | Windows 10/11 | `Blanketa-<verze>-setup.exe` | instalátor bez práv správce; nabídne otevírání `.zfo` v Blanketě. Přenosná verze: `…-windows-x64.zip` |
-| Ubuntu, Debian, Mint | `blanketa_<verze>_amd64.deb` | `sudo apt install ./blanketa_<verze>_amd64.deb` |
-| jiný Linux | `blanketa-<verze>-linux-amd64.tar.gz` | rozbalit a spustit `Blanketa/install.sh` (bez roota, do domovské složky) |
+| Ubuntu 22.04 a novější, Debian 12 a novější, Mint 21 a novější | `blanketa_<verze>_amd64.deb` | `sudo apt install ./blanketa_<verze>_amd64.deb` |
+| jiný Linux s glibc 2.35 a novější | `blanketa-<verze>-linux-amd64.tar.gz` | rozbalit a spustit `Blanketa/install.sh` (bez roota, do domovské složky) |
 
 Windows potřebují Microsoft Edge WebView2 (Windows 10/11 ho mají; instalátor jinak nabídne stažení).
 
