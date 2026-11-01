@@ -20,6 +20,7 @@ on:
       - packaging/**
       - requirements*.txt
       - tools/build_desktop.py
+      - tools/check-deb-starts.sh
       - winsign.ps1
   push:
     branches: [main]
@@ -148,9 +149,17 @@ jobs:
           python -m pip install -q --require-hashes --only-binary :all: -r requirements-build.txt
           python -m pip install -q --require-hashes --only-binary :all: --no-binary proxy-tools --no-build-isolation -r requirements-desktop.txt
       - name: Build app and packages
-        # dpkg's default zstd level takes six minutes for 20 % less size, which only a released .deb is worth.
-        env: {DEB_COMPRESSION_LEVEL: "${{ github.ref_type != 'tag' && '3' || '' }}"}
+        # The default xz level is several times slower, for a smaller file that only a released .deb is worth.
+        env: {DEB_COMPRESSION_LEVEL: "${{ github.ref_type != 'tag' && '1' || '' }}"}
         run: python tools/build_desktop.py
+      - name: Install and start the .deb on the other supported systems
+        run: |
+          for image in \
+            debian:12@sha256:d74df7598108a173a621eda4d58a2adbf850b2d9a9d81bc2cca1a6c21174a880 \
+            debian:13@sha256:2dc419c6d7fe3dad0a2f9fd469c34cc90b0f9ba642d8fde837fe3d7d34a0e7f1 \
+            ubuntu:24.04@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852; do
+            docker run --rm -v "$PWD:/repo:ro" "$image" sh /repo/tools/check-deb-starts.sh
+          done
       - name: Install the .deb and take a screenshot
         run: |
           sudo apt-get install -y -q ./dist/blanketa_*_amd64.deb
