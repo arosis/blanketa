@@ -1468,9 +1468,9 @@ pyobjc-framework-security==12.2.2 ; sys_platform == 'darwin' \
     --hash=sha256:ca580d5f56e1222d63f1322a4fbf63be0bad77e77cca084290310df007b3fdde \
     --hash=sha256:f5afda32efbfdef150e921563b94a799ea104e575f4a95b8c5cd71a2322413a8
     # via pywebview
-pyobjc-framework-uniformtypeidentifiers==12.2.2 ; sys_platform == 'darwin' \
-    --hash=sha256:12f8ba77dcc949ffb9f0f48743cae326aebec8e69cb1ac55a1d1e04dca7bd59a \
-    --hash=sha256:1dc6a538df07c410e4bfd6457adcb0b663a5e0df331905dbe135bcfd3f89ae57
+pyobjc-framework-uniformtypeidentifiers==13.0 ; sys_platform == 'darwin' \
+    --hash=sha256:5375270af9980825b3a20267312bbd616e9828c4b7d5ab008c98d9bf6b8a51e3 \
+    --hash=sha256:d70ae3722c91c57de71a77d1004a22a118e38798f66c30552cb93754f7a9cbb5
     # via pywebview
 pyobjc-framework-webkit==12.2.2 ; sys_platform == 'darwin' \
     --hash=sha256:0be3ed885100dd38c6b927c9a25a63f22fd624bc4c6bb3d3af14fab5dcdcfc97 \
