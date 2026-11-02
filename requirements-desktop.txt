@@ -1456,17 +1456,16 @@ pyobjc-framework-quartz==12.2.2 ; sys_platform == 'darwin' \
     --hash=sha256:d89a5f47c079b5c340d2b1cbb83eb6c4c92d4bb17cd4daf7d8c02c91a49f5399 \
     --hash=sha256:ebf8167ca2096cf3a05199decfa517be0df4c56048f49cf132bd6b1a6ab9c086
     # via pywebview
-pyobjc-framework-security==12.2.2 ; sys_platform == 'darwin' \
-    --hash=sha256:266f41995f2fc80660c8451bdb199a7e259a6cad02fbc1e0e2f69dd5576e2203 \
-    --hash=sha256:33efab1ff7d18570148f8f3ddd44eca305f733aee00b9115d5263bef81018f65 \
-    --hash=sha256:4cc2e7352f4ca67a43bcf65587a024fdafdea5f5fcae7264b896e39cd68d5718 \
-    --hash=sha256:54b9b7a03f2e4a7e1ac182239d63cb94bc3628293f39637c17d3ececd495a619 \
-    --hash=sha256:67655616bd0b9e05bd6a18fa353c5a7bc1743f79f1774644dbb180a2c62bf65b \
-    --hash=sha256:786da49c319318bb4cf168755d4a9324a6b3720a3dd7503990249c2a27b661ee \
-    --hash=sha256:a78b6945d4681e319e03757c8039ac4014833ede1d883aa793a286f48fa93bb7 \
-    --hash=sha256:c4726b41c96a611fa13880bcfcb38a32ac9256239adb5b48d559dc4d0c9d0b99 \
-    --hash=sha256:ca580d5f56e1222d63f1322a4fbf63be0bad77e77cca084290310df007b3fdde \
-    --hash=sha256:f5afda32efbfdef150e921563b94a799ea104e575f4a95b8c5cd71a2322413a8
+pyobjc-framework-security==13.0 ; sys_platform == 'darwin' \
+    --hash=sha256:027e4ec0a3080efa82fadb88de68c7aa5aedacceacf5115faf4c6924704500fb \
+    --hash=sha256:28a54bc028ac5951271ce168043111a478434e2271cbd054d460fdb246acc8ca \
+    --hash=sha256:2fcf3f415090829eb363cdd77df6370be17162700e34cd81d0bcf478c938a4b7 \
+    --hash=sha256:6693e6e083497c6e51ac4533c137f41712b3751cb3c45c3daf7ecc6a197d437e \
+    --hash=sha256:77fe472d115e527fdcaa9b97de693307deaf2c3bea36058b47ec1a5048b4a0bd \
+    --hash=sha256:7c295d54229adf8241538057e9d0106cc24aba452ec0050b0c222c56f707620a \
+    --hash=sha256:e5c3f90773fb53dcd525075011f80a83e6f38cb0ad0bcd13fb8f629bf35d22aa \
+    --hash=sha256:e988fb40d2f0a83e453056829433cb464699fc0fe5169d2db76a833c15cdc769 \
+    --hash=sha256:fa7228c7bfafbec54577d89ada79e3eb772234ba3e65e4c11873b417a7ff920f
     # via pywebview
 pyobjc-framework-uniformtypeidentifiers==12.2.2 ; sys_platform == 'darwin' \
     --hash=sha256:12f8ba77dcc949ffb9f0f48743cae326aebec8e69cb1ac55a1d1e04dca7bd59a \
