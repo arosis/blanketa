@@ -14,6 +14,9 @@ updates:
       - dependency-name: uharfbuzz
         versions: [">=0.56"]
     groups:
+      # Every pyobjc framework requires pyobjc-core of its own version, so a single one cannot move alone.
+      pyobjc:
+        patterns: ["pyobjc*"]
       python-minor-and-patch:
         update-types: [minor, patch]
   - package-ecosystem: github-actions
