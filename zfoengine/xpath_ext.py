@@ -641,7 +641,7 @@ class ExtendedXpathEvaluator:
           if att is None:
             datanode.text = str(value)
           else:
-            datanode.set(att, str(value))
+            datanode.getparent().set(att, str(value))
            
   def SetListDataTo(self, context, node, bindXpath):
     log.warning("SetListDataTo not implemented")
