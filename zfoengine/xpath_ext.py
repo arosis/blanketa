@@ -635,13 +635,7 @@ class ExtendedXpathEvaluator:
         if not len(datanode):
           return
         else:
-          # store value to that node
-          datanode = datanode[0]
-          att = self._doc._path_contains_att(path)
-          if att is None:
-            datanode.text = str(value)
-          else:
-            datanode.getparent().set(att, str(value))
+          self._doc._store_one_value(bindref, path, str(value))
            
   def SetListDataTo(self, context, node, bindXpath):
     log.warning("SetListDataTo not implemented")

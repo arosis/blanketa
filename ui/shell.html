@@ -566,6 +566,13 @@
   };
   const addSection = window.server_add_section_callback;
   window.server_add_section_callback = data => addSection({...data, repe_html: sectionHtml.get(data.repe_html)});
+  // The engine answers a form's button without the values it stored, so the page recalculates and reads them all back.
+  window.perform_click_action_callback = () => {
+    gtk_handler_finished();
+    gtk_handler_start();
+    send(JSON.stringify({type: 'recalc_form', data: ''}));
+    set_inputs_init_values();
+  };
   // Each section copied while opening would bind these two to every field of the page again; once at the end is enough.
   for (const name of ['set_field_info_request_handler', 'set_date_inputs_clear_func']) {
     const original = window[name];

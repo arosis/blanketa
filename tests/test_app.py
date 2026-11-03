@@ -653,6 +653,7 @@ class FormScripts(unittest.TestCase):
         root.set("form602bindref", "a")
         doc.perform_click_action("SetValueToData(vlozeno)")
         self.assertEqual(root[0].get("a"), "vlozeno")
+        self.assertEqual(doc._get_computable_data_root().getroot()[0].get("a"), "vlozeno")
 
     def test_xpath_number_is_stored_as_xpath_writes_it(self):
         doc = engine.open_document((FORM_WITH_ATTRIBUTE % "1 + 1").encode())
