@@ -655,6 +655,16 @@ class FormScripts(unittest.TestCase):
         self.assertEqual(root[0].get("a"), "vlozeno")
         self.assertEqual(doc._get_computable_data_root().getroot()[0].get("a"), "vlozeno")
 
+    def test_button_tells_the_page_whether_it_stored_a_value(self):
+        doc = engine.open_document((FORM_WITH_ATTRIBUTE % "").encode())
+
+        def answer(command):
+            return engine.handle(doc, "perform_click", {"command": command})[0]["data"]
+
+        self.assertIn('{"stored": false}', answer("SetValueToData(vlozeno)"))
+        doc._get_data_root().getroot().set("form602bindref", "a")
+        self.assertIn('{"stored": true}', answer("SetValueToData(vlozeno)"))
+
     def test_xpath_number_is_stored_as_xpath_writes_it(self):
         doc = engine.open_document((FORM_WITH_ATTRIBUTE % "1 + 1").encode())
         engine.handle(doc, "recalc_form", "")

@@ -566,9 +566,10 @@
   };
   const addSection = window.server_add_section_callback;
   window.server_add_section_callback = data => addSection({...data, repe_html: sectionHtml.get(data.repe_html)});
-  // The engine answers a form's button without the values it stored, so the page recalculates and reads them all back.
-  window.perform_click_action_callback = () => {
+  // The engine answers a form's button only with whether it stored a value, so the page recalculates and reads them all back.
+  window.perform_click_action_callback = answer => {
     gtk_handler_finished();
+    if (!answer?.stored) return;
     gtk_handler_start();
     send(JSON.stringify({type: 'recalc_form', data: ''}));
     set_inputs_init_values();

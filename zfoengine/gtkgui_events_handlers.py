@@ -330,8 +330,9 @@ def store_to_file(document, msg_data=None):
 def perform_click(document, msg_data):    
   if ("command" not in msg_data):
     return _construct_web_response("perform_click_action_callback(%s)" % "")  
-  command = msg_data["command"]  
-  if (len(command)):      
+  command = msg_data["command"]
+  stored_before = document.stored_value_count
+  if (len(command)):
     log.debug("Button clicked, command: %s" % command)
     res = document.perform_click_action(command)
   else:
@@ -378,8 +379,9 @@ def perform_click(document, msg_data):
       log.info("Processing break occured!")
       break
   
-  responses = _construct_web_response("perform_click_action_callback(%s)" % "")   
-  for msg in msgs:    
+  stored = {"stored": document.stored_value_count != stored_before}
+  responses = _construct_web_response("perform_click_action_callback(%s)" % json.dumps(stored))
+  for msg in msgs:
     responses += _construct_gtk_info_response(msg[1]+'-'+msg[2], area="message_area", type=msg[0])    
   return responses + boxes
 
