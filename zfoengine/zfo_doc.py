@@ -57,6 +57,7 @@ class ZFO_document:
     self.script_running = False
     self.script_named_parameters = {}
     self.user_action_running = False
+    self.stored_value_count = 0
     self.prefix_map = prefix_map    
     self.content = parsed_content 
     self.root = parsed_content.getroot()
@@ -658,6 +659,7 @@ class ZFO_document:
     '''
     self._store_one_value_to_tree(self._get_data_root(), name, path, value)
     self._store_one_value_to_tree(self._get_computable_data_root(), name, path, value)
+    self.stored_value_count += 1
   
   def _get_ns_prefix(self, ns_uri):
     '''

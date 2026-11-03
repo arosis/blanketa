@@ -647,6 +647,24 @@ class FormScripts(unittest.TestCase):
         self.assertEqual(app.binds_with_unsupported_scripts(fo), ["odeslano"])
         self.assertEqual(app.count_never_run_scripts(fo), 0)
 
+    def test_button_stores_a_value_to_a_field_saved_as_an_attribute(self):
+        doc = engine.open_document((FORM_WITH_ATTRIBUTE % "").encode())
+        root = doc._get_data_root().getroot()
+        root.set("form602bindref", "a")
+        doc.perform_click_action("SetValueToData(vlozeno)")
+        self.assertEqual(root[0].get("a"), "vlozeno")
+        self.assertEqual(doc._get_computable_data_root().getroot()[0].get("a"), "vlozeno")
+
+    def test_button_tells_the_page_whether_it_stored_a_value(self):
+        doc = engine.open_document((FORM_WITH_ATTRIBUTE % "").encode())
+
+        def answer(command):
+            return engine.handle(doc, "perform_click", {"command": command})[0]["data"]
+
+        self.assertIn('{"stored": false}', answer("SetValueToData(vlozeno)"))
+        doc._get_data_root().getroot().set("form602bindref", "a")
+        self.assertIn('{"stored": true}', answer("SetValueToData(vlozeno)"))
+
     def test_xpath_number_is_stored_as_xpath_writes_it(self):
         doc = engine.open_document((FORM_WITH_ATTRIBUTE % "1 + 1").encode())
         engine.handle(doc, "recalc_form", "")
