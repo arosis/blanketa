@@ -653,6 +653,74 @@ class DataChangesOutsideFields(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which("node"), "needs Node.js; CI runners have it")
+class RadioButtonsInSectionCopies(unittest.TestCase):
+    """Runs the radio button handling of ui/shell.html on a page with a group outside sections and two copies of a section."""
+    SCRIPT = """
+    const window = globalThis, sent = [];
+    const formsById = new Map();
+    const document = {body: {append() {}}, createElement: tag => tag === 'div'
+      ? {children: [], append(form) { this.children.push(form); formsById.set(form.id, form); }, get childElementCount() { return this.children.length; }}
+      : {id: ''}};
+    const copies = [{name: 'sekce-rep-0'}, {name: 'sekce-rep-1'}];
+    const radio = (name, value, copy) => ({type: 'radio', name, value, checked: false, copy, id: `${name}-${value}`, attributes: {},
+      closest: () => copy, getAttribute(key) { return this.attributes[key] ?? null; }, setAttribute(key, text) { this.attributes[key] = text; },
+      get form() { return formsById.get(this.attributes.form) ?? null; }});
+    const radios = [radio('mimo', 'x', null), radio('mimo', 'y', null), ...copies.flatMap(copy => ['a', 'b'].map(value => radio('r', value, copy)))];
+    const page = {querySelectorAll: () => radios};
+    const elementsNamed = name => radios.filter(candidate => candidate.name === name);
+    const $ = element => element?.wrapped ? element : {wrapped: element, hasClass: () => false};
+    const is_array = Array.isArray;
+    const get_html_elem = (parent, name) => copies.find(copy => copy.name === name)
+      ?? radios.find(candidate => candidate.name === name && candidate.copy === (parent?.wrapped ?? null));
+    const set_input_value = () => { throw new Error('a radio button reached set_input_value'); };
+    const gtk_handler_start = () => {}, send = message => sent.push(JSON.parse(message)), setStatus = () => {};
+    const shortOneLine = text => text, labelFor = () => '', get_parent_repe = field => field.copy ? `block---${field.copy.name}` : '';
+    let lastField = null;
+    %s
+    eval(process.argv[1]);
+    console.log(JSON.stringify({checked: radios.filter(candidate => candidate.checked).map(candidate => (candidate.copy?.name ?? 'mimo') + ':' + candidate.value),
+                                forms: radios.map(candidate => candidate.getAttribute('form')), sent}));
+    """
+
+    def page_after(self, call):
+        page = app.SHELL
+        parts = [re.search(pattern, page, re.S).group(0) for pattern in (
+            r"  const SECTION_COPY = .*?window\.fill_inputs = .*?\n  \};", r"  function applyDefault\(.*?\n  \}")]
+        script = self.SCRIPT % "\n".join(parts)
+        return json.loads(subprocess.run(["node", "-e", script, "--", call], capture_output=True, text=True, check=True).stdout)
+
+    def test_each_copy_shows_its_own_value(self):
+        page = self.page_after("fill_inputs(null, {mimo: 'y', sekce: [{r: 'b'}, {r: 'a'}]})")
+        self.assertEqual(page["checked"], ["mimo:y", "sekce-rep-0:b", "sekce-rep-1:a"])
+
+    def test_empty_value_leaves_no_button_of_the_copy_chosen(self):
+        page = self.page_after("fill_inputs(null, {sekce: [{r: 'a'}, {r: 'a'}]}); fill_inputs(null, {sekce: [{r: 'a'}, {r: ''}]})")
+        self.assertEqual(page["checked"], ["sekce-rep-0:a"])
+
+    def test_each_copy_is_a_group_of_its_own(self):
+        forms = self.page_after("fill_inputs(null, {})")["forms"]
+        self.assertEqual(forms[:2], [None, None])
+        self.assertEqual(forms[2], forms[3])
+        self.assertEqual(forms[4], forms[5])
+        self.assertNotEqual(forms[2], forms[4])
+
+    def test_copy_cloned_with_the_group_of_its_original_gets_its_own(self):
+        clone = ("fill_inputs(null, {}); copies[1] = {name: 'sekce-rep-1'}; radios.slice(4).forEach(button => { button.copy = copies[1]; button.setAttribute('form', radios[2].getAttribute('form')); }); "
+                 "fill_inputs(null, {})")
+        forms = self.page_after(clone)["forms"]
+        self.assertNotEqual(forms[2], forms[4])
+
+    def test_value_by_name_alone_goes_to_the_first_group_and_clears_its_choice(self):
+        page = self.page_after("fill_inputs(null, {mimo: 'x', sekce: [{r: 'a'}, {r: 'a'}]}); set_radio_value('r', 'b'); set_radio_value('mimo', '')")
+        self.assertEqual(page["checked"], ["sekce-rep-0:b", "sekce-rep-1:a"])
+
+    def test_default_value_is_stored_for_the_copy_of_the_field(self):
+        page = self.page_after("fill_inputs(null, {sekce: [{r: 'b'}, {r: 'b'}]}); lastField = radios[5]; applyDefault({field: 'r', value: 'a'})")
+        self.assertEqual(page["checked"], ["sekce-rep-0:b", "sekce-rep-1:a"])
+        self.assertEqual(page["sent"], [{"type": "store_val", "data": {"field": "r", "value": "a", "repe": "block---sekce-rep-1", "input_id": "r-b"}}])
+
+
+@unittest.skipUnless(shutil.which("node"), "needs Node.js; CI runners have it")
 class RevocationVerdict(unittest.TestCase):
     """Runs the decision in ui/bridge.js: the certificate below was revoked on 1 June."""
     BEFORE, AFTER = "2026-01-01T00:00:00+00:00", "2026-09-01T00:00:00+00:00"
