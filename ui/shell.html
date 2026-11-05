@@ -457,6 +457,11 @@
   let queue = Promise.resolve();
   let changed = false;
   let ready = false;
+  const noteChange = () => {
+    if (changed || !ready) return;
+    changed = true;
+    renderSignatures();
+  };
   const opening = {populating: false, after: []};
   // The page stays out of layout until the form is complete: the user never sees it half built, and the form scripts'
   // many small changes do not each lay out thousands of fields again. Everything that measures it runs after finishOpening.
@@ -566,10 +571,11 @@
   };
   const addSection = window.server_add_section_callback;
   window.server_add_section_callback = data => addSection({...data, repe_html: sectionHtml.get(data.repe_html)});
-  // The engine answers a form's button only with whether it stored a value, so the page recalculates and reads them all back.
+  // The engine answers a form's button only with whether it changed the data, so the page recalculates and reads them all back.
   window.perform_click_action_callback = answer => {
     gtk_handler_finished();
-    if (!answer?.stored) return;
+    if (!answer?.changed) return;
+    noteChange();
     gtk_handler_start();
     send(JSON.stringify({type: 'recalc_form', data: ''}));
     set_inputs_init_values();
@@ -693,7 +699,7 @@
       }
       if (GlobalVars.handlers_active < 0) GlobalVars.handlers_active = 0;
       if (ready) fitPage();
-      if (type === 'store_val' && !changed && ready) { changed = true; renderSignatures(); }
+      if (type === 'store_val') noteChange();
       if (type === 'get_multiswitch_list' && !window.selectsSynced) {
         window.selectsSynced = true;
         $('select[name]').each(function () { if (this.value && isShownOnceLaidOut(this)) $(this).trigger('change'); });
@@ -740,6 +746,7 @@
       setStatus(`Tuto akci formuláře Blanketa neumí provést (${result.refused}), data zůstala beze změny.`);
       return;
     }
+    if (result.sections || Object.keys(result.values).length) noteChange();
     if (result.sections) redrawSections(result);
     for (const [bind, value] of Object.entries(result.values)) {
       const fields = [...document.getElementsByName(bind)];

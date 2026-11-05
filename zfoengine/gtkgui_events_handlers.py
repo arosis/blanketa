@@ -327,11 +327,14 @@ def store_to_file(document, msg_data=None):
   return _construct_web_response("empty_callback()") +\
          _construct_gtk_info_response(result["msg"], area="message_area", type=msg_types.WARN)
           
+def _saved_data(document):
+  return etree.tostring(document._get_data_root())
+
 def perform_click(document, msg_data):    
   if ("command" not in msg_data):
     return _construct_web_response("perform_click_action_callback(%s)" % "")  
   command = msg_data["command"]
-  stored_before = document.stored_value_count
+  data_before = _saved_data(document)
   if (len(command)):
     log.debug("Button clicked, command: %s" % command)
     res = document.perform_click_action(command)
@@ -379,8 +382,8 @@ def perform_click(document, msg_data):
       log.info("Processing break occured!")
       break
   
-  stored = {"stored": document.stored_value_count != stored_before}
-  responses = _construct_web_response("perform_click_action_callback(%s)" % json.dumps(stored))
+  changed = {"changed": _saved_data(document) != data_before}
+  responses = _construct_web_response("perform_click_action_callback(%s)" % json.dumps(changed))
   for msg in msgs:
     responses += _construct_gtk_info_response(msg[1]+'-'+msg[2], area="message_area", type=msg[0])    
   return responses + boxes
