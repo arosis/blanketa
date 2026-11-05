@@ -538,8 +538,7 @@ class SignatureReplacementNotice(unittest.TestCase):
     const queue = Promise.resolve(), document = {getElementsByName: () => []}, calls = [];
     for (const name of ['gtk_handler_start', 'gtk_handler_finished', 'send', 'set_inputs_init_values', 'redrawSections',
                         'calc_repeatable_sections', 'set_readonly_inputs', 'set_multiswitch_controls', 'setStatus', 'alert',
-                        'showCheck', 'focusField', 'addSection']) window[name] = () => calls.push(name);
-    const sectionHtml = new Map();
+                        'showCheck', 'focusField']) window[name] = () => calls.push(name);
     const plainTextOf = text => text;
     %s
     eval(process.argv[1]);
@@ -551,8 +550,7 @@ class SignatureReplacementNotice(unittest.TestCase):
         page = app.SHELL
         parts = [re.search(pattern, page, re.S).group(0) for pattern in (
             r"const noteChange = .*?\n  \};", r"window\.perform_click_action_callback = .*?\n  \};",
-            r"window\.form_script_callback = .*?\n  \};", r"window\.server_add_section_callback = .*?;\n",
-            r"window\.data_changed_callback = .*?;\n")]
+            r"window\.form_script_callback = .*?\n  \};", r"window\.data_changed_callback = .*?;\n")]
         script = self.SCRIPT % "\n".join(parts)
         return json.loads(subprocess.run(["node", "-e", script, "--", call], capture_output=True, text=True, check=True).stdout)
 
@@ -572,7 +570,7 @@ class SignatureReplacementNotice(unittest.TestCase):
         self.assertEqual(self.notices_after('perform_click_action_callback({changed: true}); perform_click_action_callback({changed: true})'), 1)
 
     def test_engine_answer_that_the_data_changed(self):
-        self.assertEqual(self.notices_after('server_add_section_callback({repe_html: "s"}); data_changed_callback()'), 1)
+        self.assertEqual(self.notices_after('data_changed_callback()'), 1)
 
     def test_script_answer_refreshes_every_copy_of_the_sections(self):
         # result.values names a field only by its bind; the values of the second and further copies come with the refresh.

@@ -1689,8 +1689,8 @@ class ZFO_document:
     Besides stores also filename and mimetype infromation about file.
     Returns what store_value returns.    
     '''
-    f = open(filename, "rb")
-    content = f.read()    
+    with open(filename, "rb") as f:
+      content = f.read()
     content = base64.b64encode(content).decode("ascii")
     
     repe_data = tools.extract_repetition_parents_info(repe)
