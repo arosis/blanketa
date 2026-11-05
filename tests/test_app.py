@@ -917,7 +917,7 @@ class PdfFormData(unittest.TestCase):
                 result = app.import_pdf_data(self.session(), contents[extension].encode("utf-8"))
                 self.assertEqual({name: result["values"][name] for name in self.VALUES}, self.VALUES)
                 self.assertEqual(result["values"]["email"], "")
-                self.assertEqual((result["missing"], result["unchangeable"], result["not_offered"]), ([], [], []))
+                self.assertEqual((result["missing"], result["unchangeable"], result["not_offered"], result["several_values"]), ([], [], [], []))
 
     def test_export_names_the_pdf_and_holds_saved_values(self):
         exported = self.exported(values={})
@@ -940,10 +940,24 @@ class PdfFormData(unittest.TestCase):
         self.assertEqual(sorted(result["missing"]), ["jine.pole", "stare_pole"])
 
     def test_values_the_form_does_not_offer_are_listed(self):
-        data = pdf_form_data.write_xfdf({"ucel": "Pro úřad", "doruceni": "kurýrem", "souhlas": "Ano", "jmeno": "Jan"}, "x.pdf").encode()
+        data = pdf_form_data.write_xfdf({"ucel": "Pro úřad", "doruceni": "kurýrem", "souhlas": "Ne", "jmeno": "Jan"}, "x.pdf").encode()
         result = app.import_pdf_data(self.session(), data)
-        self.assertEqual(result["values"], {"souhlas": True, "jmeno": "Jan"})
-        self.assertEqual(result["not_offered"], [{"field": "ucel", "value": "Pro úřad"}, {"field": "doruceni", "value": "kurýrem"}])
+        self.assertEqual(result["values"], {"jmeno": "Jan"})
+        self.assertEqual(result["not_offered"], [{"field": "ucel", "value": "Pro úřad"}, {"field": "doruceni", "value": "kurýrem"},
+                                                 {"field": "souhlas", "value": "Ne"}])
+
+    def test_unchecked_states_clear_buttons(self):
+        for unchecked in ("Off", ""):
+            with self.subTest(unchecked=unchecked):
+                data = pdf_form_data.write_xfdf({"souhlas": unchecked, "doruceni": unchecked}, "x.pdf").encode()
+                result = app.import_pdf_data(self.session(), data)
+                self.assertEqual((result["values"], result["not_offered"]), ({"souhlas": False, "doruceni": unchecked}, []))
+
+    def test_several_values_for_one_field_are_listed(self):
+        for write in (pdf_form_data.write_xfdf, pdf_form_data.write_fdf):
+            with self.subTest(write=write.__name__):
+                result = app.import_pdf_data(self.session(), write({"ucel": ["Pro soud", "Ostatní"], "email": ["a@b.cz"]}, "x.pdf").encode())
+                self.assertEqual((result["values"], result["several_values"]), ({"email": "a@b.cz"}, ["ucel"]))
 
     def test_read_only_and_signature_fields_are_not_changed(self):
         writer = PdfWriter(clone_from=self.SOURCE)
@@ -1001,21 +1015,28 @@ class PdfFormData(unittest.TestCase):
 
 
 class DesktopDataFileDialog(unittest.TestCase):
-    def saved_file(self, chosen_name):
+    def setUp(self):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
-        window = mock.Mock()
-        window.create_file_dialog.return_value = str(Path(folder.name) / chosen_name)
-        desktop_app = mock.Mock()
-        bridge = desktop.Bridge(desktop_app, mock.Mock())
-        bridge._save_file_from_dialog(window, {"name": "zadost-data.xfdf", "folder": folder.name, "content": "XFDF",
-                                            "contents": {"xfdf": "XFDF", "fdf": "FDF"}})
-        self.assertEqual(window.create_file_dialog.call_args.kwargs["file_types"], ("XFDF (*.xfdf)", "FDF (*.fdf)"))
-        return {path.name: path.read_text(encoding="utf-8") for path in Path(folder.name).iterdir()}
+        self.folder = Path(folder.name)
+        self.window = mock.Mock()
+
+    def saved_file(self, *chosen_names):
+        self.window.create_file_dialog.side_effect = [str(self.folder / name) for name in chosen_names]
+        bridge = desktop.Bridge(mock.Mock(), mock.Mock())
+        bridge._save_file_from_dialog(self.window, {"name": "zadost-data.xfdf", "folder": str(self.folder), "content": "XFDF",
+                                                    "contents": {"xfdf": "XFDF", "fdf": "FDF"}})
+        self.assertEqual(self.window.create_file_dialog.call_args.kwargs["file_types"], ("XFDF (*.xfdf)", "FDF (*.fdf)"))
+        return {path.name: path.read_text(encoding="utf-8") for path in self.folder.iterdir()}
+
+    def test_existing_file_with_the_added_extension_is_asked_about_again(self):
+        (self.folder / "data.xfdf").write_text("old", encoding="utf-8")
+        self.assertEqual(self.saved_file("data", "data.xfdf"), {"data.xfdf": "XFDF"})
+        self.assertEqual(self.window.create_file_dialog.call_args.kwargs["save_filename"], "data.xfdf")
 
     def test_content_follows_the_chosen_extension(self):
         self.assertEqual(self.saved_file("data.fdf"), {"data.fdf": "FDF"})
-        self.assertEqual(self.saved_file("data.XFDF"), {"data.XFDF": "XFDF"})
+        self.assertEqual(self.saved_file("data.XFDF"), {"data.fdf": "FDF", "data.XFDF": "XFDF"})
 
     def test_name_without_a_known_extension_gets_the_default_one(self):
         self.assertEqual(self.saved_file("data"), {"data.xfdf": "XFDF"})

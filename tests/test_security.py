@@ -11,6 +11,7 @@ import re
 import sys
 import tempfile
 import threading
+import time
 import unittest
 import zipfile
 from http.server import ThreadingHTTPServer
@@ -624,6 +625,17 @@ class HostileFormDataFiles(unittest.TestCase):
                         b"%FDF-1.2\n1 0 obj << /FDF << /Fields [ << /T (a) /V /" + b"a" * 5000 + b" >> ] >> >> endobj"):
             with self.subTest(size=len(hostile)), self.assertRaises(ValueError):
                 pdf_form_data.read_form_data(hostile)
+
+    def test_long_runs_of_digits_are_read_quickly(self):
+        started = time.monotonic()
+        for hostile in (b"%FDF-1.2\n" + b"9" * 200_000, b"%FDF-1.2\n" + b"9" * 100_000 + b" " + b"9" * 100_000 + b" obj"):
+            with self.subTest(size=len(hostile)), self.assertRaises(ValueError):
+                pdf_form_data.read_form_data(hostile)
+        self.assertLess(time.monotonic() - started, 2)
+
+    def test_fdf_with_bytes_before_the_header_is_read(self):
+        data = b"\xef\xbb\xbfjunk\n" + pdf_form_data.write_fdf({"a": "x"}, "x.pdf").encode()
+        self.assertEqual(pdf_form_data.read_form_data(data), {"a": "x"})
 
     def test_deeply_nested_fields_are_cut_off(self):
         nested = "".join(f'<field name="f{i}">' for i in range(200)) + "<value>x</value>" + "</field>" * 200

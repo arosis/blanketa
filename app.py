@@ -224,7 +224,7 @@ def import_pdf_data(session, data):
     if is_document_locked:
         raise ValueError("Podpis dokumentu nedovoluje žádné další změny, data do něj nelze načíst.")
     fields = pdf_form_data.form_fields(session["pdf"])
-    values, missing, unchangeable, not_offered = {}, [], [], []
+    values, missing, unchangeable, not_offered, several_values = {}, [], [], [], []
     for name, value in pdf_form_data.read_form_data(data).items():
         field = fields.get(name)
         if field is None:
@@ -233,12 +233,16 @@ def import_pdf_data(session, data):
         if not pdf_form_data.is_fillable_kind(field.kind) or field.is_read_only or any(lock.is_locked(name) for lock in field_locks):
             unchangeable.append(name)
             continue
-        page_value = pdf_form_data.page_value(field.kind, value)
-        if not field.offers(page_value):
-            not_offered.append({"field": name, "value": page_value})
+        text = pdf_form_data.single_text(field.kind, value)
+        if text is None:
+            several_values.append(name)
             continue
-        values[name] = page_value
-    return {"values": values, "missing": missing, "unchangeable": unchangeable, "not_offered": not_offered}
+        if not field.offers(text):
+            not_offered.append({"field": name, "value": text})
+            continue
+        values[name] = pdf_form_data.page_value(field.kind, text)
+    return {"values": values, "missing": missing, "unchangeable": unchangeable, "not_offered": not_offered,
+            "several_values": several_values}
 
 
 def published_form_with_data(fo, data):

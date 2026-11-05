@@ -125,6 +125,10 @@ __SHELL_STYLE__
       <p>Tyto hodnoty formulář u pole nenabízí, pole zůstala beze změny:</p>
       <ul></ul>
     </div>
+    <div data-import-several-values hidden>
+      <p>Tato pole mají v souboru víc hodnot najednou, Blanketa vyplní jen jednu; pole zůstala beze změny:</p>
+      <ul></ul>
+    </div>
     <div class="zfo-dialog-buttons"><button class="zfo-btn primary" value="close">Zavřít</button></div>
   </form>
 </dialog>
@@ -332,11 +336,12 @@ __SHELL_STYLE__
     const loaded = Object.keys(result.values).length;
     const summary = `Ze souboru „${fileName}“ ${loadedValues(loaded)}.` + (loaded ? ` Zkontrolujte ${loaded === 1 ? 'ji' : 'je'} a dokument uložte.` : '');
     setStatus(summary);
-    if (!result.missing.length && !result.unchangeable.length && !result.not_offered.length) return;
+    if (!result.missing.length && !result.unchangeable.length && !result.not_offered.length && !result.several_values.length) return;
     importReport.querySelector('[data-import-summary]').textContent = summary;
     listInReport('[data-import-missing]', result.missing);
     listInReport('[data-import-unchangeable]', result.unchangeable);
     listInReport('[data-import-not-offered]', result.not_offered.map(({field, value}) => `${field}: „${value}“`));
+    listInReport('[data-import-several-values]', result.several_values);
     importReport.showModal();
   };
   const importData = () => {
@@ -347,11 +352,13 @@ __SHELL_STYLE__
       const file = input.files[0];
       if (!file) return;
       document.activeElement?.blur();
-      const response = await fetch('/pdf-import-data?s=' + SESSION, {method: 'POST', body: await file.arrayBuffer()});
-      if (!response.ok) { setStatus('Import se nepodařil: ' + await response.text()); return; }
-      const result = await response.json();
-      await loadDocument({...changedFieldValues(), ...result.values});
-      showImportResult(file.name, result);
+      try {
+        const response = await fetch('/pdf-import-data?s=' + SESSION, {method: 'POST', body: await file.arrayBuffer()});
+        if (!response.ok) { setStatus('Import se nepodařil: ' + await response.text()); return; }
+        const result = await response.json();
+        await loadDocument({...changedFieldValues(), ...result.values});
+        showImportResult(file.name, result);
+      } catch (error) { setStatus('Import se nepodařil: ' + error.message); }
     });
     input.click();
   };

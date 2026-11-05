@@ -17,7 +17,9 @@ from pypdf.generic import (
 
 XFDF_NAMESPACE = "http://ns.adobe.com/xfdf/"
 FDF_HEADER = b"%FDF-"
-FDF_OBJECT_START = re.compile(rb"(\d+)\s+\d+\s+obj\b\s*")
+FDF_HEADER_SEARCH_LENGTH = 1024
+# A match starts only at the first digit of a number: trying every digit of a long run makes the search quadratic.
+FDF_OBJECT_START = re.compile(rb"(?<!\d)(\d+)\s+\d+\s+obj\b\s*")
 MAX_FIELD_DEPTH = 32
 FIELD_FLAG_READ_ONLY = 1
 FIELD_FLAG_RADIO = 1 << 15
@@ -34,8 +36,10 @@ class FormField(NamedTuple):
     is_read_only: bool
     offered_values: frozenset | None
 
-    def offers(self, value):
-        return self.offered_values is None or value in self.offered_values or (self.kind == "choice" and value == "")
+    def offers(self, text):
+        is_unselected_button = self.kind in ("checkbox", "radio") and text in UNCHECKED_STATES
+        is_empty_choice = self.kind == "choice" and text == ""
+        return self.offered_values is None or text in self.offered_values or is_unselected_button or is_empty_choice
 
 
 class _FdfObjects:
@@ -201,7 +205,7 @@ def _read_fdf(data):
 
 
 def read_form_data(data):
-    if data.lstrip()[:len(FDF_HEADER)] == FDF_HEADER:
+    if FDF_HEADER in data[:FDF_HEADER_SEARCH_LENGTH]:
         return _read_fdf(data)
     return _read_xfdf(data)
 
@@ -219,8 +223,8 @@ def _option_value(option):
 
 
 def _offered_values(field, kind):
-    if kind == "radio":
-        return frozenset(_text(state).lstrip("/") for state in field.get("/_States_") or []) - {"Off"}
+    if kind in ("checkbox", "radio"):
+        return frozenset(_text(state).lstrip("/") for state in field.get("/_States_") or []) - {"Off"} or None
     if kind == "choice" and not int(field.get("/Ff") or 0) & FIELD_FLAG_EDITABLE_CHOICE:
         return frozenset(_option_value(option) for option in _resolved(field.get("/Opt")) or [])
     return None
@@ -248,10 +252,13 @@ def form_data_values(pdf):
     return values
 
 
-def page_value(kind, value):
-    first = (value[0] if value else "") if isinstance(value, list) else value
-    if kind == "checkbox":
-        return first.lstrip("/") not in UNCHECKED_STATES
-    if kind == "radio":
-        return first.lstrip("/")
-    return first
+def single_text(kind, value):
+    if isinstance(value, list):
+        if len(value) > 1:
+            return None
+        value = value[0] if value else ""
+    return value.lstrip("/") if kind in ("checkbox", "radio") else value
+
+
+def page_value(kind, text):
+    return text not in UNCHECKED_STATES if kind == "checkbox" else text

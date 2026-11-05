@@ -57,20 +57,30 @@ class Bridge:
     def _is_showing_form_server(self, window):
         return (window.get_current_url() or "").startswith(self._form.home)
 
+    def _ask_for_save_target(self, window, folder, name, file_types):
+        chosen = window.create_file_dialog(self._app.webview.FileDialog.SAVE, directory=folder, save_filename=name,
+                                           file_types=file_types)
+        return Path(chosen if isinstance(chosen, str) else chosen[0]) if chosen else None
+
     def _save_file_from_dialog(self, window, request):
         contents = request.get("contents") or {}
         default_extension = Path(request["name"]).suffix.lstrip(".").lower()
         extensions = [default_extension, *sorted(set(contents) - {default_extension})] if contents else ["xml"]
-        chosen = window.create_file_dialog(self._app.webview.FileDialog.SAVE, directory=request.get("folder") or "",
-                                           save_filename=request["name"],
-                                           file_types=tuple(f"{extension.upper()} (*.{extension})" for extension in extensions))
-        if chosen:
-            target = Path(chosen if isinstance(chosen, str) else chosen[0])
-            extension = target.suffix.lstrip(".").lower()
-            if contents and extension not in contents:
-                target, extension = target.with_name(f"{target.name}.{default_extension}"), default_extension
-            target.write_text(contents.get(extension, request["content"]), encoding="utf-8")
-            window.evaluate_js(f"window.zfoDataSaved && zfoDataSaved({json.dumps(str(target))})")
+        file_types = tuple(f"{extension.upper()} (*.{extension})" for extension in extensions)
+        folder, name = request.get("folder") or "", request["name"]
+        while (target := self._ask_for_save_target(window, folder, name, file_types)) is not None:
+            if not contents or target.suffix.lstrip(".").lower() in contents:
+                break
+            completed = target.with_name(f"{target.name}.{default_extension}")
+            if not completed.exists():
+                target = completed
+                break
+            # The dialog only asked about the name without the extension; asked again, it asks before replacing.
+            folder, name = str(completed.parent), completed.name
+        if target is None:
+            return
+        target.write_text(contents.get(target.suffix.lstrip(".").lower(), request["content"]), encoding="utf-8")
+        window.evaluate_js(f"window.zfoDataSaved && zfoDataSaved({json.dumps(str(target))})")
 
     def message(self, msg):
         action, window = msg.get("action"), self._form.window
