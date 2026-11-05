@@ -399,6 +399,16 @@ class HostileFormScripts(unittest.TestCase):
         self.assertEqual(value_of_a(doc), "puvodni")
         self.assertNotIn("kept_at_open", doc.script_interpreter().globals.vars)
 
+    def test_script_reports_a_change_the_page_cannot_show(self):
+        form = FORM_WITH_SCRIPT.replace("<d:sekce><d:b/></d:sekce>", "<d:sekce><d:b/></d:sekce><d:sekce><d:b/></d:sekce>")
+        script = "{ GetDocument().GetElement().SetDataTo('b', 'druha'); }"
+        button = BUTTON_SCRIPT_MARK.replace(">", f" form602btnclick={quoteattr(script)}>")
+        doc = engine.open_document((form % "").replace(BUTTON_SCRIPT_MARK, button).encode())
+        result = form_scripts.run_button_script(doc, 0, "block---sekce-rep-1", [])
+        self.assertEqual(result["values"], {})
+        self.assertTrue(result["changed"])
+        self.assertFalse(form_scripts.run_button_script(doc, 0, "block---sekce-rep-1", [])["changed"])
+
     def test_value_only_loaded_by_the_page_runs_no_change_script(self):
         form = (FORM_WITH_SCRIPT % "").replace(BUTTON_SCRIPT_MARK, BUTTON_SCRIPT_MARK.replace(">", " form602onchange=\"{ GetDocument().GetElement().SetDataTo('b', 'spusteno'); }\">"))
         doc = engine.open_document(form.encode())

@@ -544,7 +544,7 @@ class SignatureReplacementNotice(unittest.TestCase):
     eval(process.argv[1]);
     console.log(notices);
     """
-    ANSWER = {"values": {}, "messages": [], "notices": [], "focus": None, "problems": []}
+    ANSWER = {"values": {}, "changed": False, "messages": [], "notices": [], "focus": None, "problems": []}
 
     def notices_after(self, call):
         page = app.SHELL
@@ -559,7 +559,7 @@ class SignatureReplacementNotice(unittest.TestCase):
         self.assertEqual(self.notices_after('perform_click_action_callback({changed: false})'), 0)
 
     def test_script_button_that_changed_the_data(self):
-        changed = {**self.ANSWER, "values": {"a": "zmeneno"}}
+        changed = {**self.ANSWER, "changed": True}
         self.assertEqual(self.notices_after(f"form_script_callback({json.dumps(changed)})"), 1)
         self.assertEqual(self.notices_after(f"form_script_callback({json.dumps(self.ANSWER)})"), 0)
 

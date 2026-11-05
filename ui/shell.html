@@ -746,7 +746,7 @@
       setStatus(`Tuto akci formuláře Blanketa neumí provést (${result.refused}), data zůstala beze změny.`);
       return;
     }
-    if (result.sections || Object.keys(result.values).length) noteChange();
+    if (result.changed) noteChange();
     if (result.sections) redrawSections(result);
     for (const [bind, value] of Object.entries(result.values)) {
       const fields = [...document.getElementsByName(bind)];
