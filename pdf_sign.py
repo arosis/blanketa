@@ -33,6 +33,7 @@ logging.getLogger("pyhanko_certvalidator").setLevel(logging.CRITICAL)
 SIGNATURE_TIME_STAMP_TOKEN_OID = "1.2.840.113549.1.9.16.2.14"
 DOCUMENT_TIME_STAMP_TYPE = "/DocTimeStamp"
 STAMP_FONT = Path("/System/Library/Fonts/Supplemental/Arial.ttf")
+MULTI_SELECT = 1 << 21
 
 # pyHanko writes glyph widths and kerning in font units, but PDF counts them in thousandths of an em, so a TrueType
 # font with 2048 units per em (Arial) comes out letter-spaced. Shaping and widths are rescaled to 1000 units per em.
@@ -154,10 +155,7 @@ def _button_state(widget, value):
     return (on_state if value is True else "/Off") if isinstance(value, bool) else f"/{str(value).lstrip('/')}"
 
 
-MULTI_SELECT = 1 << 21
-
-
-def _selected_indices(field, value):
+def _required_indices(field, value):
     exports = [str(option[0]) if isinstance(option, list) else str(option) for option in field.get("/Opt") or []]
     if not field.get("/Ff", 0) & MULTI_SELECT and len(set(exports)) == len(exports):
         return None
@@ -170,7 +168,7 @@ def _choice_selections(widget, field, value):
     # than form filling. ISO 32000-1 lets /V win over a stale /I, so /I is only rewritten where it is required.
     parent = widget.get("/Parent")
     nodes = [node for node in (widget, parent.get_object() if parent is not None else None) if node is not None and "/I" in node]
-    required = _selected_indices(field, value)
+    required = _required_indices(field, value)
     return [(node, node["/I"] if required is None else required) for node in nodes]
 
 

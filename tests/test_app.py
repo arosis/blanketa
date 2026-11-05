@@ -24,7 +24,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa
 from lxml import etree
 from lxml import html as lxml_html
-from pypdf import PdfWriter
+from pypdf import PdfReader, PdfWriter
 from pypdf.generic import (
     ArrayObject,
     DictionaryObject,
@@ -334,7 +334,6 @@ class ChoiceFieldsAfterSigning(unittest.TestCase):
     """A choice field keeps its selected indices (/I) only where ISO 32000-1 lets /V outrank them."""
 
     def field(self, name):
-        from pypdf import PdfReader
         return PdfReader(io.BytesIO(self.filled)).get_fields()[name]
 
     def test_single_select_keeps_earlier_signature_clean(self):
