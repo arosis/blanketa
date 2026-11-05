@@ -154,6 +154,26 @@ def _button_state(widget, value):
     return (on_state if value is True else "/Off") if isinstance(value, bool) else f"/{str(value).lstrip('/')}"
 
 
+MULTI_SELECT = 1 << 21
+
+
+def _selected_indices(field, value):
+    exports = [str(option[0]) if isinstance(option, list) else str(option) for option in field.get("/Opt") or []]
+    if not field.get("/Ff", 0) & MULTI_SELECT and len(set(exports)) == len(exports):
+        return None
+    chosen = [str(item) for item in value] if isinstance(value, list) else [str(value)]
+    return ArrayObject(NumberObject(exports.index(item)) for item in chosen if item in exports)
+
+
+def _choice_selections(widget, field, value):
+    # pypdf drops /I (selected indices) from a choice field, but a signature validator sees any change to /I as more
+    # than form filling. ISO 32000-1 lets /V win over a stale /I, so /I is only rewritten where it is required.
+    parent = widget.get("/Parent")
+    nodes = [node for node in (widget, parent.get_object() if parent is not None else None) if node is not None and "/I" in node]
+    required = _selected_indices(field, value)
+    return [(node, node["/I"] if required is None else required) for node in nodes]
+
+
 def fill_form_fields(pdf, values):
     reader = PdfReader(io.BytesIO(pdf))
     writer = _IncrementWriter(reader, incremental=True)
@@ -161,12 +181,15 @@ def fill_form_fields(pdf, values):
     touched = []
     for page in writer.pages:
         page_values = {}
+        selections = []
         for annotation in page.get("/Annots") or []:
             widget = annotation.get_object()
             name = _field_full_name(widget)
             if name not in values or name not in known:
                 continue
             value = values[name]
+            if known[name].get("/FT") == "/Ch":
+                selections += _choice_selections(widget, known[name], value)
             if known[name].get("/FT") == "/Btn":
                 value = _button_state(widget, value)
             elif "/AP" in widget:
@@ -177,6 +200,8 @@ def fill_form_fields(pdf, values):
             touched.append((widget, set(widget)))
         if page_values:
             writer.update_page_form_field_values(page, page_values, auto_regenerate=False)
+        for node, indices in selections:
+            node[NameObject("/I")] = indices
     # pypdf also copies resources (/DR, /DA) onto the widgets; a signature validator sees anything beyond the
     # value and appearance as a change to signed content.
     for widget, keys in touched:
