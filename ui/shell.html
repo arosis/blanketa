@@ -571,6 +571,7 @@
   };
   const addSection = window.server_add_section_callback;
   window.server_add_section_callback = data => addSection({...data, repe_html: sectionHtml.get(data.repe_html)});
+  window.data_changed_callback = noteChange;
   // The engine answers a form's button only with whether it changed the data, so the page recalculates and reads them all back.
   window.perform_click_action_callback = answer => {
     gtk_handler_finished();

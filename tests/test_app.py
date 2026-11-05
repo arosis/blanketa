@@ -535,24 +535,27 @@ class SignatureReplacementNotice(unittest.TestCase):
     const window = globalThis;
     let changed = false, ready = true, notices = 0;
     const renderSignatures = () => notices++;
-    const queue = Promise.resolve(), document = {getElementsByName: () => []};
+    const queue = Promise.resolve(), document = {getElementsByName: () => []}, calls = [];
     for (const name of ['gtk_handler_start', 'gtk_handler_finished', 'send', 'set_inputs_init_values', 'redrawSections',
                         'calc_repeatable_sections', 'set_readonly_inputs', 'set_multiswitch_controls', 'setStatus', 'alert',
-                        'showCheck', 'focusField']) window[name] = () => {};
+                        'showCheck', 'focusField']) window[name] = () => calls.push(name);
     const plainTextOf = text => text;
     %s
     eval(process.argv[1]);
-    console.log(notices);
+    console.log(JSON.stringify({notices, calls}));
     """
     ANSWER = {"values": {}, "changed": False, "messages": [], "notices": [], "focus": None, "problems": []}
 
-    def notices_after(self, call):
+    def page_after(self, call):
         page = app.SHELL
         parts = [re.search(pattern, page, re.S).group(0) for pattern in (
             r"const noteChange = .*?\n  \};", r"window\.perform_click_action_callback = .*?\n  \};",
-            r"window\.form_script_callback = .*?\n  \};")]
+            r"window\.form_script_callback = .*?\n  \};", r"window\.data_changed_callback = .*?;\n")]
         script = self.SCRIPT % "\n".join(parts)
-        return int(subprocess.run(["node", "-e", script, "--", call], capture_output=True, text=True, check=True).stdout)
+        return json.loads(subprocess.run(["node", "-e", script, "--", call], capture_output=True, text=True, check=True).stdout)
+
+    def notices_after(self, call):
+        return self.page_after(call)["notices"]
 
     def test_xpath_button_that_changed_the_data(self):
         self.assertEqual(self.notices_after('perform_click_action_callback({changed: true})'), 1)
@@ -565,6 +568,60 @@ class SignatureReplacementNotice(unittest.TestCase):
 
     def test_notice_is_drawn_once(self):
         self.assertEqual(self.notices_after('perform_click_action_callback({changed: true}); perform_click_action_callback({changed: true})'), 1)
+
+    def test_engine_answer_that_the_data_changed(self):
+        self.assertEqual(self.notices_after('data_changed_callback()'), 1)
+
+    def test_script_answer_refreshes_every_copy_of_the_sections(self):
+        # result.values names a field only by its bind; the values of the second and further copies come with the refresh.
+        self.assertIn("calc_repeatable_sections", self.page_after(f"form_script_callback({json.dumps(self.ANSWER)})")["calls"])
+
+
+class DataChangesOutsideFields(unittest.TestCase):
+    """Repeating sections, attachments and scripts change the data without a stored value; the page has to learn of it."""
+    FORM = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#" Id="_1"><dsig:Object Id="_2" MimeType="text/xml">
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:fm="http://software602.cz/forms" xmlns:d="http://software602.cz/sample">
+<fm:formparams><fm:model><fm:instance><d:root><d:priloha/><d:jmeno/>
+<d:sekce><d:b/><d:c>ne</d:c></d:sekce><d:sekce><d:b/><d:c>ne</d:c></d:sekce></d:root></fm:instance>
+<fm:bind Id="k" nodeset="/d:root"><fm:bind Id="priloha" nodeset="d:priloha"/><fm:bind Id="jmeno" nodeset="d:jmeno"/>
+<fm:bind Id="sekce" nodeset="d:sekce"><fm:bind Id="b" nodeset="d:b"/><fm:bind Id="c" nodeset="d:c"/></fm:bind></fm:bind>
+</fm:model></fm:formparams>
+<fo:page-sequence master-reference="p"><fo:flow flow-name="xsl-region-body"><fo:block>
+<fo:inline form602ct="bin" form602bind="priloha" filenamebind="jmeno"/>
+<fo:block form602ct="rep" form602bind="sekce" form602repe="sekce"><fo:inline form602ct="txt" form602bind="b"/>
+<fo:character form602bind="c" form602ct="chb" form602on="ano" form602off="ne" character="x"/>
+<fo:inline form602ct="btn" form602btnclick="{ var e = GetDocument().GetElement(); e.SetDataTo('b', 'druha'); e.SetDataTo('c', 'ano'); }">Zapsat</fo:inline>
+</fo:block></fo:block></fo:flow></fo:page-sequence></fo:root></dsig:Object></dsig:Signature>"""
+    SECOND_COPY = "block---sekce-rep-1"
+
+    def setUp(self):
+        self.doc = engine.open_document(self.FORM.encode())
+        engine.handle(self.doc, "document.ready", "")
+
+    def answers(self, message, data):
+        return [answer["data"] for answer in engine.handle(self.doc, message, data) if answer["type"] == "javascript"]
+
+    def sections_on_page(self):
+        answer = self.answers("get_repeatable", "")[0]
+        return json.loads(answer[len("calc_repeatable_sections_callback("):-1])["sekce"]
+
+    def test_adding_and_removing_a_copy_of_a_section_changes_the_data(self):
+        self.assertIn("data_changed_callback()", self.answers("add_section", {"name": "sekce-rep-0", "repe": "", "rs_id": "s"}))
+        self.assertIn("data_changed_callback()", self.answers("del_section", {"name": "sekce-rep-2", "repe": "block---sekce-rep-2"}))
+        self.assertEqual(len(self.sections_on_page()), 2)
+
+    def test_deleting_an_attachment_changes_the_data(self):
+        with tempfile.TemporaryDirectory() as folder:
+            attachment = Path(folder, "doklad.txt")
+            attachment.write_text("obsah")
+            self.doc.attach_file(str(attachment), "priloha", None)
+        deletion = {"field": "priloha", "value": "doklad.txt", "repe": "", "input_id": "p"}
+        self.assertIn("data_changed_callback()", self.answers("delete_attachment", deletion))
+        self.assertNotIn("data_changed_callback()", self.answers("delete_attachment", deletion))
+
+    def test_script_value_in_a_further_copy_reaches_that_copy_on_the_page(self):
+        engine.handle(self.doc, "run_form_script", {"button": 0, "repe": self.SECOND_COPY})
+        self.assertEqual(self.sections_on_page(), [{"b": "", "c": "off"}, {"b": "druha", "c": "on"}])
 
 
 @unittest.skipUnless(shutil.which("node"), "needs Node.js; CI runners have it")

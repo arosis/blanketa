@@ -858,6 +858,10 @@ class ZFO_document:
           results[bind.get("Id")] = "" if t is None else t 
         else:
           results[bind.get("Id")] = val[0]
+      # zfoengine: the page checks a box only by "on", as get_initial_values answers it
+      on_value = child.get("form602on") if child.get("form602ct") == "chb" else None
+      if on_value is not None:
+        results[bind.get("Id")] = "on" if results[bind.get("Id")] == on_value else "off"
       #results.append({"key": bind.get("Id"), "value": val[0]})
     # now go through repeating children
     for rep_child in repe_children:
@@ -1685,8 +1689,8 @@ class ZFO_document:
     Besides stores also filename and mimetype infromation about file.
     Returns what store_value returns.    
     '''
-    f = open(filename, "rb")
-    content = f.read()    
+    with open(filename, "rb") as f:
+      content = f.read()
     content = base64.b64encode(content).decode("ascii")
     
     repe_data = tools.extract_repetition_parents_info(repe)
