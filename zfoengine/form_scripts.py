@@ -307,16 +307,21 @@ def _section_templates(document, tree):
   return templates
 
 
-def _result_of_finished_run(document, host, values_before):
+def serialized_data(document):
+  return etree.tostring(document._get_data_root())
+
+
+def _result_of_finished_run(document, host, values_before, data_before):
   if host.has_section_changes:
     document.recalc_form()
   values_after = _page_values(document)
-  changed = {bind_id: _value_for_page(document, bind_id, value) for bind_id, value in values_after.items()
-             if values_before.get(bind_id) != value}
-  if changed or host.has_section_changes:
+  changed_values = {bind_id: _value_for_page(document, bind_id, value) for bind_id, value in values_after.items()
+                    if values_before.get(bind_id) != value}
+  data_changed = serialized_data(document) != data_before
+  if data_changed:
     document.is_changed = True
-  result = {"values": changed, "messages": host.messages, "notices": host.notices, "focus": host.focus_bind,
-            "problems": host.problems}
+  result = {"values": changed_values, "changed": data_changed, "messages": host.messages, "notices": host.notices,
+            "focus": host.focus_bind, "problems": host.problems}
   if host.has_section_changes:
     tree = _section_tree(document, document.get_repeatable_sections())
     result["sections"] = tree
@@ -338,6 +343,7 @@ def _run(document, element, script, repe, answers, retry):
   saved_computing_data = copy.deepcopy(document._get_computable_data_root())
   saved_parameters = dict(document.script_named_parameters)
   values_before = _page_values(document)
+  data_before = serialized_data(document)
   host = FormActionHost(document, element, repe, answers)
   was_script_running = document.script_running
   document.script_running = True
@@ -358,7 +364,7 @@ def _run(document, element, script, repe, answers, retry):
     document.script_running = was_script_running
   if outcome is None:
     try:
-      return _result_of_finished_run(document, host, values_before)
+      return _result_of_finished_run(document, host, values_before, data_before)
     except (etree.LxmlError, ValueError, TypeError, IndexError) as error:  # a hostile form's data may not fit its own binds
       log.info("Form script left data the form cannot show: %s", error)
       outcome = {"refused": "chyba ve skriptu formuláře"}
