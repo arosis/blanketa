@@ -511,14 +511,45 @@
     }
     return null;
   };
+  // A browser groups radio buttons by name, and every copy of a repeating section repeats the names: without a form of
+  // its own, choosing in one copy cleared the others. Copies cloned on the page carry the form of their original along.
+  const SECTION_COPY = '[class~="602-repetition-row"], [class~="602-repetition-block"], [class~="602-repetition-table"]';
+  const radioForms = document.createElement('div');
+  radioForms.hidden = true;
+  document.body.append(radioForms);
+  const radioFormOfCopy = new WeakMap();
+  const separateRadioGroups = () => {
+    for (const radio of page.querySelectorAll('input[type=radio]')) {
+      const copy = radio.closest(SECTION_COPY);
+      if (!copy) continue;
+      if (!radioFormOfCopy.has(copy)) {
+        const form = document.createElement('form');
+        form.id = `zfo-radios-${radioForms.childElementCount}`;
+        radioForms.append(form);
+        radioFormOfCopy.set(copy, form.id);
+      }
+      if (radio.getAttribute('form') !== radioFormOfCopy.get(copy)) radio.setAttribute('form', radioFormOfCopy.get(copy));
+    }
+  };
+  const radioGroupOf = radio => elementsNamed(radio.name).filter(other => other.type === 'radio' && other.form === radio.form);
+  const chooseRadio = (radio, value) => radioGroupOf(radio).forEach(other => { other.checked = other.value === value; });
+  // Its set_radio_value found the button by an id that every copy of a section repeats and never cleared a choice. Its
+  // callers pass only the name, so the value goes to the first group, the one outside sections or in the first copy.
+  window.set_radio_value = (name, value) => {
+    const first = elementsNamed(name).find(element => element.type === 'radio');
+    if (first) chooseRadio(first, value);
+  };
   // Its fill_inputs also counted each section's copies through a full walk of the page and never used the number.
   window.fill_inputs = (parent, data) => {
+    if (parent == null) separateRadioGroups();
     for (const [name, value] of Object.entries(data)) {
       if (is_array(value)) {
         value.forEach((copy, index) => fill_inputs($(get_html_elem(parent, `${name}-rep-${index}`, false)), copy));
       } else {
         const input = get_html_elem(parent, name, true);
-        if (input && !$(input).hasClass('shouldStayEmpty')) set_input_value(input, value);
+        if (!input || $(input).hasClass('shouldStayEmpty')) continue;
+        if (input.type === 'radio') chooseRadio(input, value);
+        else set_input_value(input, value);
       }
     }
   };
@@ -570,7 +601,11 @@
     startSections(data);
   };
   const addSection = window.server_add_section_callback;
-  window.server_add_section_callback = data => addSection({...data, repe_html: sectionHtml.get(data.repe_html)});
+  window.server_add_section_callback = data => {
+    addSection({...data, repe_html: sectionHtml.get(data.repe_html)});
+    separateRadioGroups();
+  };
+  window.data_changed_callback = noteChange;
   // The engine answers a form's button only with whether it changed the data, so the page recalculates and reads them all back.
   window.perform_click_action_callback = answer => {
     gtk_handler_finished();
@@ -1080,13 +1115,15 @@
     const element = lastField?.name === field ? lastField : document.getElementsByName(field)[0];
     if (!element || value === null) { setStatus('Pole nemá výchozí hodnotu.'); return; }
     if (element.type === 'radio') {
-      document.getElementsByName(field).forEach(radio => { radio.checked = radio.value === value; });
-    } else if (element.type === 'checkbox') {
-      element.checked = !['', '0', 'false'].includes(value);
+      // The change event of the clicked button would store that button's value, and with no button chosen there is none.
+      chooseRadio(element, value);
+      gtk_handler_start();
+      send(JSON.stringify({type: 'store_val', data: {field, value, repe: get_parent_repe(element), input_id: element.id}}));
     } else {
-      element.value = value;
+      if (element.type === 'checkbox') element.checked = !['', '0', 'false'].includes(value);
+      else element.value = value;
+      $(element).trigger('change');
     }
-    $(element).trigger('change');
     setStatus(`Obnovena výchozí hodnota pole ${shortOneLine(labelFor(element))}`);
   }
 

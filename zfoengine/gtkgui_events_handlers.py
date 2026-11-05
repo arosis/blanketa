@@ -158,6 +158,11 @@ def store_val(document, msg_data):
      return _construct_web_response("field_changed_error_callback(%s)" % json.dumps(res)) + \
             _construct_gtk_info_response(constr_comment, area="message_area", type=msg_types.ERROR)
 
+def _data_change_answer(document, data_before):
+  if form_scripts.serialized_data(document) == data_before:
+    return []
+  return _construct_web_response("data_changed_callback()")
+
 def _script_answer(result):
   return _construct_web_response("form_script_callback(%s)" % json.dumps(result)) if result else []
 
@@ -180,6 +185,7 @@ def delete_attachment(document, msg_data):
   filename= msg_data["value"]
   repe = msg_data["repe"] if msg_data["repe"] != "" else None
   res = {}
+  data_before = form_scripts.serialized_data(document)
   # storing empty string instead of the file content
   stored_val, to_bind, constr_ok, \
       constr_comment, old_val, calculated = document.store_value(field, "", repe)
@@ -195,6 +201,7 @@ def delete_attachment(document, msg_data):
   
   res = json.dumps(res)
   return _construct_web_response("delete_file_callback(%s)" % res)+\
+            _data_change_answer(document, data_before)+\
             _construct_gtk_info_response(msgs.ATTACHMENT_DELETED.format(filename), 
                                  area="message_area", type=msg_types.INFO)
 
@@ -297,6 +304,7 @@ def add_section(document, msg_data):
   
   end_of_name = field_name.rfind("-rep-")
   field_name_no_rep = field_name[:end_of_name]
+  data_before = form_scripts.serialized_data(document)
   document.clone_section(field_name_no_rep, repe_data)
   repe_html = document.get_repe_section_html(field_name_no_rep)
   
@@ -306,19 +314,19 @@ def add_section(document, msg_data):
       
   data = json.dumps(data)
   
-  return _construct_web_response("server_add_section_callback(%s)" % data)
+  return _construct_web_response("server_add_section_callback(%s)" % data) + _data_change_answer(document, data_before)
 
 
 def del_section(document, msg_data):    
   field_name = msg_data["name"]                
   repe_data = msg_data["repe"] if msg_data["repe"] != "" else None
-  
+  data_before = form_scripts.serialized_data(document)
   document.delete_section(field_name, repe_data)
   # calculate chages of data model
   calculated = document.recalc_form() 
   calculated = json.dumps(calculated)
   
-  return _construct_web_response("server_del_section_callback(%s)" % calculated)
+  return _construct_web_response("server_del_section_callback(%s)" % calculated) + _data_change_answer(document, data_before)
 
 def store_to_file(document, msg_data=None):
   # zfoengine: saving is done by the caller from api.data_element()
