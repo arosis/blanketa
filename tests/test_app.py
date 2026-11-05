@@ -529,6 +529,45 @@ class TimeStamps(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which("node"), "needs Node.js; CI runners have it")
+class SignatureReplacementNotice(unittest.TestCase):
+    """Runs the button answers of ui/shell.html: a change of the data shows that the data signature will be replaced."""
+    SCRIPT = """
+    const window = globalThis;
+    let changed = false, ready = true, notices = 0;
+    const renderSignatures = () => notices++;
+    const queue = Promise.resolve(), document = {getElementsByName: () => []};
+    for (const name of ['gtk_handler_start', 'gtk_handler_finished', 'send', 'set_inputs_init_values', 'redrawSections',
+                        'calc_repeatable_sections', 'set_readonly_inputs', 'set_multiswitch_controls', 'setStatus', 'alert',
+                        'showCheck', 'focusField']) window[name] = () => {};
+    const plainTextOf = text => text;
+    %s
+    eval(process.argv[1]);
+    console.log(notices);
+    """
+    ANSWER = {"values": {}, "changed": False, "messages": [], "notices": [], "focus": None, "problems": []}
+
+    def notices_after(self, call):
+        page = app.SHELL
+        parts = [re.search(pattern, page, re.S).group(0) for pattern in (
+            r"const noteChange = .*?\n  \};", r"window\.perform_click_action_callback = .*?\n  \};",
+            r"window\.form_script_callback = .*?\n  \};")]
+        script = self.SCRIPT % "\n".join(parts)
+        return int(subprocess.run(["node", "-e", script, "--", call], capture_output=True, text=True, check=True).stdout)
+
+    def test_xpath_button_that_changed_the_data(self):
+        self.assertEqual(self.notices_after('perform_click_action_callback({changed: true})'), 1)
+        self.assertEqual(self.notices_after('perform_click_action_callback({changed: false})'), 0)
+
+    def test_script_button_that_changed_the_data(self):
+        changed = {**self.ANSWER, "changed": True}
+        self.assertEqual(self.notices_after(f"form_script_callback({json.dumps(changed)})"), 1)
+        self.assertEqual(self.notices_after(f"form_script_callback({json.dumps(self.ANSWER)})"), 0)
+
+    def test_notice_is_drawn_once(self):
+        self.assertEqual(self.notices_after('perform_click_action_callback({changed: true}); perform_click_action_callback({changed: true})'), 1)
+
+
+@unittest.skipUnless(shutil.which("node"), "needs Node.js; CI runners have it")
 class RevocationVerdict(unittest.TestCase):
     """Runs the decision in ui/bridge.js: the certificate below was revoked on 1 June."""
     BEFORE, AFTER = "2026-01-01T00:00:00+00:00", "2026-09-01T00:00:00+00:00"
@@ -655,15 +694,16 @@ class FormScripts(unittest.TestCase):
         self.assertEqual(root[0].get("a"), "vlozeno")
         self.assertEqual(doc._get_computable_data_root().getroot()[0].get("a"), "vlozeno")
 
-    def test_button_tells_the_page_whether_it_stored_a_value(self):
+    def test_button_tells_the_page_whether_it_changed_the_data(self):
         doc = engine.open_document((FORM_WITH_ATTRIBUTE % "").encode())
 
         def answer(command):
             return engine.handle(doc, "perform_click", {"command": command})[0]["data"]
 
-        self.assertIn('{"stored": false}', answer("SetValueToData(vlozeno)"))
+        self.assertIn('{"changed": false}', answer("SetValueToData(vlozeno)"))
         doc._get_data_root().getroot().set("form602bindref", "a")
-        self.assertIn('{"stored": true}', answer("SetValueToData(vlozeno)"))
+        self.assertIn('{"changed": true}', answer("SetValueToData(vlozeno)"))
+        self.assertIn('{"changed": false}', answer("SetValueToData(vlozeno)"))
 
     def test_xpath_number_is_stored_as_xpath_writes_it(self):
         doc = engine.open_document((FORM_WITH_ATTRIBUTE % "1 + 1").encode())
