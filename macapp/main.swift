@@ -105,7 +105,8 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
             }
         case "saveFile":
             if let name = body["name"] as? String, let content = body["content"] as? String {
-                saveFile(name: name, folder: body["folder"] as? String, content: content)
+                saveFile(name: name, folder: body["folder"] as? String, content: content,
+                         contentsByExtension: body["contents"] as? [String: String] ?? [:])
             }
         default: break
         }
@@ -115,15 +116,18 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
         webView.evaluateJavaScript("window.zfoAction && zfoAction('\(action)')")
     }
 
-    private func saveFile(name: String, folder: String?, content: String) {
+    private func saveFile(name: String, folder: String?, content: String, contentsByExtension: [String: String]) {
         let panel = NSSavePanel()
         panel.nameFieldStringValue = name
-        panel.allowedContentTypes = [.xml]
+        let defaultExtension = URL(fileURLWithPath: name).pathExtension.lowercased()
+        let extensions = [defaultExtension] + contentsByExtension.keys.sorted().filter { $0 != defaultExtension }
+        panel.allowedContentTypes = contentsByExtension.isEmpty ? [.xml] : extensions.compactMap { UTType(filenameExtension: $0) }
         if let folder { panel.directoryURL = URL(fileURLWithPath: folder, isDirectory: true) }
         panel.beginSheetModal(for: window) { [weak self] response in
             guard response == .OK, let url = panel.url, let self else { return }
             do {
-                try content.write(to: url, atomically: true, encoding: .utf8)
+                let chosen = contentsByExtension[url.pathExtension.lowercased()] ?? content
+                try chosen.write(to: url, atomically: true, encoding: .utf8)
                 let path = String(data: try JSONEncoder().encode(url.path), encoding: .utf8)!
                 self.webView.evaluateJavaScript("window.zfoDataSaved && zfoDataSaved(\(path))")
             } catch {
@@ -163,7 +167,7 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = parameters.allowsMultipleSelection
         panel.canChooseDirectories = false
-        panel.allowedContentTypes = [.xml] + ["pfx", "p12"].compactMap { UTType(filenameExtension: $0) }
+        panel.allowedContentTypes = [.xml] + ["xfdf", "fdf", "pfx", "p12"].compactMap { UTType(filenameExtension: $0) }
         panel.beginSheetModal(for: window) { completionHandler($0 == .OK ? panel.urls : nil) }
     }
 

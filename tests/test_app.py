@@ -24,7 +24,9 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa
 from lxml import etree
 from lxml import html as lxml_html
-from pypdf import PdfWriter
+from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
+from pyhanko.sign import fields, signers
+from pypdf import PdfReader, PdfWriter
 from pypdf.generic import (
     ArrayObject,
     DictionaryObject,
@@ -40,6 +42,7 @@ os.environ["ZFO_OFFLINE"] = "1"  # tests never download trusted lists
 import app  # noqa: E402
 import barcode  # noqa: E402
 import desktop  # noqa: E402
+import pdf_form_data  # noqa: E402
 import pdf_sign  # noqa: E402
 import zfo_verify  # noqa: E402
 from zfoengine import api as engine  # noqa: E402
@@ -890,6 +893,132 @@ class InterpreterAgainstNode(unittest.TestCase):
             if got != wanted:
                 wrong.append(f"{case}: node {wanted!r}, here {got!r}")
         self.assertEqual(wrong, [])
+
+
+class PdfFormData(unittest.TestCase):
+    SOURCE = ROOT / "samples-pdf/zadost.pdf"
+    VALUES = {"jmeno": "Jan Žluťoučký (ml.) \\ a závorka )", "souhlas": True, "doruceni": "posta", "ucel": "Pro soud"}
+    KEY, CERT = SignatureFieldNames.KEY, SignatureFieldNames.CERT
+
+    def setUp(self):
+        app.FORMS["pdf-data-test"] = self.SOURCE
+        self.addCleanup(app.FORMS.pop, "pdf-data-test", None)
+
+    def session(self, pdf=None):
+        return {"name": "pdf-data-test", "pdf": pdf or self.SOURCE.read_bytes()}
+
+    def exported(self, pdf=None, values=VALUES):
+        return app.export_pdf_data(self.session(pdf), values)
+
+    def test_both_formats_bring_the_values_back(self):
+        contents = self.exported()["contents"]
+        for extension in ("xfdf", "fdf"):
+            with self.subTest(extension=extension):
+                result = app.import_pdf_data(self.session(), contents[extension].encode("utf-8"))
+                self.assertEqual({name: result["values"][name] for name in self.VALUES}, self.VALUES)
+                self.assertEqual(result["values"]["email"], "")
+                self.assertEqual((result["missing"], result["unchangeable"], result["not_offered"]), ([], [], []))
+
+    def test_export_names_the_pdf_and_holds_saved_values(self):
+        exported = self.exported(values={})
+        self.assertEqual(exported["name"], "pdf-data-test-data.xfdf")
+        self.assertIn('href="zadost.pdf"', exported["contents"]["xfdf"])
+        self.assertIn("/F (zadost\\056pdf)", exported["contents"]["fdf"])
+        self.assertEqual(app.import_pdf_data(self.session(), exported["contents"]["fdf"].encode())["values"]["ucel"], "Pro banku")
+        self.assertTrue(exported["contents"]["fdf"].isascii())
+
+    def test_names_of_nested_fields_are_kept(self):
+        values = {"osoba.jmeno": "Jan", "osoba.adresa.obec": "Brno", "osoba": "kořen"}
+        for write in (pdf_form_data.write_xfdf, pdf_form_data.write_fdf):
+            with self.subTest(write=write.__name__):
+                self.assertEqual(pdf_form_data.read_form_data(write(values, "x.pdf").encode()), values)
+
+    def test_fields_missing_in_the_form_are_listed(self):
+        data = pdf_form_data.write_xfdf({"jmeno": "Jan", "stare_pole": "x", "jine.pole": "y"}, "x.pdf").encode()
+        result = app.import_pdf_data(self.session(), data)
+        self.assertEqual(result["values"], {"jmeno": "Jan"})
+        self.assertEqual(sorted(result["missing"]), ["jine.pole", "stare_pole"])
+
+    def test_values_the_form_does_not_offer_are_listed(self):
+        data = pdf_form_data.write_xfdf({"ucel": "Pro úřad", "doruceni": "kurýrem", "souhlas": "Ano", "jmeno": "Jan"}, "x.pdf").encode()
+        result = app.import_pdf_data(self.session(), data)
+        self.assertEqual(result["values"], {"souhlas": True, "jmeno": "Jan"})
+        self.assertEqual(result["not_offered"], [{"field": "ucel", "value": "Pro úřad"}, {"field": "doruceni", "value": "kurýrem"}])
+
+    def test_read_only_and_signature_fields_are_not_changed(self):
+        writer = PdfWriter(clone_from=self.SOURCE)
+        for annotation in writer.pages[0]["/Annots"]:
+            if annotation.get_object().get("/T") == "jmeno":
+                annotation.get_object()[NameObject("/Ff")] = NumberObject(pdf_form_data.FIELD_FLAG_READ_ONLY)
+        out = io.BytesIO()
+        writer.write(out)
+        data = pdf_form_data.write_xfdf({"jmeno": "Jan", "podpis_zadatele": "x", "email": "a@b.cz"}, "x.pdf").encode()
+        result = app.import_pdf_data(self.session(out.getvalue()), data)
+        self.assertEqual(result["values"], {"email": "a@b.cz"})
+        self.assertEqual(sorted(result["unchangeable"]), ["jmeno", "podpis_zadatele"])
+
+    def signed_with(self, **options):
+        writer = IncrementalPdfFileWriter(io.BytesIO(self.SOURCE.read_bytes()), strict=False)
+        metadata = signers.PdfSignatureMetadata(**{"field_name": "podpis_zadatele", "md_algorithm": "sha256", **options.pop("metadata", {})})
+        signer = signers.PdfSigner(metadata, pdf_sign.ExternalKeySigner(self.KEY, self.CERT), **options)
+        return signer.sign_pdf(writer).getvalue()
+
+    def filled_after_signing(self, values):
+        signed = pdf_sign.sign_pdf(self.SOURCE.read_bytes(), self.KEY, self.CERT)
+        data = pdf_form_data.write_xfdf(values, "zadost.pdf").encode()
+        filled = pdf_sign.fill_form_fields(signed, app.import_pdf_data(self.session(signed), data)["values"])
+        self.assertTrue(filled.startswith(signed))
+        return filled, pdf_sign.describe_signatures(filled)[0]
+
+    def test_values_loaded_into_a_signed_pdf_keep_the_signature_intact(self):
+        filled, found = self.filled_after_signing(self.VALUES)
+        self.assertTrue(found["intact"])
+        self.assertEqual(PdfReader(io.BytesIO(filled)).get_fields()["jmeno"]["/V"], self.VALUES["jmeno"])
+
+    def test_text_and_checkbox_loaded_after_signing_count_as_form_filling(self):
+        _, found = self.filled_after_signing({"jmeno": "Jan", "email": "a@b.cz", "souhlas": True})
+        self.assertTrue(found["intact"])
+        self.assertFalse(found["modified"])
+
+    def test_fields_locked_by_a_signature_are_not_changed(self):
+        locked = self.signed_with(metadata={"field_name": "zamek"},
+                                  new_field_spec=fields.SigFieldSpec("zamek", field_mdp_spec=fields.FieldMDPSpec(
+                                      fields.FieldMDPAction.INCLUDE, ["jmeno"])))
+        result = app.import_pdf_data(self.session(locked), self.exported()["contents"]["xfdf"].encode())
+        self.assertIn("jmeno", result["unchangeable"])
+        self.assertNotIn("jmeno", result["values"])
+        self.assertEqual(result["values"]["ucel"], "Pro soud")
+
+    def test_pdf_certified_against_changes_is_refused(self):
+        certified = self.signed_with(metadata={"certify": True, "docmdp_permissions": fields.MDPPerm.NO_CHANGES})
+        with self.assertRaisesRegex(ValueError, "nedovoluje žádné další změny"):
+            app.import_pdf_data(self.session(certified), self.exported()["contents"]["xfdf"].encode())
+
+    def test_other_files_get_a_message(self):
+        for data in (b"", b"plain text", b"<html/>", b"%FDF-1.2\n%%EOF"):
+            with self.subTest(data=data), self.assertRaises(ValueError):
+                app.import_pdf_data(self.session(), data)
+
+
+class DesktopDataFileDialog(unittest.TestCase):
+    def saved_file(self, chosen_name):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        window = mock.Mock()
+        window.create_file_dialog.return_value = str(Path(folder.name) / chosen_name)
+        desktop_app = mock.Mock()
+        bridge = desktop.Bridge(desktop_app, mock.Mock())
+        bridge._save_file_from_dialog(window, {"name": "zadost-data.xfdf", "folder": folder.name, "content": "XFDF",
+                                            "contents": {"xfdf": "XFDF", "fdf": "FDF"}})
+        self.assertEqual(window.create_file_dialog.call_args.kwargs["file_types"], ("XFDF (*.xfdf)", "FDF (*.fdf)"))
+        return {path.name: path.read_text(encoding="utf-8") for path in Path(folder.name).iterdir()}
+
+    def test_content_follows_the_chosen_extension(self):
+        self.assertEqual(self.saved_file("data.fdf"), {"data.fdf": "FDF"})
+        self.assertEqual(self.saved_file("data.XFDF"), {"data.XFDF": "XFDF"})
+
+    def test_name_without_a_known_extension_gets_the_default_one(self):
+        self.assertEqual(self.saved_file("data"), {"data.xfdf": "XFDF"})
 
 
 if __name__ == "__main__":

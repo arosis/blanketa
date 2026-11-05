@@ -58,11 +58,18 @@ class Bridge:
         return (window.get_current_url() or "").startswith(self._form.home)
 
     def _save_file_from_dialog(self, window, request):
+        contents = request.get("contents") or {}
+        default_extension = Path(request["name"]).suffix.lstrip(".").lower()
+        extensions = [default_extension, *sorted(set(contents) - {default_extension})] if contents else ["xml"]
         chosen = window.create_file_dialog(self._app.webview.FileDialog.SAVE, directory=request.get("folder") or "",
-                                           save_filename=request["name"], file_types=("XML (*.xml)",))
+                                           save_filename=request["name"],
+                                           file_types=tuple(f"{extension.upper()} (*.{extension})" for extension in extensions))
         if chosen:
-            target = chosen if isinstance(chosen, str) else chosen[0]
-            Path(target).write_text(request["content"], encoding="utf-8")
+            target = Path(chosen if isinstance(chosen, str) else chosen[0])
+            extension = target.suffix.lstrip(".").lower()
+            if contents and extension not in contents:
+                target, extension = target.with_name(f"{target.name}.{default_extension}"), default_extension
+            target.write_text(contents.get(extension, request["content"]), encoding="utf-8")
             window.evaluate_js(f"window.zfoDataSaved && zfoDataSaved({json.dumps(str(target))})")
 
     def message(self, msg):

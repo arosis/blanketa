@@ -361,3 +361,10 @@ def describe_signatures(pdf):
                        if stamp is not None],
         })
     return result
+
+
+def signature_locks(pdf):
+    reader = _open_for_validation(pdf)
+    signatures = reader.embedded_regular_signatures
+    is_document_locked = any(signature.docmdp_level == fields.MDPPerm.NO_CHANGES for signature in signatures)
+    return is_document_locked, [signature.fieldmdp for signature in signatures if signature.fieldmdp is not None]

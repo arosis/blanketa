@@ -29,6 +29,7 @@ from lxml import etree  # noqa: E402
 import app  # noqa: E402
 import certstore  # noqa: E402
 import desktop  # noqa: E402
+import pdf_form_data  # noqa: E402
 import zfo_verify  # noqa: E402
 from zfoengine import api as engine  # noqa: E402
 from zfoengine import form_scripts  # noqa: E402
@@ -590,6 +591,74 @@ class LinuxTrust(unittest.TestCase):
                                     test.public_bytes(serialization.Encoding.DER)])
         self.assertTrue(verdicts[0]["trusted"], verdicts[0])
         self.assertFalse(verdicts[1]["trusted"])
+
+
+class HostileFormDataFiles(unittest.TestCase):
+    def test_external_entity_is_not_read_into_values(self):
+        with tempfile.TemporaryDirectory() as folder:
+            outside_file = Path(folder) / "outside.txt"
+            outside_file.write_text(OUTSIDE_FILE_TEXT, encoding="utf-8")
+            hostile = (f'<?xml version="1.0"?><!DOCTYPE x [<!ENTITY e SYSTEM "{outside_file.as_uri()}">]>'
+                       '<xfdf xmlns="http://ns.adobe.com/xfdf/"><fields><field name="a"><value>&e;</value></field></fields></xfdf>')
+            values = pdf_form_data.read_form_data(hostile.encode())
+        self.assertNotIn(OUTSIDE_FILE_TEXT, json.dumps(values))
+
+    def test_entity_bomb_is_not_expanded(self):
+        entities = '<!ENTITY a0 "xxxxxxxxxx">' + "".join(f'<!ENTITY a{i} "{f"&a{i - 1};" * 10}">' for i in range(1, 10))
+        hostile = (f'<?xml version="1.0"?><!DOCTYPE x [{entities}]>'
+                   '<xfdf xmlns="http://ns.adobe.com/xfdf/"><fields><field name="a"><value>&a9;</value></field></fields></xfdf>')
+        try:
+            values = pdf_form_data.read_form_data(hostile.encode())
+        except ValueError:
+            return
+        self.assertLess(len(json.dumps(values)), 1000)
+
+    def test_cycles_in_fdf_end(self):
+        hostile = (b"%FDF-1.2\n1 0 obj << /FDF << /Fields [2 0 R 2 0 R] >> >> endobj\n"
+                   b"2 0 obj << /T (a) /V 3 0 R /Kids [2 0 R 1 0 R] >> endobj\n3 0 obj 3 0 R endobj\n%%EOF")
+        self.assertEqual(pdf_form_data.read_form_data(hostile), {})
+
+    def test_unreadable_objects_get_a_message(self):
+        for hostile in (b"%FDF-1.2\n1 0 obj << /FDF << /Fields " + b"[" * 100_000 + b" >> >> endobj",
+                        b"%FDF-1.2\n1 0 obj " + b"<< /A " * 50_000 + b"endobj",
+                        b"%FDF-1.2\n1 0 obj << /FDF << /Fields [ << /T (a) /V /" + b"a" * 5000 + b" >> ] >> >> endobj"):
+            with self.subTest(size=len(hostile)), self.assertRaises(ValueError):
+                pdf_form_data.read_form_data(hostile)
+
+    def test_deeply_nested_fields_are_cut_off(self):
+        nested = "".join(f'<field name="f{i}">' for i in range(200)) + "<value>x</value>" + "</field>" * 200
+        values = pdf_form_data.read_form_data(f'<xfdf xmlns="http://ns.adobe.com/xfdf/"><fields>{nested}</fields></xfdf>'.encode())
+        self.assertEqual(values, {})
+
+    def test_routes_need_the_session_and_the_own_origin(self):
+        server = ThreadingHTTPServer(("127.0.0.1", 0), app.Handler)
+        self.addCleanup(server.server_close)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.shutdown)
+        port = server.server_address[1]
+        app.FORMS["pdf-data-route"] = ROOT / "samples-pdf/zadost.pdf"
+        self.addCleanup(app.FORMS.pop, "pdf-data-route", None)
+
+        def request(path, body=b"", origin=None):
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
+            headers = {"Host": f"127.0.0.1:{port}", **({"Origin": origin} if origin else {})}
+            connection.request("POST" if body is not None else "GET", path, body=body, headers=headers)
+            response = connection.getresponse()
+            return response.status, response.read()
+
+        _, page = request("/?form=pdf-data-route", body=None)
+        session = page.decode().split("const SESSION = '")[1].split("'")[0]
+        data = pdf_form_data.write_xfdf({"jmeno": "Jan"}, "zadost.pdf").encode()
+        for path in ("/pdf-import-data", "/pdf-export-data"):
+            with self.subTest(path=path):
+                self.assertEqual(request(path, data)[0], 404)
+                self.assertEqual(request(f"{path}?s={session}", data, origin="https://attacker.example")[0], 403)
+        status, answer = request(f"/pdf-import-data?s={session}", data)
+        self.assertEqual((status, json.loads(answer)["values"]), (200, {"jmeno": "Jan"}))
+        self.assertEqual(request(f"/pdf-import-data?s={session}", b"<x")[0], 400)
+        status, answer = request(f"/pdf-export-data?s={session}", json.dumps({"values": {"jmeno": "Jan"}}).encode())
+        self.assertEqual(status, 200)
+        self.assertIn("<value>Jan</value>", json.loads(answer)["contents"]["xfdf"])
 
 
 if __name__ == "__main__":
