@@ -27,6 +27,12 @@ jobs:
         run: |
           python -m venv .venv
           .venv/bin/pip install -q --require-hashes --only-binary :all: -r requirements.txt
+      # The macOS app does not use them, so only this step installs their darwin-only lines (pyobjc) anywhere.
+      - name: Desktop dependencies install
+        run: |
+          python -m venv .venv-desktop
+          .venv-desktop/bin/pip install -q --require-hashes --only-binary :all: -r requirements-build.txt
+          .venv-desktop/bin/pip install -q --require-hashes --only-binary :all: --no-binary proxy-tools --no-build-isolation -r requirements-desktop.txt
       - name: Engine tests
         run: .venv/bin/python -I tests/test_engine.py
       - name: Signing selftest (test keychain)
