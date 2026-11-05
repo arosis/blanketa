@@ -682,6 +682,10 @@ class RadioButtonsInSectionCopies(unittest.TestCase):
         forms = self.page_after(clone)["forms"]
         self.assertNotEqual(forms[2], forms[4])
 
+    def test_value_by_name_alone_goes_to_the_first_group_and_clears_its_choice(self):
+        page = self.page_after("fill_inputs(null, {mimo: 'x', sekce: [{r: 'a'}, {r: 'a'}]}); set_radio_value('r', 'b'); set_radio_value('mimo', '')")
+        self.assertEqual(page["checked"], ["sekce-rep-0:b", "sekce-rep-1:a"])
+
     def test_default_value_is_stored_for_the_copy_of_the_field(self):
         page = self.page_after("fill_inputs(null, {sekce: [{r: 'b'}, {r: 'b'}]}); lastField = radios[5]; applyDefault({field: 'r', value: 'a'})")
         self.assertEqual(page["checked"], ["sekce-rep-0:b", "sekce-rep-1:a"])

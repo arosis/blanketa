@@ -532,8 +532,14 @@
     }
   };
   const radioGroupOf = radio => elementsNamed(radio.name).filter(other => other.type === 'radio' && other.form === radio.form);
-  // Its fill_inputs also counted each section's copies through a full walk of the page and never used the number, and
-  // it set a radio button by an id that every copy of a section repeats, so the value always reached the first copy.
+  const chooseRadio = (radio, value) => radioGroupOf(radio).forEach(other => { other.checked = other.value === value; });
+  // Its set_radio_value found the button by an id that every copy of a section repeats and never cleared a choice. Its
+  // callers pass only the name, so the value goes to the first group, the one outside sections or in the first copy.
+  window.set_radio_value = (name, value) => {
+    const first = elementsNamed(name).find(element => element.type === 'radio');
+    if (first) chooseRadio(first, value);
+  };
+  // Its fill_inputs also counted each section's copies through a full walk of the page and never used the number.
   window.fill_inputs = (parent, data) => {
     if (parent == null) separateRadioGroups();
     for (const [name, value] of Object.entries(data)) {
@@ -542,7 +548,7 @@
       } else {
         const input = get_html_elem(parent, name, true);
         if (!input || $(input).hasClass('shouldStayEmpty')) continue;
-        if (input.type === 'radio') radioGroupOf(input).forEach(radio => { radio.checked = radio.value === value; });
+        if (input.type === 'radio') chooseRadio(input, value);
         else set_input_value(input, value);
       }
     }
@@ -1110,7 +1116,7 @@
     if (!element || value === null) { setStatus('Pole nemá výchozí hodnotu.'); return; }
     if (element.type === 'radio') {
       // The change event of the clicked button would store that button's value, and with no button chosen there is none.
-      radioGroupOf(element).forEach(radio => { radio.checked = radio.value === value; });
+      chooseRadio(element, value);
       gtk_handler_start();
       send(JSON.stringify({type: 'store_val', data: {field, value, repe: get_parent_repe(element), input_id: element.id}}));
     } else {
