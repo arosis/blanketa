@@ -18,8 +18,9 @@ from pypdf.generic import (
 XFDF_NAMESPACE = "http://ns.adobe.com/xfdf/"
 FDF_HEADER = b"%FDF-"
 FDF_HEADER_SEARCH_LENGTH = 1024
-# A match starts only at the first digit of a number: trying every digit of a long run makes the search quadratic.
-FDF_OBJECT_START = re.compile(rb"(?<!\d)(\d+)\s+\d+\s+obj\b\s*")
+FDF_OBJECT_KEYWORD = re.compile(rb"\bobj\b")
+PDF_WHITESPACE = b" \t\r\n\f\x00"
+PDF_DIGITS = b"0123456789"
 MAX_FIELD_DEPTH = 32
 FIELD_FLAG_READ_ONLY = 1
 FIELD_FLAG_RADIO = 1 << 15
@@ -146,14 +147,42 @@ def _read_xfdf(data):
     return values
 
 
+def _start_of_run(data, end, characters):
+    start = end
+    while start > 0 and data[start - 1] in characters:
+        start -= 1
+    return start
+
+
+def _end_of_run(data, start, characters):
+    end = start
+    while end < len(data) and data[end] in characters:
+        end += 1
+    return end
+
+
+# "<number> <generation> obj" is read backwards from the keyword. A regular expression over both numbers would retry
+# every digit of a long run in a hostile file, which makes the search quadratic.
+def _object_number_before(data, keyword_start):
+    generation_end = _start_of_run(data, keyword_start, PDF_WHITESPACE)
+    generation_start = _start_of_run(data, generation_end, PDF_DIGITS)
+    number_end = _start_of_run(data, generation_start, PDF_WHITESPACE)
+    number_start = _start_of_run(data, number_end, PDF_DIGITS)
+    has_both_numbers = number_start < number_end < generation_start < generation_end < keyword_start
+    return int(data[number_start:number_end]) if has_both_numbers else None
+
+
 def _fdf_objects(data):
     objects_by_number = {}
     resolver = _FdfObjects(objects_by_number)
-    for match in FDF_OBJECT_START.finditer(data):
+    for match in FDF_OBJECT_KEYWORD.finditer(data):
+        number = _object_number_before(data, match.start())
+        if number is None:
+            continue
         stream = io.BytesIO(data)
-        stream.seek(match.end())
+        stream.seek(_end_of_run(data, match.end(), PDF_WHITESPACE))
         try:
-            objects_by_number[int(match.group(1))] = read_object(stream, resolver)
+            objects_by_number[number] = read_object(stream, resolver)
         # A hostile file can nest arrays deep enough to exhaust the parser's recursion.
         except (PyPdfError, ValueError, TypeError, KeyError, AttributeError, RecursionError):
             continue
