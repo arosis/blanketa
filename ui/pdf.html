@@ -17,6 +17,7 @@ __SHELL_STYLE__
   .zfo-dialog .zfo-sign-mode label { display: flex; align-items: center; gap: 8px; font-weight: 400; }
   body.zfo-placing .pdfViewer .page { cursor: crosshair; }
   body.zfo-placing :is(.annotationLayer, .textLayer) { pointer-events: none; }
+  .zfo-import-report ul { max-height: 160px; overflow: auto; margin: 4px 0 12px; padding-left: 20px; user-select: text; -webkit-user-select: text; }
   .zfo-place-box { position: absolute; z-index: 10; border: 2px dashed var(--accent); background: rgba(10, 100, 214, .1);
     border-radius: 3px; pointer-events: none; }
 </style>
@@ -45,6 +46,12 @@ __SHELL_STYLE__
   <div class="zfo-group">
     <button class="zfo-btn icon" data-action="reset" title="Obnovit hodnoty z uloženého souboru">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4h4"/></svg>
+    </button>
+    <button class="zfo-btn icon" data-action="import-data" title="Import dat do formuláře (XFDF, FDF)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="10" cy="5" rx="6" ry="2.2"/><path d="M4 5v11c0 1.2 2.7 2.2 6 2.2M16 5v5M4 10.5c0 1.2 2.7 2.2 6 2.2s6-1 6-2.2"/><path d="M12.5 21.5v-7h3.2l1.3 1.3h4.5v5.7z"/></svg>
+    </button>
+    <button class="zfo-btn icon" data-action="export-data" title="Uložit data do souboru (XFDF, FDF)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><ellipse cx="10" cy="5" rx="6" ry="2.2"/><path d="M4 5v11c0 1.2 2.7 2.2 6 2.2M16 5v5M4 10.5c0 1.2 2.7 2.2 6 2.2s6-1 6-2.2"/><path d="M13 13.5h6.5l2 2v6H13z"/><path d="M15 13.5v2.8h4v-2.8M15 21.5v-3h4.5v3"/></svg>
     </button>
   </div>
   <div class="zfo-group">
@@ -102,6 +109,30 @@ __SHELL_STYLE__
   </form>
 </dialog>
 
+<dialog class="zfo-dialog zfo-import-report" data-import-report>
+  <form method="dialog">
+    <h2>Data načtena</h2>
+    <p data-import-summary></p>
+    <div data-import-missing hidden>
+      <p>Tato pole ze souboru ve formuláři nejsou, jejich hodnoty se nenačetly:</p>
+      <ul></ul>
+    </div>
+    <div data-import-unchangeable hidden>
+      <p>Tato pole nejdou změnit (jsou jen pro čtení nebo je zamyká podpis), zůstala beze změny:</p>
+      <ul></ul>
+    </div>
+    <div data-import-not-offered hidden>
+      <p>Tyto hodnoty formulář u pole nenabízí, pole zůstala beze změny:</p>
+      <ul></ul>
+    </div>
+    <div data-import-several-values hidden>
+      <p>Tato pole mají v souboru víc hodnot najednou, Blanketa vyplní jen jednu; pole zůstala beze změny:</p>
+      <ul></ul>
+    </div>
+    <div class="zfo-dialog-buttons"><button class="zfo-btn primary" value="close">Zavřít</button></div>
+  </form>
+</dialog>
+
 <script src="/bridge.js"></script>
 <script type="module">
   const SESSION = '__SESSION__';
@@ -129,17 +160,31 @@ __SHELL_STYLE__
   linkService.setViewer(viewer);
   let pdf, fieldObjects = {}, changed = false, autoFit = true;
 
-  const loadDocument = async () => {
+  const storeFieldValue = (widget, value) => {
+    if (widget.type === 'radiobutton') pdf.annotationStorage.setValue(widget.id, {value: [widget.buttonValue, widget.exportValues].includes(value)});
+    else if (widget.type === 'checkbox') pdf.annotationStorage.setValue(widget.id, {value: Boolean(value)});
+    else if (['combobox', 'listbox'].includes(widget.type)) pdf.annotationStorage.setValue(widget.id, {value: [String(value)]});
+    // A text field shows the text of its saved appearance unless a formatted value is given; an empty one would not
+    // count, so a space stands in for it on screen while the value itself stays empty.
+    else if (widget.type === 'text') pdf.annotationStorage.setValue(widget.id, {value: String(value), formattedValue: String(value) || ' '});
+  };
+  // Values go into the storage before the viewer draws the fields: the drawn fields read their value from there once.
+  const loadDocument = async (valuesToShow = {}) => {
     pdf = await pdfjsLib.getDocument({
       url: '/pdf?s=' + SESSION + '&t=' + Date.now(), standardFontDataUrl: '/pdfjs/standard_fonts/',
       cMapUrl: '/pdfjs/cmaps/', cMapPacked: true,
     }).promise;
+    fieldObjects = (await pdf.getFieldObjects()) ?? {};
+    for (const [name, value] of Object.entries(valuesToShow)) {
+      for (const widget of fieldObjects[name] ?? []) if (widget.id) storeFieldValue(widget, value);
+    }
+    changed = Object.keys(valuesToShow).length > 0;
+    pdf.annotationStorage.onSetModified = () => { changed = true; renderSignatures(); };
+    const pagesShown = new Promise(resolve => eventBus.on('pagesinit', resolve, {once: true}));
     viewer.setDocument(pdf);
     linkService.setDocument(pdf);
-    fieldObjects = (await pdf.getFieldObjects()) ?? {};
-    changed = false;
-    pdf.annotationStorage.onSetModified = () => { changed = true; renderSignatures(); };
     renderSignatures();
+    await pagesShown;
   };
   eventBus.on('pagesinit', () => { if (autoFit) viewer.currentScaleValue = 'page-width'; setStatus('Připraveno'); });
   eventBus.on('scalechanging', event => { queryOne('.zfo-zoom').textContent = Math.round(event.scale * 100) + ' %'; });
@@ -258,9 +303,64 @@ __SHELL_STYLE__
   const showSavedDocument = async (result, verb) => {
     signatures = result.signatures;
     signatureField = result.signature_field;
-    savedStatus(verb, result.saved);
     queryOne('[data-file]').textContent = result.saved.split('/').pop();
     await loadDocument();
+    savedStatus(verb, result.saved);
+  };
+
+  window.zfoDataSaved = path => savedStatus('Data uložena do', path);
+  const exportData = async () => {
+    try {
+      const data = await postChangedValues('/pdf-export-data');
+      if (native) {
+        native.postMessage({action: 'saveFile', name: data.name, folder: data.folder, content: data.contents.xfdf, contents: data.contents});
+        return;
+      }
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(new Blob([data.contents.xfdf], {type: 'application/vnd.adobe.xfdf'}));
+      link.download = data.name;
+      link.click();
+      URL.revokeObjectURL(link.href);
+      setStatusMarkup(`Data stažena jako <b>${escapeHtml(data.name)}</b>`);
+    } catch (error) { setStatus('Chyba: ' + error.message); }
+  };
+  const importReport = queryOne('[data-import-report]');
+  const listInReport = (selector, names) => {
+    const section = importReport.querySelector(selector);
+    section.hidden = !names.length;
+    section.querySelector('ul').replaceChildren(...names.map(name => Object.assign(document.createElement('li'), {textContent: name})));
+  };
+  const loadedValues = count => count === 0 ? 'se nenačetla žádná hodnota'
+    : count === 1 ? 'se načetla 1 hodnota' : count <= 4 ? `se načetly ${count} hodnoty` : `se načetlo ${count} hodnot`;
+  const showImportResult = (fileName, result) => {
+    const loaded = Object.keys(result.values).length;
+    const summary = `Ze souboru „${fileName}“ ${loadedValues(loaded)}.` + (loaded ? ` Zkontrolujte ${loaded === 1 ? 'ji' : 'je'} a dokument uložte.` : '');
+    setStatus(summary);
+    if (!result.missing.length && !result.unchangeable.length && !result.not_offered.length && !result.several_values.length) return;
+    importReport.querySelector('[data-import-summary]').textContent = summary;
+    listInReport('[data-import-missing]', result.missing);
+    listInReport('[data-import-unchangeable]', result.unchangeable);
+    listInReport('[data-import-not-offered]', result.not_offered.map(({field, value}) => `${field}: „${value}“`));
+    listInReport('[data-import-several-values]', result.several_values);
+    importReport.showModal();
+  };
+  const importData = () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.xfdf,.fdf,application/vnd.adobe.xfdf,application/vnd.fdf';
+    input.addEventListener('change', async () => {
+      const file = input.files[0];
+      if (!file) return;
+      document.activeElement?.blur();
+      try {
+        const response = await fetch('/pdf-import-data?s=' + SESSION, {method: 'POST', body: await file.arrayBuffer()});
+        if (!response.ok) { setStatus('Import se nepodařil: ' + await response.text()); return; }
+        const result = await response.json();
+        await loadDocument({...changedFieldValues(), ...result.values});
+        showImportResult(file.name, result);
+      } catch (error) { setStatus('Import se nepodařil: ' + error.message); }
+    });
+    input.click();
   };
 
   let signatureField = info.signature_field;
@@ -376,6 +476,8 @@ __SHELL_STYLE__
       await loadDocument();
       setStatus('Načteny hodnoty z uloženého souboru');
     },
+    'import-data': importData,
+    'export-data': exportData,
     'zoom-in': () => zoomTo(viewer.currentScale + .1),
     'zoom-out': () => zoomTo(viewer.currentScale - .1),
     'zoom-fit': () => { autoFit = true; viewer.currentScaleValue = 'page-width'; },

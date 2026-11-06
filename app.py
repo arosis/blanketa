@@ -21,6 +21,7 @@ from lxml import etree
 
 import barcode
 import certstore
+import pdf_form_data
 import pdf_sign
 import zfo_sign
 import zfo_verify
@@ -202,6 +203,48 @@ def write_pdf_for_printing(session, values):
     return {"path": str(target)}
 
 
+def data_file_folder(session):
+    return str(form_path(session["name"]).parent if SINGLE_FILE else ROOT / "out")
+
+
+def data_file_stem(session):
+    return form_path(session["name"]).stem if SINGLE_FILE else session["name"]
+
+
+def export_pdf_data(session, values):
+    pdf = pdf_sign.fill_form_fields(session["pdf"], values) if values else session["pdf"]
+    current = pdf_form_data.form_data_values(pdf)
+    pdf_name = form_path(session["name"]).name
+    return {"name": f"{data_file_stem(session)}-data.xfdf", "folder": data_file_folder(session),
+            "contents": {"xfdf": pdf_form_data.write_xfdf(current, pdf_name), "fdf": pdf_form_data.write_fdf(current, pdf_name)}}
+
+
+def import_pdf_data(session, data):
+    is_document_locked, field_locks = pdf_sign.signature_locks(session["pdf"])
+    if is_document_locked:
+        raise ValueError("Podpis dokumentu nedovoluje žádné další změny, data do něj nelze načíst.")
+    fields = pdf_form_data.form_fields(session["pdf"])
+    values, missing, unchangeable, not_offered, several_values = {}, [], [], [], []
+    for name, value in pdf_form_data.read_form_data(data).items():
+        field = fields.get(name)
+        if field is None:
+            missing.append(name)
+            continue
+        if not pdf_form_data.is_fillable_kind(field.kind) or field.is_read_only or any(lock.is_locked(name) for lock in field_locks):
+            unchangeable.append(name)
+            continue
+        text = pdf_form_data.single_text(field.kind, value)
+        if text is None:
+            several_values.append(name)
+            continue
+        if not field.offers(text):
+            not_offered.append({"field": name, "value": text})
+            continue
+        values[name] = pdf_form_data.page_value(field.kind, text)
+    return {"values": values, "missing": missing, "unchangeable": unchangeable, "not_offered": not_offered,
+            "several_values": several_values}
+
+
 def published_form_with_data(fo, data):
     published = publisher_layer(parse_fo(fo))
     remove_data_objects(published)
@@ -378,11 +421,8 @@ def write_zfo(name, fo, target):
 
 
 def export_data(session):
-    path = form_path(session["name"])
     xml = etree.tostring(engine.data_element(session["doc"]), xml_declaration=True, encoding="UTF-8", pretty_print=True)
-    return {"name": f"{path.stem if SINGLE_FILE else session['name']}-data.xml",
-            "folder": str(path.parent if SINGLE_FILE else ROOT / "out"),
-            "xml": xml.decode("utf-8")}
+    return {"name": f"{data_file_stem(session)}-data.xml", "folder": data_file_folder(session), "xml": xml.decode("utf-8")}
 
 
 def import_data(session, xml):
@@ -552,6 +592,14 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_error_message(error)
         return self._send_json(result)
 
+    def _export_or_import_pdf_data(self, session, path, body):
+        try:
+            result = (export_pdf_data(session, json.loads(body or b"{}").get("values") or {}) if path == "/pdf-export-data"
+                      else import_pdf_data(session, body))
+        except (LookupError, ValueError, OSError) as error:
+            return self._send_error_message(error)
+        return self._send_json(result)
+
     def do_POST(self):
         if self._is_foreign_request():
             return self._send_response(403, b"forbidden", PLAIN_TEXT)
@@ -573,6 +621,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._save_or_print_pdf(session, url, body)
             if url.path in ("/export-data", "/import-data"):
                 return self._export_or_import_data(session, url.path, body)
+            if url.path in ("/pdf-export-data", "/pdf-import-data"):
+                return self._export_or_import_pdf_data(session, url.path, body)
         return self._send_not_found()
 
 
