@@ -333,6 +333,34 @@ class SignatureFieldNames(unittest.TestCase):
         self.assertFalse(any(found["changes_unchecked"] for found in pdf_sign.describe_signatures(document)))
 
 
+class ChoiceFieldsAfterSigning(unittest.TestCase):
+    """A choice field keeps its selected indices (/I) only where ISO 32000-1 lets /V outrank them."""
+
+    def field(self, name):
+        return PdfReader(io.BytesIO(self.filled)).get_fields()[name]
+
+    def test_single_select_keeps_earlier_signature_clean(self):
+        signed = pdf_sign.sign_pdf((ROOT / "samples-pdf/zadost.pdf").read_bytes(), SignatureFieldNames.KEY, SignatureFieldNames.CERT)
+        self.filled = pdf_sign.fill_form_fields(signed, {"ucel": "Pro soud"})
+        self.assertFalse(pdf_sign.describe_signatures(self.filled)[0]["modified"])
+        self.assertEqual(self.field("ucel")["/V"], "Pro soud")
+
+    def test_multi_select_indices_follow_the_new_value(self):
+        writer, out = PdfWriter(), io.BytesIO()
+        writer.add_blank_page(200, 200)
+        field = writer._add_object(DictionaryObject({
+            NameObject("/FT"): NameObject("/Ch"), NameObject("/T"): TextStringObject("volby"),
+            NameObject("/Ff"): NumberObject(pdf_sign.MULTI_SELECT), NameObject("/Type"): NameObject("/Annot"),
+            NameObject("/Subtype"): NameObject("/Widget"), NameObject("/Rect"): ArrayObject([NumberObject(0)] * 4),
+            NameObject("/Opt"): ArrayObject(TextStringObject(option) for option in ("a", "b", "c")),
+            NameObject("/V"): ArrayObject([TextStringObject("a")]), NameObject("/I"): ArrayObject([NumberObject(0)])}))
+        writer.pages[0][NameObject("/Annots")] = ArrayObject([field])
+        writer.root_object[NameObject("/AcroForm")] = writer._add_object(DictionaryObject({NameObject("/Fields"): ArrayObject([field])}))
+        writer.write(out)
+        self.filled = pdf_sign.fill_form_fields(out.getvalue(), {"volby": ["b", "c"]})
+        self.assertEqual(self.field("volby").indirect_reference.get_object()["/I"], [1, 2])
+
+
 class OpeningForms(unittest.TestCase):
     """Most of the time goes in the page, which no test here can run; these guard the engine's part and the page's fixes."""
     SECTIONS = 50
