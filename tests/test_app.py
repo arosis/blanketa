@@ -42,6 +42,7 @@ os.environ["ZFO_OFFLINE"] = "1"  # tests never download trusted lists
 import app  # noqa: E402
 import barcode  # noqa: E402
 import desktop  # noqa: E402
+import linux_print  # noqa: E402
 import pdf_form_data  # noqa: E402
 import pdf_sign  # noqa: E402
 import zfo_verify  # noqa: E402
@@ -1193,6 +1194,36 @@ class DesktopDataFileDialog(unittest.TestCase):
 
     def test_name_without_a_known_extension_gets_the_default_one(self):
         self.assertEqual(self.saved_file("data"), {"data.xfdf": "XFDF"})
+
+
+class LinuxPdfPrinting(unittest.TestCase):
+    A4 = (595.28, 841.89)
+
+    def test_page_fills_paper_of_its_shape(self):
+        placed = linux_print.fit_page_on_paper(self.A4, (4800, 6800), 600)
+        self.assertEqual(placed.rotation, 0)
+        self.assertEqual((placed.x, placed.width), (0, 4800))
+        self.assertAlmostEqual(placed.y * 2 + placed.height, 6800)
+
+    def test_landscape_page_turns_onto_portrait_paper(self):
+        placed = linux_print.fit_page_on_paper((self.A4[1], self.A4[0]), (4800, 6800), 600)
+        self.assertEqual(placed.rotation, 90)
+        self.assertLessEqual(placed.width, 4800)
+        self.assertLessEqual(placed.height, 6800)
+        self.assertAlmostEqual(placed.width / placed.height, self.A4[0] / self.A4[1])
+
+    def test_image_resolution_stops_at_the_print_limit(self):
+        for printer_dpi, image_dpi in ((1200, linux_print.MAX_PRINT_DPI), (150, 150)):
+            with self.subTest(printer_dpi=printer_dpi):
+                placed = linux_print.fit_page_on_paper(self.A4, (self.A4[0] / 72 * printer_dpi, self.A4[1] / 72 * printer_dpi), printer_dpi)
+                self.assertAlmostEqual(placed.render_scale * linux_print.POINTS_PER_INCH, image_dpi)
+
+    def test_failed_preview_opens_the_file_in_the_system_viewer(self):
+        path = Path("/tmp/zfo-tisk-x.pdf")
+        with mock.patch.object(linux_print, "show_print_preview", side_effect=ImportError), \
+                mock.patch.object(desktop, "open_with_system") as open_with_system:
+            desktop.show_print_preview_or_open(path, mock.Mock())
+        open_with_system.assert_called_once_with(path)
 
 
 if __name__ == "__main__":

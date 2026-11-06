@@ -39,7 +39,8 @@ def pyinstaller():
     if IS_WINDOWS:
         args += ["--windowed", *data("winsign.ps1", ".")]
     else:
-        args += ["--hidden-import", "qtpy", "--collect-submodules", "PyQt6.QtWebEngineWidgets"]
+        args += ["--hidden-import", "qtpy", "--collect-submodules", "PyQt6.QtWebEngineWidgets",
+                 "--hidden-import", "PyQt6.QtPrintSupport", "--hidden-import", "linux_print", "--copy-metadata", "pypdfium2"]
     subprocess.run([*args, str(ROOT / "desktop.py")], check=True, cwd=ROOT)
     # GPL/LGPL: licence texts and the source of the modified library travel with the app.
     licence = DIST / "Blanketa/Licence"
