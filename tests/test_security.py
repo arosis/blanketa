@@ -522,8 +522,8 @@ class LocalServer(unittest.TestCase):
             self.assertEqual((status, "Soubor nelze otevřít" in page.decode()), (422, True), name)
 
     def test_only_page_scripts_are_served_from_ui(self):
-        for name in app.PAGE_SCRIPTS:
-            self.assertEqual(self.request("GET", f"/{name}"), (200, (ROOT / "ui" / name).read_bytes()), name)
+        for path, script in app.PAGE_SCRIPTS.items():
+            self.assertEqual(self.request("GET", path), (200, script.read_bytes()), path)
         for path in ("/shell.html", "/fo2html.xsl", "/ui/shell.js", "/shell.js/../app.py", "/%2e%2e/app.py"):
             body = self.request("GET", path)[1]
             for source in (b"__PAGE_DATA__", b"xsl:stylesheet", b"script[data-zfo-page]", b"def page_with_data"):

@@ -163,7 +163,7 @@ class IsdsMessages(unittest.TestCase):
                 message = isds_message.read_message(isds_sample_tool().build_message(status=status))
                 self.assertIsNone(message.info["status"])
 
-    def test_message_page_answers_form_menu_commands(self):
+    def test_message_script_answers_form_menu_commands(self):
         page = ui_source("message.js")
         fallback = re.search(r"window\.zfoAction = name => \(actions\[name\] \?\? (\w+)\)", page).group(1)
         self.assertIn("Datová zpráva je jen ke čtení", page.split(f"const {fallback} = ")[1].split("\n")[0])

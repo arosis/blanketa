@@ -67,7 +67,8 @@ SHELL_STYLE = re.search(r"<style>.*?</style>", SHELL, re.S).group(0).replace("__
 PDF_PAGE = (RESOURCES / "ui/pdf.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
 MESSAGE_PAGE = (RESOURCES / "ui/message.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
 CONTAINER_PAGE = (RESOURCES / "ui/container.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
-PAGE_SCRIPTS = {"files.js", "shell.js", "pdf.mjs", "message.js", "container.js"}
+PAGE_SCRIPTS = {f"/{name}": RESOURCES / "ui" / name
+                for name in ("files.js", "shell.js", "pdf.mjs", "message.js", "container.js")}
 
 
 def json_for_script(value):
@@ -540,8 +541,8 @@ class Handler(BaseHTTPRequestHandler):
         desktop_flag = b"window.ZFO_DESKTOP = true;\n" if os.environ.get("ZFO_DESKTOP") else b""
         self._send_response(200, desktop_flag + (RESOURCES / "ui/bridge.js").read_bytes(), "text/javascript")
 
-    def _serve_page_script(self, name):
-        self._send_response(200, (RESOURCES / "ui" / name).read_bytes(), "text/javascript")
+    def _serve_page_script(self, path):
+        self._send_response(200, path.read_bytes(), "text/javascript")
 
     def _serve_session_pdf(self, query):
         session = SESSIONS.get(first_query_value(query, "s"))
@@ -618,8 +619,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_file_inside(PDFJS, url.path[len("/pdfjs/"):], PDFJS_CONTENT_TYPES)
         if url.path == "/bridge.js":
             return self._serve_bridge_script()
-        if url.path[1:] in PAGE_SCRIPTS:
-            return self._serve_page_script(url.path[1:])
+        if url.path in PAGE_SCRIPTS:
+            return self._serve_page_script(PAGE_SCRIPTS[url.path])
         if url.path == "/pdf":
             return self._serve_session_pdf(url.query)
         if url.path == "/container-file":

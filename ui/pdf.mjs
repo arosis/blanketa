@@ -78,8 +78,8 @@ const info = pageData.info;
 queryOne('[data-info]').innerHTML = [
   info.title && `<b>${escapeHtml(info.title)}</b>`,
   info.author && `Autor: ${escapeHtml(info.author)}`,
-  `Stran: ${info.pages}`,
-  info.fields ? `Vyplnitelných polí: ${info.fields}` : 'Dokument nemá vyplnitelná pole.',
+  `Stran: ${escapeHtml(info.pages)}`,
+  info.fields ? `Vyplnitelných polí: ${escapeHtml(info.fields)}` : 'Dokument nemá vyplnitelná pole.',
   info.xfa && 'Dokument obsahuje formulář XFA, který Blanketa nepodporuje.',
 ].filter(Boolean).join('<br>');
 if (info.xfa) {
