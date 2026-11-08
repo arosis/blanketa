@@ -4,6 +4,7 @@ import datetime
 import http.client
 import io
 import json
+import os
 import re
 import struct
 import tempfile
@@ -627,6 +628,11 @@ class ContainerLimitsTest(unittest.TestCase):
     def test_unsafe_names_are_damaged(self):
         for name in ("../smlouva.pdf", "/smlouva.pdf", "a\\smlouva.pdf", "C:/smlouva.pdf"):
             self.assertDamaged(self.signed((name, PDF)))
+
+    def test_backslash_name_is_damaged_where_zipfile_reads_it_as_a_folder(self):
+        data = self.signed(("a\\smlouva.pdf", PDF))
+        with mock.patch.object(os, "sep", "\\"):
+            self.assertDamaged(data)
 
     def test_duplicate_names_are_damaged(self):
         with self.assertWarns(UserWarning):

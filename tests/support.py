@@ -22,7 +22,7 @@ needs_node = unittest.skipUnless(shutil.which("node"), "needs Node.js; CI runner
 
 
 def run_in_node(script, *args, env=None):
-    return subprocess.run(["node", "-e", script, "--", *args], capture_output=True, text=True, check=True, env=env).stdout
+    return subprocess.run(["node", "-e", script, "--", *args], capture_output=True, encoding="utf-8", check=True, env=env).stdout
 
 
 def isds_sample_tool():

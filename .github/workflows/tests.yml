@@ -56,6 +56,7 @@ jobs:
           python -m pip install -q --require-hashes --only-binary :all: -r requirements-build.txt
           python -m pip install -q --require-hashes --only-binary :all: --no-binary proxy-tools --no-build-isolation -r requirements-desktop.txt
       - name: Tests
+        shell: bash
         run: |
           # test_asic.py signs its samples with the test PKI.
           bash tools/make-test-pki.sh
@@ -64,6 +65,8 @@ jobs:
       - name: Signing selftest (Windows certificate store and PFX file)
         shell: pwsh
         run: |
+          # Without it pwsh judges the step only by the last command's exit code.
+          $PSNativeCommandUseErrorActionPreference = $true
           bash tools/make-test-pki.sh
           $password = ConvertTo-SecureString test -AsPlainText -Force
           Import-PfxCertificate -FilePath pki\user.pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password | Out-Null
