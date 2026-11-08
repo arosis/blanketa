@@ -5,6 +5,7 @@
 import base64
 import copy
 import http.client
+import importlib.util
 import json
 import os
 import re
@@ -38,6 +39,15 @@ from zfoengine import form_scripts  # noqa: E402
 DS = zfo_verify.DS
 FM = "http://software602.cz/forms"
 SIGNED = ROOT / "samples/mac-vyplneny/form.zfo"
+ISDS_SAMPLES = ROOT / "samples-isds"
+
+
+def isds_sample_tool():
+    if not hasattr(isds_sample_tool, "module"):
+        spec = importlib.util.spec_from_file_location("make_isds_samples", ROOT / "tools/make-isds-samples.py")
+        isds_sample_tool.module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(isds_sample_tool.module)
+    return isds_sample_tool.module
 OUTSIDE_FILE_TEXT = "OBSAH-CIZIHO-SOUBORU"
 
 
@@ -83,6 +93,20 @@ class PageInjection(unittest.TestCase):
         self.assertNotIn("window.pwned", html)
         self.assertNotIn('"</style>', html)
         self.assertIn('font-family: "Good Font"', html)
+
+
+class HostileIsdsPages(unittest.TestCase):
+    def test_message_page_escapes_values(self):
+        hostile = "</script><script>window.pwned=1</script>"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "zprava.zfo"
+            path.write_bytes(isds_sample_tool().build_message(subject=hostile, sender=hostile,
+                                                              attachments=((hostile, "text/html", "main", b"<b>x</b>"),)))
+            with mock.patch.dict(app.FORMS, {"hostile-isds": path}):
+                page = app.render_message_page("hostile-isds")
+        self.assertNotIn("<script>window.pwned", page)
+        self.assertIn("\\u003c/script\\u003e", page)
+        self.assertNotIn("innerHTML", page.split("const MESSAGE")[1].split("renderSeal")[0])
 
 
 class FormExpressions(unittest.TestCase):
@@ -427,12 +451,60 @@ class LocalServer(unittest.TestCase):
         cls.port = cls.server.server_address[1]
         threading.Thread(target=cls.server.serve_forever, daemon=True).start()
         app.FORMS["cuzk-test"] = ROOT / "samples/cuzk/form.zfo"
+        app.FORMS["isds-test"] = ISDS_SAMPLES / "prijata.zfo"
+        app.FORMS["isds-other-test"] = ISDS_SAMPLES / "dorucenka.zfo"
+        cls.folder = tempfile.TemporaryDirectory()
+        signed_xml = Path(cls.folder.name) / "p7m.zfo"
+        signed_xml.write_bytes(isds_sample_tool().build_message(xml=b"<x/>"))
+        app.FORMS["p7m-test"] = signed_xml
+        garbage = Path(cls.folder.name) / "garbage.zfo"
+        garbage.write_bytes(b"\x30\x80garbage")
+        app.FORMS["garbage-test"] = garbage
 
     @classmethod
     def tearDownClass(cls):
         cls.server.shutdown()
         cls.server.server_close()
-        del app.FORMS["cuzk-test"]
+        for name in ("cuzk-test", "isds-test", "isds-other-test", "p7m-test", "garbage-test"):
+            del app.FORMS[name]
+        cls.folder.cleanup()
+
+    def session_of(self, name):
+        return self.request("GET", f"/?form={name}")[1].decode().split("const SESSION = '")[1].split("'")[0]
+
+    def test_routing_by_content(self):
+        status, page = self.request("GET", "/?form=isds-test")
+        self.assertEqual(status, 200)
+        self.assertIn('"kind": "received"', page.decode())
+        self.assertIn("zfo-app", self.request("GET", "/?form=cuzk-test")[1].decode())
+        for name in ("p7m-test", "garbage-test"):
+            status, page = self.request("GET", f"/?form={name}")
+            self.assertEqual((status, "Soubor nelze otevřít" in page.decode()), (422, True), name)
+
+    def test_attachment_route_guards(self):
+        session = self.session_of("isds-test")
+        status, body = self.request("GET", f"/attachment?s={session}&i=0")
+        self.assertEqual((status, body), (200, b"%PDF-1.4\n% TEST priloha\n"))
+        other = self.session_of("isds-other-test")
+        form = self.session_of("cuzk-test")
+        for path in ("/attachment?i=0", f"/attachment?s={other}&i=0", f"/attachment?s={form}&i=0",
+                     f"/attachment?s={session}&i=99", f"/attachment?s={session}&i=-1", f"/attachment?s={session}&i=x",
+                     f"/attachment?s={session}"):
+            with self.subTest(path=path):
+                self.assertEqual(self.request("GET", path)[0], 404)
+        self.assertEqual(self.request("GET", f"/attachment?s={session}&i=0", host="attacker.example")[0], 403)
+        for path in ("/save", "/pdf-save", "/export-data", "/ipc"):
+            with self.subTest(path=path):
+                self.assertEqual(self.request("POST", f"{path}?s={session}", body=b"{}")[0], 404)
+
+    def test_attachment_is_never_shown_inline(self):
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=30)
+        connection.request("GET", f"/attachment?s={self.session_of('isds-test')}&i=2", headers={"Host": f"127.0.0.1:{self.port}"})
+        response = connection.getresponse()
+        response.read()
+        self.assertEqual(response.getheader("Content-Type"), "application/octet-stream")
+        self.assertEqual(response.getheader("X-Content-Type-Options"), "nosniff")
+        self.assertEqual(response.getheader("Content-Disposition"), "attachment; filename*=UTF-8''evil.txt")
 
     def request(self, method, path, host=None, origin=None, body=None):
         connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=30)

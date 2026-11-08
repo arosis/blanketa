@@ -21,6 +21,7 @@ from lxml import etree
 
 import barcode
 import certstore
+import isds_message
 import pdf_form_data
 import pdf_sign
 import zfo_sign
@@ -61,8 +62,9 @@ PDFJS_CONTENT_TYPES = {".mjs": "text/javascript", ".js": "text/javascript", ".cs
                        ".png": "image/png"}
 
 SHELL = (RESOURCES / "ui/shell.html").read_text(encoding="utf-8")
-PDF_PAGE = (RESOURCES / "ui/pdf.html").read_text(encoding="utf-8").replace(
-    "__SHELL_STYLE__", re.search(r"<style>.*?</style>", SHELL, re.S).group(0).replace("__FONTS__", ""))
+SHELL_STYLE = re.search(r"<style>.*?</style>", SHELL, re.S).group(0).replace("__FONTS__", "")
+PDF_PAGE = (RESOURCES / "ui/pdf.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
+MESSAGE_PAGE = (RESOURCES / "ui/message.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
 
 
 def json_for_script(value):
@@ -179,6 +181,22 @@ def render_pdf_page(name):
             .replace("__FILE__", json_for_script(form_path(name).name))
             .replace("__SIGNATURES__", json_for_script(pdf_signatures(pdf)))
             .replace("__INFO__", json_for_script(pdf_info(pdf))))
+
+
+def file_start(path):
+    with open(path, "rb") as file:
+        return file.read(1)
+
+
+def render_message_page(name):
+    message = isds_message.read_message(form_path(name).read_bytes())
+    signatures = add_trust_verdicts([isds_message.describe_seal(message)])
+    session = new_session({"name": name, "message": message})
+    return (MESSAGE_PAGE.replace("__SESSION__", session)
+            .replace("__FILE__", json_for_script(form_path(name).name))
+            .replace("__MESSAGE__", json_for_script(message.info))
+            .replace("__SIGNATURES__", json_for_script(signatures))
+            .replace("__SUBMITTED__", json_for_script(isds_message.submission_stamp(message))))
 
 
 def save_pdf(session, values, identity_id=None, placement=None, password=None):
@@ -506,6 +524,25 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_not_found()
         return self._send_response(200, session["pdf"], "application/pdf")
 
+    def _serve_attachment(self, query):
+        session = SESSIONS.get(first_query_value(query, "s"))
+        index = first_query_value(query, "i")
+        if session is None or "message" not in session or not index.isdigit():
+            return self._send_not_found()
+        message = session["message"]
+        if int(index) >= len(message.attachments):
+            return self._send_not_found()
+        name = message.info["attachments"][int(index)]["name"]
+        body = message.attachments[int(index)]
+        self.send_response(200)
+        # Never rendered by the app window: a hostile attachment must not run as a page of the local server.
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{quote(name, safe='')}")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _serve_form_list(self):
         links = "".join(f'<li><a href="/?form={quote(name)}">{name}</a></li>' for name in sorted(FORMS))
         self._send_response(200, f"<meta charset=utf-8><h1>Formuláře</h1><ul>{links}</ul>".encode(), HTML_UTF8)
@@ -513,8 +550,12 @@ class Handler(BaseHTTPRequestHandler):
     def _serve_form_page(self, name, query):
         try:
             data = IMPORTS.pop(first_query_value(query, "import"), None)
-            page = (render_pdf_page(name) if form_path(name).suffix.lower() == ".pdf"
-                    else render_zfo_page(name, first_query_value(query, "blank") == "1", data))
+            if form_path(name).suffix.lower() == ".pdf":
+                page = render_pdf_page(name)
+            elif isds_message.looks_like_message(file_start(form_path(name))):
+                page = render_message_page(name)
+            else:
+                page = render_zfo_page(name, first_query_value(query, "blank") == "1", data)
             self._send_response(200, page.encode(), HTML_UTF8)
         except FileNotFoundError:
             self._send_response(404, b"form not found", PLAIN_TEXT)
@@ -535,6 +576,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_bridge_script()
         if url.path == "/pdf":
             return self._serve_session_pdf(url.query)
+        if url.path == "/attachment":
+            return self._serve_attachment(url.query)
         if url.path == "/identities":
             return self._send_json(certstore.signing_identities())
         name = first_query_value(url.query, "form", None)
@@ -607,6 +650,8 @@ class Handler(BaseHTTPRequestHandler):
         session = SESSIONS.get(first_query_value(url.query, "s"))
         if session is None:
             return self._send_response(404, "Relace vypršela, načti formulář znovu".encode(), PLAIN_TEXT_UTF8)
+        if "message" in session and url.path != "/revocation":
+            return self._send_not_found()
         if url.path == "/add-certificate":
             return self._add_certificate()
         body = self._read_body()

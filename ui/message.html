@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title></title>
+__SHELL_STYLE__
+<style>
+  .zfo-stage { overflow: auto; }
+  .zfo-message { max-width: 760px; margin: 24px auto; padding: 24px 28px; background: #fff; border-radius: 10px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .12), 0 8px 28px rgba(0, 0, 0, .10); user-select: text; -webkit-user-select: text; }
+  .zfo-message h1 { margin: 0 0 4px; font-size: 20px; line-height: 1.3; overflow-wrap: anywhere; }
+  .zfo-message .kind { margin: 0 0 18px; color: var(--muted); }
+  .zfo-message dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 0 0 22px; }
+  .zfo-message dt { color: var(--muted); }
+  .zfo-message dd { margin: 0; overflow-wrap: anywhere; white-space: pre-line; }
+  .zfo-message h2 { display: flex; align-items: center; gap: 12px; margin: 0 0 8px; font-size: 15px; }
+  .zfo-message h2 .zfo-btn { margin-left: auto; }
+  .zfo-message table { width: 100%; border-collapse: collapse; }
+  .zfo-message td { padding: 7px 6px; border-top: 1px solid var(--line); vertical-align: middle; overflow-wrap: anywhere; }
+  .zfo-message td.size, .zfo-message td.type { color: var(--muted); white-space: nowrap; }
+  .zfo-message td.save { width: 1%; text-align: right; }
+  .zfo-message .main-file { margin-left: 6px; color: var(--muted); font-size: 12px; }
+  .zfo-message ol { margin: 0; padding-left: 20px; }
+  .zfo-message li { margin-bottom: 4px; }
+  .zfo-message li time { color: var(--muted); margin-right: 8px; }
+  .zfo-notice.zfo-foreign-seal { background: #fde7e6; color: #8a1c17; font-weight: 600; }
+</style>
+</head>
+<body class="zfo-app help-hidden">
+
+<header class="zfo-bar">
+  <div class="zfo-group">
+    <button class="zfo-btn icon" data-action="open" data-native hidden title="Otevřít dokument (⌘O)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1H3z"/><path d="M3 10h18l-2 9H5z"/></svg>
+    </button>
+  </div>
+  <div class="zfo-spacer"></div>
+  <div class="zfo-group">
+    <button class="zfo-btn icon active" data-action="panel" title="Informace o pečeti (⌥⌘2)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 3h9l4 4v14H6z"/><circle cx="12" cy="13" r="3"/><path d="M10.5 15.5 10 20l2-1 2 1-.5-4.5"/></svg>
+    </button>
+  </div>
+</header>
+
+<div class="zfo-notice" data-notice role="alert" hidden><span></span><button title="Zavřít upozornění">✕</button></div>
+
+<main class="zfo-stage">
+  <article class="zfo-message">
+    <h1 data-subject></h1>
+    <p class="kind" data-kind></p>
+    <dl data-fields></dl>
+    <section data-attachments hidden>
+      <h2><span data-attachments-title></span>
+        <button class="zfo-btn" type="button" data-save-all>Uložit všechny…</button></h2>
+      <table><tbody data-attachment-rows></tbody></table>
+    </section>
+    <section data-events hidden>
+      <h2>Události</h2>
+      <ol data-event-list></ol>
+    </section>
+  </article>
+</main>
+
+<aside class="zfo-panel">
+  <h2>Informace <button class="zfo-close" data-action="panel" title="Skrýt panel">✕</button></h2>
+  <h2>Pečeť</h2>
+  <div data-signatures></div>
+  <h2>Podání</h2>
+  <div class="zfo-info" data-submitted></div>
+</aside>
+
+<footer class="zfo-status">
+  <span class="file">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4"/></svg>
+    <span data-file></span>
+  </span>
+  <span>·</span>
+  <span class="msg" data-status>Zpráva je jen ke čtení</span>
+</footer>
+
+<script src="/bridge.js"></script>
+<script>
+  const SESSION = '__SESSION__';
+  const MESSAGE = __MESSAGE__;
+  const SUBMITTED = __SUBMITTED__;
+  let signatures = __SIGNATURES__;
+  const native = window.zfoNative;
+  const PORTAL = 'https://www.mojedatovaschranka.cz/';
+  const KINDS = {received: 'Přijatá datová zpráva', sent: 'Odeslaná datová zpráva', receipt: 'Doručenka'};
+  const STATES = {1: 'Podána', 2: 'Opatřena časovým razítkem', 3: 'Neprošla antivirovou kontrolou', 4: 'Dodána',
+                  5: 'Doručena fikcí', 6: 'Doručena přihlášením', 7: 'Přečtena', 8: 'Nedoručitelná',
+                  10: 'Přesunuta do Datového trezoru'};
+  const FOREIGN_SEAL = 'Zprávu nezapečetil Informační systém datových schránek';
+  const queryOne = selector => document.querySelector(selector);
+  const escapeHtml = text => String(text).replace(/[&<>"]/g, character => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[character]));
+  const formatDateTime = iso => iso ? new Date(iso).toLocaleString('cs-CZ', {dateStyle: 'medium', timeStyle: 'short'}) : '–';
+  const formatSize = bytes => bytes < 1024 ? `${bytes} B`
+    : bytes < 1024 * 1024 ? `${(bytes / 1024).toLocaleString('cs-CZ', {maximumFractionDigits: 1})} kB`
+    : `${(bytes / 1024 / 1024).toLocaleString('cs-CZ', {maximumFractionDigits: 1})} MB`;
+  const status = queryOne('[data-status]');
+  const element = (tag, text, className) => {
+    const created = document.createElement(tag);
+    if (text !== undefined) created.textContent = text;
+    if (className) created.className = className;
+    return created;
+  };
+  const showNotice = (text, className) => {
+    const notice = queryOne('[data-notice]');
+    notice.querySelector('span').textContent = text;
+    if (className) notice.classList.add(className);
+    notice.querySelector('button').addEventListener('click', () => { notice.hidden = true; });
+    notice.hidden = false;
+  };
+
+  queryOne('[data-file]').textContent = __FILE__;
+  document.title = MESSAGE.subject || KINDS[MESSAGE.kind];
+  if (native) queryOne('[data-native]').hidden = false;
+  queryOne('[data-subject]').textContent = MESSAGE.subject || 'Bez věci';
+  queryOne('[data-kind]').textContent = `${KINDS[MESSAGE.kind]}${MESSAGE.id ? ` · ID zprávy ${MESSAGE.id}` : ''}`;
+  const party = ({name, address, box}) => [name, address, box && `ID schránky ${box}`].filter(Boolean).join('\n');
+  const fields = [
+    ['Odesílatel', party(MESSAGE.sender)], ['Příjemce', party(MESSAGE.recipient)], ['K rukám', MESSAGE.to_hands],
+    ['Č. j. odesílatele', MESSAGE.sender_ref], ['Spis. zn. odesílatele', MESSAGE.sender_ident],
+    ['Č. j. příjemce', MESSAGE.recipient_ref], ['Spis. zn. příjemce', MESSAGE.recipient_ident],
+    ['Dodáno', MESSAGE.delivered && formatDateTime(MESSAGE.delivered)],
+    ['Doručeno', MESSAGE.accepted && formatDateTime(MESSAGE.accepted)],
+    ['Stav', MESSAGE.status === null ? '' : STATES[MESSAGE.status] ?? `Stav ${MESSAGE.status}`],
+    ['Do vlastních rukou', MESSAGE.personal_delivery ? 'Ano' : ''],
+  ];
+  for (const [label, value] of fields.filter(([, value]) => value)) {
+    queryOne('[data-fields]').append(element('dt', label), element('dd', value));
+  }
+  if (MESSAGE.suspicious) showNotice('ISDS zprávu označil jako podezřelou.');
+
+  const saveAttachments = (indexes, folder) => {
+    const files = indexes.map(index => ({url: `/attachment?s=${SESSION}&i=${index}`, name: MESSAGE.attachments[index].name}));
+    if (native) { native.postMessage({action: 'saveAttachment', files, folder}); return; }
+    for (const file of files) {
+      const link = Object.assign(document.createElement('a'), {href: file.url, download: file.name});
+      document.body.append(link);
+      link.click();
+      link.remove();
+    }
+  };
+  window.zfoAttachmentSaved = path => {
+    status.replaceChildren(element('span', 'Uloženo: '), element('b', path.split(/[\\/]/).pop()));
+    if (!native) return;
+    const reveal = element('a', window.zfoIsMac ? ' Zobrazit ve Finderu' : ' Zobrazit ve složce');
+    reveal.addEventListener('click', () => native.postMessage({action: 'reveal', path}));
+    status.append(reveal);
+  };
+  if (MESSAGE.kind !== 'receipt') {
+    queryOne('[data-attachments]').hidden = false;
+    queryOne('[data-attachments-title]').textContent = `Přílohy (${MESSAGE.attachments.length})`;
+    queryOne('[data-save-all]').hidden = MESSAGE.attachments.length < 2;
+    queryOne('[data-save-all]').addEventListener('click', () => saveAttachments(MESSAGE.attachments.map((_, index) => index), true));
+    MESSAGE.attachments.forEach((attachment, index) => {
+      const row = document.createElement('tr');
+      const name = element('td', attachment.name);
+      if (attachment.main) name.append(element('span', 'hlavní dokument', 'main-file'));
+      const save = element('button', 'Uložit…', 'zfo-btn');
+      save.type = 'button';
+      save.addEventListener('click', () => saveAttachments([index], false));
+      const saveCell = element('td', undefined, 'save');
+      saveCell.append(save);
+      row.append(name, element('td', attachment.mime, 'type'), element('td', formatSize(attachment.size), 'size'), saveCell);
+      queryOne('[data-attachment-rows]').append(row);
+    });
+  } else {
+    queryOne('[data-events]').hidden = !MESSAGE.events.length;
+    for (const event of MESSAGE.events) {
+      const item = element('li');
+      const time = element('time', formatDateTime(event.time));
+      item.append(time, document.createTextNode(event.description));
+      queryOne('[data-event-list]').append(item);
+    }
+  }
+
+  const submitted = queryOne('[data-submitted]');
+  submitted.textContent = SUBMITTED?.matches
+    ? `Podáno ${formatDateTime(SUBMITTED.at)} podle časového razítka v pečetěném obsahu zprávy, vydal ${SUBMITTED.issuer}.`
+    : 'Zpráva neobsahuje časové razítko podání, které by k ní patřilo.';
+
+  const revocation = window.zfoRevocation;
+  const icons = {
+    ok: '<svg viewBox="0 0 24 24" fill="none" stroke="#1e8e3e" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>',
+    warn: '<svg viewBox="0 0 24 24" fill="none" stroke="#b26a00" stroke-width="2"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17v.5"/></svg>',
+    bad: '<svg viewBox="0 0 24 24" fill="none" stroke="#c5221f" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/></svg>',
+  };
+  const stampLine = seal => seal.proof
+    ? `<div class="meta">Čas zapečetění potvrzuje kvalifikované časové razítko: ${formatDateTime(seal.proof.at)}, vydal ${escapeHtml(seal.proof.issuer)}.</div>`
+    : seal.stamp_problem ? `<div class="meta">Časové razítko čas nepotvrzuje. ${escapeHtml(seal.stamp_problem)}</div>` : '';
+  const sealState = seal => {
+    const expired = new Date(seal.not_after) < new Date(seal.proof?.at ?? Date.now());
+    if (!seal.intact) return ['bad', 'Pečeť je porušena – obsah zprávy byl po zapečetění změněn'];
+    if (revocation.revokedBeforeSigning(seal)) return ['bad', revocation.state(seal)];
+    if (!seal.isds_operator) return ['warn', `${FOREIGN_SEAL}. Pečeť je neporušená${seal.trusted ? ', certifikát je důvěryhodný' : ''}.`];
+    if (revocation.revoked(seal)) return ['warn', revocation.state(seal)];
+    if (!seal.trusted) return ['warn', seal.unverifiable ? 'Obsah je neporušený, důvěryhodnost certifikátu se nepodařilo ověřit'
+                                                         : 'Obsah je neporušený, ale certifikát pečeti není důvěryhodný'];
+    if (expired) return ['warn', 'Pečeť je neporušená, certifikát už vypršel a čas zapečetění nepotvrzuje časové razítko.', true];
+    return ['ok', 'Pečeť ISDS je platná, certifikát je důvěryhodný'];
+  };
+  const sealCard = seal => {
+    const [level, state, offerPortal] = sealState(seal);
+    return `<div class="zfo-card ${level}" title="${escapeHtml(seal.reason || '')}">
+      <div class="who">${icons[level]}${escapeHtml(seal.isds_operator ? 'Informační systém datových schránek' : seal.subject)}</div>
+      <div class="state">${escapeHtml(state)}</div>
+      ${seal.trust_source === 'eu' ? '<div class="meta">Vydavatel je v důvěryhodném seznamu EU.</div>' : ''}
+      ${seal.unverifiable ? `<div class="meta">${escapeHtml(seal.reason)}</div>` : ''}
+      ${revocation.line(seal)}
+      ${stampLine(seal)}
+      <div class="meta">Zapečetil: ${escapeHtml(seal.subject)}<br>Vystavil: ${escapeHtml(seal.issuer)}<br>
+        ${new Date(seal.not_after) < new Date() ? 'Platnost certifikátu skončila' : 'Certifikát platí do'} ${new Date(seal.not_after).toLocaleDateString('cs-CZ')}</div>
+      ${offerPortal ? '<div class="meta">Pravost ověříte nahráním souboru na portálu datových schránek. <button type="button" class="zfo-link" data-portal>Otevřít portál</button></div>' : ''}
+    </div>`;
+  };
+  const renderSeal = () => {
+    queryOne('[data-signatures]').innerHTML = signatures.map(sealCard).join('');
+    queryOne('[data-portal]')?.addEventListener('click', () => window.zfoOpenUrl(PORTAL));
+    revocation.ask(SESSION, signatures, renderSeal);
+  };
+  if (signatures.some(seal => !seal.isds_operator)) {
+    showNotice(`${FOREIGN_SEAL}. Zapečetil ji: ${signatures.find(seal => !seal.isds_operator).subject}.`, 'zfo-foreign-seal');
+  }
+  renderSeal();
+
+  const actions = {
+    open: () => native?.postMessage({action: 'open'}),
+    support: () => zfoSupport(),
+    panel: () => {
+      const hidden = document.body.classList.toggle('panel-hidden');
+      queryOne('.zfo-bar [data-action="panel"]').classList.toggle('active', !hidden);
+    },
+  };
+  for (const button of document.querySelectorAll('.zfo-bar [data-action], .zfo-close[data-action]')) {
+    button.addEventListener('click', () => actions[button.dataset.action]());
+  }
+  window.zfoAction = name => actions[name]?.();
+</script>
+</body>
+</html>
