@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, quote, urlparse
 from cryptography import x509
 from lxml import etree
 
+import asic_verify
 import barcode
 import certstore
 import pdf_form_data
@@ -62,6 +63,8 @@ PDFJS_CONTENT_TYPES = {".mjs": "text/javascript", ".js": "text/javascript", ".cs
 
 SHELL = (RESOURCES / "ui/shell.html").read_text(encoding="utf-8")
 PDF_PAGE = (RESOURCES / "ui/pdf.html").read_text(encoding="utf-8").replace(
+    "__SHELL_STYLE__", re.search(r"<style>.*?</style>", SHELL, re.S).group(0).replace("__FONTS__", ""))
+CONTAINER_PAGE = (RESOURCES / "ui/container.html").read_text(encoding="utf-8").replace(
     "__SHELL_STYLE__", re.search(r"<style>.*?</style>", SHELL, re.S).group(0).replace("__FONTS__", ""))
 
 
@@ -179,6 +182,28 @@ def render_pdf_page(name):
             .replace("__FILE__", json_for_script(form_path(name).name))
             .replace("__SIGNATURES__", json_for_script(pdf_signatures(pdf)))
             .replace("__INFO__", json_for_script(pdf_info(pdf))))
+
+
+def container_signatures(signatures):
+    readable = [signature for signature in signatures if signature["der"] is not None]
+    for signature in signatures:
+        if signature["der"] is None:
+            del signature["der"]
+            judge_time_stamps(signature)
+            signature.update(trusted=False, unverifiable=False, reason="", trust_source="", certificate="")
+    add_trust_verdicts(readable)
+    return signatures
+
+
+def render_container_page(name):
+    path = form_path(name)
+    description, entries = asic_verify.describe(path.read_bytes())
+    description["signatures"] = container_signatures(description["signatures"])
+    session = new_session({"name": name, "entries": entries, "names": [file["name"] for file in description["files"]]})
+    return (CONTAINER_PAGE.replace("__SESSION__", session)
+            .replace("__FILE__", json_for_script(path.name))
+            .replace("__CONTAINER__", json_for_script(description))
+            .replace("__FOLDER__", json_for_script(data_file_folder(SESSIONS[session]))))
 
 
 def save_pdf(session, values, identity_id=None, placement=None, password=None):
@@ -461,9 +486,11 @@ class Handler(BaseHTTPRequestHandler):
         if sys.stderr:
             super().log_message(format, *args)
 
-    def _send_response(self, code, body, content_type):
+    def _send_response(self, code, body, content_type, headers=None):
         self.send_response(code)
         self.send_header("Content-Type", content_type)
+        for header, value in (headers or {}).items():
+            self.send_header(header, value)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -506,15 +533,34 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_not_found()
         return self._send_response(200, session["pdf"], "application/pdf")
 
+    def _serve_container_file(self, query):
+        session = SESSIONS.get(first_query_value(query, "s"))
+        index = first_query_value(query, "i")
+        if session is None or "entries" not in session or not index.isascii() or not index.isdigit() or int(index) >= len(session["entries"]):
+            return self._send_not_found()
+        content = session["entries"][int(index)]
+        if content.startswith(b"%PDF-"):
+            return self._send_response(200, content, "application/pdf")
+        entry_name = session["names"][int(index)]
+        return self._send_response(200, content, "application/octet-stream",
+                                   {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(entry_name.rsplit('/', 1)[-1])}"})
+
     def _serve_form_list(self):
         links = "".join(f'<li><a href="/?form={quote(name)}">{name}</a></li>' for name in sorted(FORMS))
         self._send_response(200, f"<meta charset=utf-8><h1>Formuláře</h1><ul>{links}</ul>".encode(), HTML_UTF8)
 
+    def _render_form_page(self, name, query, data):
+        path = form_path(name)
+        if path.suffix.lower() == ".pdf":
+            return render_pdf_page(name)
+        if asic_verify.is_signed_file(path.read_bytes()):
+            return render_container_page(name)
+        return render_zfo_page(name, first_query_value(query, "blank") == "1", data)
+
     def _serve_form_page(self, name, query):
         try:
             data = IMPORTS.pop(first_query_value(query, "import"), None)
-            page = (render_pdf_page(name) if form_path(name).suffix.lower() == ".pdf"
-                    else render_zfo_page(name, first_query_value(query, "blank") == "1", data))
+            page = self._render_form_page(name, query, data)
             self._send_response(200, page.encode(), HTML_UTF8)
         except FileNotFoundError:
             self._send_response(404, b"form not found", PLAIN_TEXT)
@@ -535,6 +581,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_bridge_script()
         if url.path == "/pdf":
             return self._serve_session_pdf(url.query)
+        if url.path == "/container-file":
+            return self._serve_container_file(url.query)
         if url.path == "/identities":
             return self._send_json(certstore.signing_identities())
         name = first_query_value(url.query, "form", None)
