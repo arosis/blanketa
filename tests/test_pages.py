@@ -3,9 +3,8 @@ import json
 import re
 import unittest
 
-from support import ROOT, needs_node, run_in_node
+from support import ROOT, needs_node, run_in_node, ui_source
 
-import app
 import desktop
 
 
@@ -28,7 +27,7 @@ class SignatureReplacementNotice(unittest.TestCase):
     ANSWER = {"values": {}, "changed": False, "messages": [], "notices": [], "focus": None, "problems": []}
 
     def page_after(self, call):
-        page = app.SHELL
+        page = ui_source("shell.js")
         parts = [re.search(pattern, page, re.S).group(0) for pattern in (
             r"const noteChange = .*?\n  \};", r"window\.perform_click_action_callback = .*?\n  \};",
             r"window\.form_script_callback = .*?\n  \};", r"window\.data_changed_callback = .*?;\n")]
@@ -89,7 +88,7 @@ class RadioButtonsInSectionCopies(unittest.TestCase):
     """
 
     def page_after(self, call):
-        page = app.SHELL
+        page = ui_source("shell.js")
         parts = [re.search(pattern, page, re.S).group(0) for pattern in (
             r"  const SECTION_COPY = .*?window\.fill_inputs = .*?\n  \};", r"  function applyDefault\(.*?\n  \}")]
         script = self.SCRIPT % "\n".join(parts)

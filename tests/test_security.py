@@ -23,7 +23,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from lxml import etree
 from pypdf import PdfReader
-from support import ISDS_SAMPLES, ROOT, isds_sample_tool
+from support import ISDS_SAMPLES, ROOT, isds_sample_tool, page_data, ui_source
 
 import app
 import asic_verify
@@ -97,7 +97,7 @@ class HostileIsdsPages(unittest.TestCase):
                 page = app.render_message_page("hostile-isds")
         self.assertNotIn("<script>window.pwned", page)
         self.assertIn("\\u003c/script\\u003e", page)
-        self.assertNotIn("innerHTML", page.split("const MESSAGE")[1].split("renderSeal")[0])
+        self.assertNotIn("innerHTML", ui_source("message.js").split("const MESSAGE")[1].split("renderSeal")[0])
 
 
 class HostileIsdsMessages(unittest.TestCase):
@@ -455,8 +455,9 @@ class HostileFormScripts(unittest.TestCase):
         self.assertIn("onerror", json.loads(arguments)["messages"][0]["text"])
 
     def test_page_shows_messages_only_as_text(self):
-        self.assertIn("const plainTextOf = markup => new DOMParser()", app.SHELL)
-        callback = app.SHELL[app.SHELL.index("window.form_script_callback"):app.SHELL.index("const icons = {")]
+        shell = ui_source("shell.js")
+        self.assertIn("const plainTextOf = markup => new DOMParser()", shell)
+        callback = shell[shell.index("window.form_script_callback"):shell.index("const icons = {")]
         self.assertNotIn("innerHTML", callback)
 
     def test_opening_the_form_runs_no_script(self):
@@ -509,7 +510,7 @@ class LocalServer(unittest.TestCase):
         cls.folder.cleanup()
 
     def session_of(self, name):
-        return self.request("GET", f"/?form={name}")[1].decode().split("const SESSION = '")[1].split("'")[0]
+        return page_data(self.request("GET", f"/?form={name}")[1].decode())["session"]
 
     def test_routing_by_content(self):
         status, page = self.request("GET", "/?form=isds-test")
@@ -519,6 +520,14 @@ class LocalServer(unittest.TestCase):
         for name in ("p7m-test", "garbage-test"):
             status, page = self.request("GET", f"/?form={name}")
             self.assertEqual((status, "Soubor nelze otevřít" in page.decode()), (422, True), name)
+
+    def test_only_page_scripts_are_served_from_ui(self):
+        for path, script in app.PAGE_SCRIPTS.items():
+            self.assertEqual(self.request("GET", path), (200, script.read_bytes()), path)
+        for path in ("/shell.html", "/fo2html.xsl", "/ui/shell.js", "/shell.js/../app.py", "/%2e%2e/app.py"):
+            body = self.request("GET", path)[1]
+            for source in (b"__PAGE_DATA__", b"xsl:stylesheet", b"script[data-zfo-page]", b"def page_with_data"):
+                self.assertNotIn(source, body, path)
 
     def test_attachment_route_guards(self):
         session = self.session_of("isds-test")
@@ -565,13 +574,13 @@ class LocalServer(unittest.TestCase):
 
     def test_post_from_another_origin_is_refused(self):
         status, page = self.request("GET", "/?form=cuzk-test")
-        session = page.decode().split("const SESSION = '")[1].split("'")[0]
+        session = page_data(page.decode())["session"]
         self.assertEqual(self.request("POST", f"/export-data?s={session}")[0], 200)
         self.assertEqual(self.request("POST", f"/export-data?s={session}", origin=f"http://127.0.0.1:{self.port}")[0], 200)
         self.assertEqual(self.request("POST", f"/export-data?s={session}", origin="https://attacker.example")[0], 403)
 
     def test_revocation_answers_only_about_signatures_shown(self):
-        session = self.request("GET", "/?form=cuzk-test")[1].decode().split("const SESSION = '")[1].split("'")[0]
+        session = page_data(self.request("GET", "/?form=cuzk-test")[1].decode())["session"]
         known = next(iter(app.SHOWN_CERTIFICATES_BY_ID))
         self.assertEqual(self.request("POST", "/revocation", body=json.dumps([known]))[0], 404)
         status, answer = self.request("POST", f"/revocation?s={session}", body=json.dumps([known, "unknown-id", 5]))
@@ -645,7 +654,7 @@ class LocalServer(unittest.TestCase):
         layout_block.set("changed", "1")
         status, page = self.serve_file(etree.tostring(root))
         self.assertEqual(status, 200)
-        signatures = json.loads(re.search(r"let signatures = (\[.*?\]);\n", page.decode()).group(1))
+        signatures = page_data(page.decode())["signatures"]
         self.assertTrue(signatures and not all(signature["intact"] for signature in signatures))
 
 
@@ -780,7 +789,7 @@ class HostileFormDataFiles(unittest.TestCase):
             return response.status, response.read()
 
         _, page = request("/?form=pdf-data-route", body=None)
-        session = page.decode().split("const SESSION = '")[1].split("'")[0]
+        session = page_data(page.decode())["session"]
         data = pdf_form_data.write_xfdf({"jmeno": "Jan"}, "zadost.pdf").encode()
         for path in ("/pdf-import-data", "/pdf-export-data", "/pdf-print-document"):
             with self.subTest(path=path):

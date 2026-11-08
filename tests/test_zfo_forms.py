@@ -23,7 +23,7 @@ from pypdf.generic import (
     NameObject,
     TextStringObject,
 )
-from support import NS, ROOT
+from support import NS, ROOT, page_data, ui_source
 
 import app
 import barcode
@@ -114,7 +114,7 @@ class PlainFoForms(unittest.TestCase):
 
     def open_session(self, name="plain"):
         page = app.render_zfo_page(name)
-        return app.SESSIONS[re.search(r"const SESSION = '([\w-]+)'", page).group(1)]
+        return app.SESSIONS[page_data(page)["session"]]
 
     def signing_identity(self):
         key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
@@ -208,7 +208,7 @@ class OpeningForms(unittest.TestCase):
     def test_engine_answers_quickly_with_many_sections(self):
         started = time.monotonic()
         page = app.render_zfo_page("many-sections")
-        session = app.SESSIONS[re.search(r"const SESSION = '([\w-]+)'", page).group(1)]
+        session = app.SESSIONS[page_data(page)["session"]]
         for message in ("document.ready", "init_rep_sections", "get_readonly_binds", "get_selected_listboxes",
                         "get_multiswitch_list", "get_repeatable"):
             answer = app.engine.handle(session["doc"], message, "")
@@ -227,10 +227,10 @@ class OpeningForms(unittest.TestCase):
                     "window.populate_repeating_sections =", "REFRESHES.has(type)", "classList.add('zfo-opening')",
                     "AVAILABLE_WHILE_OPENING.has(name)", "window.send_rep_sections_originals =",
                     "window.set_readonly_inputs_callback =", "window.field_changed_error_callback ="):
-            self.assertIn(fix, app.SHELL)
+            self.assertIn(fix, ui_source("shell.js"))
 
     def test_page_lays_out_only_after_opening(self):
-        self.assertNotIn("]:visible", app.SHELL)  # jQuery measures it, and a page still hidden has no visible field
+        self.assertNotIn("]:visible", ui_source("shell.js"))  # jQuery measures it, and a page still hidden has no visible field
 
 
 class UnsupportedForms(unittest.TestCase):
@@ -240,7 +240,7 @@ class UnsupportedForms(unittest.TestCase):
 
     def test_notice_stays_outside_the_zoomed_page(self):
         # Whatever is not listed as chrome moves into .zfo-page and would scale with the page zoom.
-        chrome = re.search(r"const chrome = \[\.\.\.document\.querySelectorAll\('([^']+)'\)", app.SHELL).group(1)
+        chrome = re.search(r"const chrome = \[\.\.\.document\.querySelectorAll\('([^']+)'\)", ui_source("shell.js")).group(1)
         self.assertIn(".zfo-notice", chrome)
 
     def test_form_with_scripts_that_run_is_not_reported(self):
