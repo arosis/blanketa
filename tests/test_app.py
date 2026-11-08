@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 import zipfile
@@ -1313,6 +1314,65 @@ class DesktopDataFileDialog(unittest.TestCase):
 
     def test_name_without_a_known_extension_gets_the_default_one(self):
         self.assertEqual(self.saved_file("data"), {"data.xfdf": "XFDF"})
+
+
+class DesktopAttachmentSaving(unittest.TestCase):
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.folder = Path(folder.name)
+        self.server = app.ThreadingHTTPServer(("127.0.0.1", 0), app.Handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+        port = self.server.server_address[1]
+        self.session = app.new_session({"name": "zprava", "message": isds_message.read_message(isds_sample("prijata"))})
+        self.window = mock.Mock()
+        self.window.get_current_url.return_value = f"http://127.0.0.1:{port}/"
+        self.bridge = desktop.Bridge(mock.Mock(), mock.Mock(home=f"http://127.0.0.1:{port}/", window=self.window))
+
+    def files(self, *indexes):
+        names = isds_message.read_message(isds_sample("prijata")).info["attachments"]
+        return [{"url": f"/attachment?s={self.session}&i={index}", "name": names[index]["name"]} for index in indexes]
+
+    def test_attachment_url_rule(self):
+        self.assertTrue(desktop.attachment_url_is_allowed("/attachment?s=Ab_c-9&i=12"))
+        for url in ("http://evil.example/attachment?s=x&i=1", "/pdf?s=x", "/attachment?s=x&i=1&j=2", "/attachment?s=x&i=1#",
+                    "//evil.example/attachment?s=x&i=1", "/attachment?s=x&i=-1", 5, None):
+            with self.subTest(url=url):
+                self.assertFalse(desktop.attachment_url_is_allowed(url))
+
+    def test_free_target_never_overwrites(self):
+        (self.folder / "a.pdf").write_bytes(b"1")
+        (self.folder / "a (2).pdf").write_bytes(b"2")
+        self.assertEqual(desktop.free_target(self.folder, "a.pdf"), self.folder / "a (3).pdf")
+        self.assertEqual(desktop.free_target(self.folder, "b"), self.folder / "b")
+        for name in ("..", ".", "a/b", "a\\b", "a\x00b", ""):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                desktop.free_target(self.folder, name)
+
+    def test_desktop_saves_one_attachment_where_the_user_chose(self):
+        self.window.create_file_dialog.return_value = str(self.folder / "jinak.pdf")
+        self.bridge.message({"action": "saveAttachment", "files": self.files(0), "folder": False})
+        self.assertEqual(self.window.create_file_dialog.call_args.kwargs["save_filename"], "rozhodnuti.pdf")
+        self.assertEqual((self.folder / "jinak.pdf").read_bytes(), b"%PDF-1.4\n% TEST priloha\n")
+        self.window.evaluate_js.assert_called_with(f"window.zfoAttachmentSaved && zfoAttachmentSaved({json.dumps(str(self.folder / 'jinak.pdf'))})")
+
+    def test_desktop_saves_all_into_the_folder(self):
+        (self.folder / "data.xml").write_bytes(b"older")
+        self.window.create_file_dialog.return_value = (str(self.folder),)
+        self.bridge.message({"action": "saveAttachment", "files": self.files(0, 1, 2), "folder": True})
+        self.assertEqual(self.window.create_file_dialog.call_args.args[0], self.bridge._app.webview.FileDialog.FOLDER)
+        self.assertEqual(sorted(path.name for path in self.folder.iterdir()), ["data (2).xml", "data.xml", "evil.txt", "rozhodnuti.pdf"])
+        self.assertEqual((self.folder / "data.xml").read_bytes(), b"older")
+        self.window.evaluate_js.assert_called_with(f"window.zfoAttachmentSaved && zfoAttachmentSaved({json.dumps(str(self.folder))})")
+
+    def test_desktop_refuses_foreign_urls_and_names(self):
+        self.window.create_file_dialog.return_value = (str(self.folder),)
+        for files in ([{"url": "http://evil.example/x", "name": "x"}], [{"url": f"/attachment?s={self.session}&i=0", "name": "../x"}]):
+            with self.subTest(files=files):
+                self.bridge.message({"action": "saveAttachment", "files": files, "folder": True})
+        self.assertEqual(list(self.folder.iterdir()), [])
 
 
 if __name__ == "__main__":

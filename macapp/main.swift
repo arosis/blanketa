@@ -3,6 +3,34 @@ import PDFKit
 import WebKit
 import UniformTypeIdentifiers
 
+enum AttachmentRequest {
+    // The page names the attachment and the server's address for it; nothing else may come through this way.
+    static func files(_ value: Any?) -> [(url: String, name: String)]? {
+        guard let list = value as? [[String: Any]], !list.isEmpty else { return nil }
+        let files = list.compactMap { item -> (url: String, name: String)? in
+            guard let url = item["url"] as? String, let name = item["name"] as? String,
+                  url.range(of: #"^/attachment\?s=[A-Za-z0-9_-]+&i=[0-9]+$"#, options: .regularExpression) != nil,
+                  isPlainFileName(name) else { return nil }
+            return (url, name)
+        }
+        return files.count == list.count ? files : nil
+    }
+
+    static func isPlainFileName(_ name: String) -> Bool {
+        !["", ".", ".."].contains(name) && !name.contains("/") && !name.contains("\\") && !name.contains("\0")
+    }
+
+    static func freeTarget(in folder: URL, name: String) -> URL {
+        let stem = (name as NSString).deletingPathExtension, suffix = (name as NSString).pathExtension
+        var candidate = folder.appendingPathComponent(name), copyNumber = 2
+        while FileManager.default.fileExists(atPath: candidate.path) {
+            candidate = folder.appendingPathComponent("\(stem) (\(copyNumber))" + (suffix.isEmpty ? "" : ".\(suffix)"))
+            copyNumber += 1
+        }
+        return candidate
+    }
+}
+
 final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUIDelegate, WKNavigationDelegate {
     let window: NSWindow
     let webView: WKWebView
@@ -108,6 +136,10 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
                 saveFile(name: name, folder: body["folder"] as? String, content: content,
                          contentsByExtension: body["contents"] as? [String: String] ?? [:])
             }
+        case "saveAttachment":
+            if let files = AttachmentRequest.files(body["files"]) {
+                saveAttachments(files, intoFolder: body["folder"] as? Bool ?? false)
+            }
         default: break
         }
     }
@@ -133,6 +165,53 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
             } catch {
                 let alert = NSAlert(error: error)
                 alert.beginSheetModal(for: self.window)
+            }
+        }
+    }
+
+    private func saveAttachments(_ files: [(url: String, name: String)], intoFolder: Bool) {
+        guard let port = formServerPort else { return }
+        let download = { (file: (url: String, name: String), target: URL) throws in
+            let source = URL(string: "http://127.0.0.1:\(port)\(file.url)")!
+            let partial = target.appendingPathExtension("part")
+            defer { try? FileManager.default.removeItem(at: partial) }
+            try Data(contentsOf: source).write(to: partial)
+            if FileManager.default.fileExists(atPath: target.path) {
+                _ = try FileManager.default.replaceItemAt(target, withItemAt: partial)
+            } else {
+                try FileManager.default.moveItem(at: partial, to: target)
+            }
+        }
+        let finish = { [weak self] (saved: URL, work: @escaping () throws -> Void) in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    try work()
+                    let path = String(data: try JSONEncoder().encode(saved.path), encoding: .utf8)!
+                    DispatchQueue.main.async { self?.webView.evaluateJavaScript("window.zfoAttachmentSaved && zfoAttachmentSaved(\(path))") }
+                } catch {
+                    DispatchQueue.main.async {
+                        guard let self else { return }
+                        NSAlert(error: error).beginSheetModal(for: self.window)
+                    }
+                }
+            }
+        }
+        if intoFolder {
+            let panel = NSOpenPanel()
+            panel.canChooseDirectories = true
+            panel.canChooseFiles = false
+            panel.canCreateDirectories = true
+            panel.prompt = "Uložit sem"
+            panel.beginSheetModal(for: window) { response in
+                guard response == .OK, let folder = panel.url else { return }
+                finish(folder) { for file in files { try download(file, AttachmentRequest.freeTarget(in: folder, name: file.name)) } }
+            }
+        } else {
+            let panel = NSSavePanel()
+            panel.nameFieldStringValue = files[0].name
+            panel.beginSheetModal(for: window) { response in
+                guard response == .OK, let target = panel.url else { return }
+                finish(target) { try download(files[0], target) }
             }
         }
     }
