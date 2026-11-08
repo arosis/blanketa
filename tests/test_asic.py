@@ -221,5 +221,41 @@ class XadesVerifyTest(unittest.TestCase):
         self.assertBroken(xades_verify.verify(signature, resolver({}), standalone=True), xades_verify.BAD_REFERENCE)
 
 
+    def test_time_stamp_is_reported(self):
+        stamp, = xades_verify.verify(asic_samples.xades_signature(FILES, stamp=True), resolver(FILES))["stamps"]
+        self.assertEqual((stamp["kind"], stamp["intact"]), ("signature", True))
+        self.assertIsNotNone(stamp["der"])
+        self.assertEqual(stamp["at"], "2026-01-15T10:05:00+00:00")
+
+    def test_no_time_stamp_gives_no_stamps(self):
+        self.assertEqual(xades_verify.verify(asic_samples.xades_signature(FILES), resolver(FILES))["stamps"], [])
+
+    def test_time_stamp_over_other_data_is_not_intact(self):
+        result = xades_verify.verify(asic_samples.xades_signature(FILES, stamp="wrong"), resolver(FILES))
+        stamp, = result["stamps"]
+        self.assertFalse(stamp["intact"])
+        self.assertTrue(result["intact"])
+
+    def test_damaged_time_stamp_token_is_not_intact(self):
+        def damage(signature):
+            element = signature.find(f".//{{{XADES}}}EncapsulatedTimeStamp")
+            token = bytearray(base64.b64decode(element.text))
+            for index in range(len(token) // 2, len(token) // 2 + 8):
+                token[index] ^= 0xFF
+            element.text = base64.b64encode(bytes(token)).decode()
+        signature = asic_samples.xades_signature(FILES, stamp=True)
+        damage(signature)
+        result = xades_verify.verify(signature, resolver(FILES))
+        stamp, = result["stamps"]
+        self.assertFalse(stamp["intact"])
+        self.assertTrue(result["intact"])
+
+    def test_unreadable_time_stamp_is_not_intact(self):
+        signature = asic_samples.xades_signature(FILES, stamp=True)
+        signature.find(f".//{{{XADES}}}EncapsulatedTimeStamp").text = "!!not base64!!"
+        stamp, = xades_verify.verify(signature, resolver(FILES))["stamps"]
+        self.assertFalse(stamp["intact"])
+
+
 if __name__ == "__main__":
     unittest.main()

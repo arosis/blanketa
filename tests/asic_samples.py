@@ -2,15 +2,20 @@
 import base64
 import copy
 import hashlib
+import asyncio
+import datetime
 import io
 import zipfile
 from pathlib import Path
 from urllib.parse import quote
 
+from asn1crypto import keys as asn1_keys
+from asn1crypto import x509 as asn1_x509
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa, utils
 from lxml import etree
+from pyhanko.sign.timestamps import DummyTimeStamper
 
 ROOT = Path(__file__).resolve().parent.parent
 DS = "http://www.w3.org/2000/09/xmldsig#"
@@ -37,6 +42,39 @@ BASE64 = DS + "base64"
 
 DIGESTS = {SHA1: hashlib.sha1, SHA256: hashlib.sha256, SHA384: hashlib.sha384, SHA512: hashlib.sha512, MD5: hashlib.md5}
 SIGNATURE_HASHES = {RSA_SHA1: hashes.SHA1, RSA_SHA256: hashes.SHA256, ECDSA_SHA256: hashes.SHA256}
+
+
+_tsa = []
+
+
+def _tsa_stamper():
+    if not _tsa:
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        name = x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME, "Blanketa TEST TSA")])
+        start = datetime.datetime(2020, 1, 1, tzinfo=datetime.timezone.utc)
+        cert = (x509.CertificateBuilder().subject_name(name).issuer_name(name).public_key(key.public_key())
+                .serial_number(x509.random_serial_number()).not_valid_before(start)
+                .not_valid_after(start + datetime.timedelta(days=36500))
+                .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+                .add_extension(x509.ExtendedKeyUsage([x509.ExtendedKeyUsageOID.TIME_STAMPING]), critical=True)
+                .sign(key, hashes.SHA256()))
+        _tsa.append(DummyTimeStamper(
+            tsa_cert=asn1_x509.Certificate.load(cert.public_bytes(serialization.Encoding.DER)),
+            tsa_key=asn1_keys.PrivateKeyInfo.load(key.private_bytes(serialization.Encoding.DER, serialization.PrivateFormat.PKCS8,
+                                                                    serialization.NoEncryption())),
+            fixed_dt=datetime.datetime(2026, 1, 15, 10, 5, tzinfo=datetime.timezone.utc)))
+    return _tsa[0]
+
+
+def _add_stamp(signature, stamp, c14n=C14N10):
+    data = b"other bytes" if stamp == "wrong" else _canonical(signature.find(_ds("SignatureValue")), c14n)
+    token = asyncio.run(_tsa_stamper().async_timestamp(hashlib.sha256(data).digest(), "sha256")).dump()
+    qualifying = signature.find(f".//{_xades('QualifyingProperties')}")
+    stamp_element = etree.SubElement(etree.SubElement(etree.SubElement(qualifying, _xades("UnsignedProperties")),
+                                                      _xades("UnsignedSignatureProperties")), _xades("SignatureTimeStamp"))
+    if c14n != C14N10:
+        etree.SubElement(stamp_element, _ds("CanonicalizationMethod"), Algorithm=c14n)
+    etree.SubElement(stamp_element, _xades("EncapsulatedTimeStamp")).text = base64.b64encode(token).decode()
 
 
 def _ds(name):
@@ -188,8 +226,6 @@ def _identity(key, cert):
 
 def xades_signature(files, *, signature_id="S1", digest=SHA256, signature_method=RSA_SHA256, c14n=C14N10,
                     signing_certificate="v2", key=None, cert=None, stamp=False, manifest=False, sign_key_info=False, mutate=None):
-    if stamp:
-        raise NotImplementedError("time stamps come with RFC 3161 support")
     key, cert = _identity(key, cert)
     wrapper = etree.Element(f"{{{ASIC}}}XAdESSignatures", nsmap={"asic": ASIC, "ds": DS})
     signature, signed_info = _skeleton(wrapper, signature_id, signature_method, c14n, cert, signing_certificate)
@@ -205,7 +241,10 @@ def xades_signature(files, *, signature_id="S1", digest=SHA256, signature_method
         signature.find(_ds("KeyInfo")).set("Id", f"{signature_id}-key-info")
         _add_reference(signed_info, f"#{signature_id}-key-info", SHA256, [C14N10])
     _signed_properties_reference(signature, signed_info, digest)
-    return _finish(signature, signed_info, key, files, mutate)
+    _finish(signature, signed_info, key, files, mutate)
+    if stamp:
+        _add_stamp(signature, stamp)
+    return signature
 
 
 def signatures_xml(*signatures):

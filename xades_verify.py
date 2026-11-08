@@ -1,3 +1,4 @@
+import asyncio
 import base64
 import copy
 import hashlib
@@ -8,8 +9,13 @@ from cryptography import x509
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa, utils
+from asn1crypto import cms
 from lxml import etree
+from pyhanko.sign.validation.generic_cms import validate_tst_signed_data
+from pyhanko.sign.validation.status import TimestampSignatureStatus
+from pyhanko_certvalidator import ValidationContext
 
+import pdf_sign
 from zfo_verify import C14N, DS, EXC
 
 C14N_COMMENTS = C14N + "#WithComments"
@@ -404,7 +410,34 @@ class _Verification:
                     self.check_value(signed_info, cert)
                 except _Refused as refused:
                     self.fail(refused.reason)
+        result["stamps"] = self.collect_stamps()
         return self.finish(result)
+
+    def signature_stamp(self, element):
+        try:  # a damaged token only means the time is not confirmed, the signature is judged apart from it
+            method = element.find(_ds("CanonicalizationMethod"))
+            algorithm = method.get("Algorithm") if method is not None else C14N
+            if algorithm not in CANONICALIZATIONS:
+                raise _Refused(UNSUPPORTED_C14N)
+            imprinted = _canonicalize(self.child(self.signature, "SignatureValue"), algorithm,
+                                      with_comments=algorithm.endswith("WithComments"), prefixes=_inclusive_prefixes(method)
+                                      if method is not None else None)
+            token = element.find(f"{{{etree.QName(element).namespace}}}EncapsulatedTimeStamp")
+            signed_data = cms.ContentInfo.load(_decode_base64(token.text))["content"]
+            kwargs = asyncio.run(validate_tst_signed_data(
+                signed_data, ValidationContext(allow_fetching=False), lambda name: hashlib.new(name, imprinted).digest()))
+            return pdf_sign._stamp_details(TimestampSignatureStatus(**kwargs), "signature")
+        except Exception:
+            return pdf_sign._stamp_details(None, "signature")
+
+    def collect_stamps(self):
+        try:
+            return [self.signature_stamp(element) for namespace in XADES_NAMESPACES
+                    for element in self.signature.iterfind(
+                        f"{_ds('Object')}/{{{namespace}}}QualifyingProperties/{{{namespace}}}UnsignedProperties/"
+                        f"{{{namespace}}}UnsignedSignatureProperties/{{{namespace}}}SignatureTimeStamp")]
+        except Exception:
+            return [pdf_sign._stamp_details(None, "signature")]
 
     def finish(self, result):
         result.update(intact=not self.reason, broken_reason=self.reason, content_changed=self.content_changed)
