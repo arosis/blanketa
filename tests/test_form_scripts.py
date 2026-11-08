@@ -215,6 +215,45 @@ class FormStylesheetChecks(unittest.TestCase):
         self.assertIn("refused", self.click("GetDocument().XSLCheck('Neni');"))
 
 
+ARES_URL = "https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty/00006947"
+ASK_ARES = ("var p = new SendParam(); p.method = SM_GET; p.flags = SHTTP_NODLG | SHTTP_WEB_SERVERSENDS; p.url = '%s';"
+            "var r = GetDocument().SendData(new Variant(VarStr, ' '), p);"
+            "if (r && r.code == SR_OK) GetDocument().GetElement().SetDataTo('a', JSON.parse(r.data.data)?.obchodniJmeno || 'nic');")
+
+
+class RegisterLookups(unittest.TestCase):
+    """Forms fill a company in from ARES by its IČO; the user confirms each lookup and the server makes it."""
+
+    def click(self, lookups=None, url=ARES_URL):
+        doc = engine.open_document(form_with_stylesheets(ASK_ARES % url, (), "puvodni"))
+        return doc, form_scripts.run_button_script(doc, 0, "", [], lookups)
+
+    def test_lookup_is_asked_first_and_names_what_leaves(self):
+        doc, result = self.click()
+        self.assertEqual(result["lookup"]["url"], ARES_URL)
+        self.assertIn("IČO 00006947 Ministerstvu financí (ares.gov.cz)", result["lookup"]["question"])
+        self.assertEqual(result["lookup"]["retry"], {"button": 0, "repe": "", "answers": [], "lookups": {}})
+        self.assertEqual(doc.get_value("a"), "puvodni")
+
+    def test_answer_reaches_the_script(self):
+        _, result = self.click({ARES_URL: {"status": 200, "body": '{"obchodniJmeno": "Ministerstvo financí"}'}})
+        self.assertEqual(result["values"], {"a": "Ministerstvo financí"})
+
+    def test_the_resident_register_of_jmk_forms_is_known_too(self):
+        url = ARES_URL.replace("ekonomicke-subjekty/", "ekonomicke-subjekty-res/")
+        self.assertEqual(self.click(url=url)[1]["lookup"]["url"], url)
+
+    def test_unknown_subject_stops_with_words_and_keeps_the_data(self):
+        doc, result = self.click({ARES_URL: {"status": 404, "body": "{}"}})
+        self.assertIn("subjekt s\u00a0IČO 00006947 nezná", result["stopped"])
+        self.assertEqual(doc.get_value("a"), "puvodni")
+        self.assertIn("chyba 500", self.click({ARES_URL: {"status": 500, "body": ""}})[1]["stopped"])
+
+    def test_the_closed_ares_service_is_named_as_closed(self):
+        result = self.click(url="http://wwwinfo.mfcr.cz/cgi-bin/ares/darv_std.cgi?ico=00006947")[1]
+        self.assertEqual(result, {"stopped": form_scripts.CLOSED_ARES_NOTICE})
+
+
 class Interpreter(unittest.TestCase):
     """What matters about zfoengine/js602.py that a form cannot show."""
 
@@ -314,6 +353,7 @@ class InterpreterAgainstNode(unittest.TestCase):
     (function() { var f = function(n) { return n < 2 ? 1 : n * f(n - 1); }; return f(5); })(); (function(a, b) { return arguments.length + "" + b; })(1); (function() { return typeof x; var x = 1; })(); (function() { return g(); function g() { return "hoisted"; } })(); (function() { var c = 0; function add() { c++; } add(); add(); return c; })(); (function() { var o = {v: 7, f: function() { return this.v; }}; return o.f(); })();
     (function() { try { throw "x"; } catch (e) { return e + "!"; } })(); (function() { try { null.a; } catch (e) { return "caught"; } })(); (function() { var s = ""; try { s += "t"; } finally { s += "f"; } return s; })();
     (function() { var a = 1; a += 2; a *= 3; a -= 1; a /= 2; a %= 3; return a; })(); (function() { var i = 1; return i++ + ++i; })(); (function() { var s = "a"; s += 1; return s; })(); (function() { var o = {n: 1}; o.n++; o["n"] += 1; return o.n; })(); (1, 2); void 0; true ? "y" : "n"; "" ? "y" : "n";
+    ({a: {b: 5}})?.a?.b; ({a: 1})?.x?.y.z; (null)?.a; (undefined)?.a.b.c; ({a: null}).a?.b; ({a: {b: 1}})?.["a"]?.b; (null)?.(); ({a: 1.5}).a?.toFixed(1); ({})?.a || "z"; true?.5:1; (function() { var n = 0; ({})?.a?.[n++]; return n; })();
     """
 
     @staticmethod

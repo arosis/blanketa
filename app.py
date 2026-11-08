@@ -23,6 +23,7 @@ import asic_verify
 import barcode
 import certstore
 import isds_message
+import lookups
 import pdf_form_data
 import pdf_sign
 import zfo_sign
@@ -655,6 +656,15 @@ class Handler(BaseHTTPRequestHandler):
         return self._send_json({certificate_id: certstore.revocation_status(SHOWN_CERTIFICATES_BY_ID[certificate_id])
                                 for certificate_id in certificate_ids})
 
+    def _answer_lookup(self, body):
+        try:
+            url = json.loads(body or b"{}").get("url")
+            return self._send_json(lookups.ask(url))
+        except (ValueError, TypeError, AttributeError):
+            return self._send_response(400, b"bad request", PLAIN_TEXT)
+        except OSError:
+            return self._send_json({"error": lookups.UNAVAILABLE})
+
     def _answer_engine_message(self, session, body):
         message = json.loads(body)
         self._send_json(engine.handle(session["doc"], message.get("type"), message.get("data")))
@@ -713,6 +723,8 @@ class Handler(BaseHTTPRequestHandler):
         body = self._read_body()
         if url.path == "/revocation":  # outside the lock: it may wait for a download, the form must stay usable
             return self._report_revocation(body)
+        if url.path == "/lookup":  # outside the lock for the same reason
+            return self._answer_lookup(body)
         with LOCK:
             if url.path == "/ipc":
                 return self._answer_engine_message(session, body)

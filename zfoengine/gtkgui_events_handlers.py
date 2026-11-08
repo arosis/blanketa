@@ -166,16 +166,17 @@ def _data_change_answer(document, data_before):
 def _script_answer(result):
   return _construct_web_response("form_script_callback(%s)" % json.dumps(result)) if result else []
 
-def _field_change_script_answer(document, field, repe, answers):
-  return _script_answer(form_scripts.run_field_change_script(document, field, repe, answers))
+def _field_change_script_answer(document, field, repe, answers, lookups=None):
+  return _script_answer(form_scripts.run_field_change_script(document, field, repe, answers, lookups))
 
 def run_form_script(document, msg_data):
   # zfoengine: the page names a button or a field of the form, never the text of a script
   answers = msg_data.get("answers") or []
+  lookups = msg_data.get("lookups")
   repe = msg_data.get("repe") or ""
   if "field" in msg_data:
-    return _field_change_script_answer(document, msg_data["field"], repe, answers)
-  return _script_answer(form_scripts.run_button_script(document, int(msg_data["button"]), repe, answers))
+    return _field_change_script_answer(document, msg_data["field"], repe, answers, lookups)
+  return _script_answer(form_scripts.run_button_script(document, int(msg_data["button"]), repe, answers, lookups))
 
 def delete_attachment(document, msg_data):
   '''
