@@ -8,12 +8,12 @@ import zipfile
 from pathlib import Path
 
 from lxml import etree
-from support import NS, ROOT, needs_node, run_in_node
+from support import NS, ROOT, form_with_stylesheets, needs_node, run_in_node, stylesheet
 
 import app
 import zfo_verify
 from zfoengine import api as engine
-from zfoengine import js602
+from zfoengine import form_scripts, js602
 
 FORM_WITH_ATTRIBUTE = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#" Id="_1"><dsig:Object Id="_2" MimeType="text/xml">
 <fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:fm="http://software602.cz/forms" xmlns:d="http://software602.cz/sample">
@@ -153,6 +153,66 @@ class FormScripts(unittest.TestCase):
             original = etree.fromstring(fo, etree.XMLParser(huge_tree=True))
             self.assertEqual(layer, etree.tostring(app.publisher_layer(original).find("{http://www.w3.org/2000/09/xmldsig#}SignatureValue")))
             self.assertEqual(zfo_verify.describe_signature_layers(saved)[0]["intact"], True)
+
+
+REQUIRED_A = stylesheet("Kontrola", """<control><xsl:if test="js:isBlank(string(/d:root/d:a))"><item><text code="ID1">F001: Položka
+ je povinná.</text><focus>/d:root[1]/d:a[1]</focus></item></xsl:if><item><text>F900: Formulář jako celek.</text><focus>/d:root[1]/d:neni[1]</focus></item>
+</control>""", "function isBlank(value) { return value.replace(/ /g, '') == ''; }")
+NO_FAULTS = stylesheet("Bez", "<control/>")
+ADDRESS_PATHS = stylesheet("Seznam", "<seznam><xpath>/d:root/d:a</xpath></seznam>")
+
+
+class FormStylesheetChecks(unittest.TestCase):
+    """Forms of MPSV check their data with their own stylesheets, document.XSLCheck() in their scripts."""
+
+    def click(self, script, value="", stylesheets=(REQUIRED_A, NO_FAULTS, ADDRESS_PATHS)):
+        doc = engine.open_document(form_with_stylesheets(script, stylesheets, value))
+        return form_scripts.run_button_script(doc, 0, "", [])
+
+    def test_faults_come_with_their_field_and_their_words(self):
+        result = self.click("if (!GetDocument().XSLCheck('Kontrola')) MessageBox('chyby');")
+        self.assertEqual(result["problems"], [{"field": "a", "index": 0, "kind": "form", "message": "F001: Položka je povinná."},
+                                              {"field": None, "index": 0, "kind": "form", "message": "F900: Formulář jako celek."}])
+        self.assertEqual(result["messages"], [{"text": "chyby", "title": ""}])
+
+    def test_check_without_faults_passes(self):
+        result = self.click("if (GetDocument().XSLCheck('Bez')) MessageBox('v poradku');", value="vyplneno")
+        self.assertEqual((result["problems"], result["messages"]), ([], [{"text": "v poradku", "title": ""}]))
+
+    def test_noclean_adds_to_the_earlier_check_and_a_plain_check_starts_anew(self):
+        twice = self.click("var d = GetDocument(); d.XSLCheck('Kontrola'); d.XSLCheck('Kontrola', 'noclean');")
+        self.assertEqual(len(twice["problems"]), 4)
+        cleaned = self.click("var d = GetDocument(); d.XSLCheck('Kontrola'); d.XSLCheck('Bez');")
+        self.assertEqual(cleaned["problems"], [])
+
+    def test_faults_in_a_copy_added_between_checks_find_their_field(self):
+        copy_fault = stylesheet("Kopie", "<control><item><text>F002</text><focus>/d:root[1]/d:sekce[2]/d:c[1]</focus></item></control>")
+        result = self.click("var d = GetDocument(); d.XSLCheck('Kontrola'); d.GetElement().InsertSection('//*[@form602id=\"s\"]');"
+                            "d.XSLCheck('Kopie', 'noclean');", stylesheets=(REQUIRED_A, copy_fault))
+        self.assertEqual(result["problems"][-1], {"field": "c", "index": 1, "kind": "form", "message": "F002"})
+
+    def test_form_data_of_a_stylesheet_reaches_the_script(self):
+        result = self.click("var p = new DataParam(); p.xslName = 'Seznam'; var r = GetDocument().GetFormData(p);"
+                            "GetDocument().GetElement().SetDataTo('a', /<xpath>([^<]*)<\\/xpath>/.exec(r.data)[1]);")
+        self.assertEqual(result["values"], {"a": "/d:root/d:a"})
+
+    def test_address_lists_of_both_generations_are_empty_with_a_notice(self):
+        for name in ("XsltGetAdresy", "Validace_AdresaWS_XpathAdres"):
+            with self.subTest(name):
+                result = self.click(f"var p = new DataParam(); p.xslName = '{name}';"
+                                    "if (GetDocument().GetFormData(p).data == '') GetDocument().GetElement().SetDataTo('a', 'prazdny');",
+                                    stylesheets=(stylesheet(name, "<x><xpath>/d:root/d:a</xpath></x>"),))
+                self.assertEqual(result["values"], {"a": "prazdny"})
+                self.assertEqual(result["notices"], [form_scripts.ADDRESS_NOT_CHECKED_NOTICE])
+
+    def test_a_check_that_answers_otherwise_is_refused_instead_of_passing(self):
+        for body in ("", "<x/>", '<control xmlns="urn:jiny"/>'):
+            with self.subTest(body):
+                self.assertEqual(self.click("GetDocument().XSLCheck('Jina');", stylesheets=(stylesheet("Jina", body),))["refused"], "XSLCheck")
+
+    def test_unknown_stylesheet_is_refused(self):
+        self.assertEqual(self.click("var p = new DataParam(); p.xslName = 'Neni'; GetDocument().GetFormData(p);")["refused"], "GetFormData")
+        self.assertIn("refused", self.click("GetDocument().XSLCheck('Neni');"))
 
 
 class Interpreter(unittest.TestCase):

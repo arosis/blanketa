@@ -507,10 +507,13 @@
   let checkWaiter = null;
   function showCheck(problems, scripts = []) {
     page.querySelectorAll('.zfo-invalid').forEach(field => field.classList.remove('zfo-invalid'));
+    const fieldOf = problem => problem.field ? document.getElementsByName(problem.field)[problem.index] ?? document.getElementsByName(problem.field)[0] : null;
+    // The form's own check names its faults in words, they matter even where the field is not on the page.
     const found = problems
-      .map(problem => ({...problem, element: document.getElementsByName(problem.field)[problem.index] ?? document.getElementsByName(problem.field)[0]}))
-      .filter(problem => problem.element?.offsetParent);
-    found.forEach(problem => problem.element.classList.add('zfo-invalid'));
+      .map(problem => ({...problem, fieldElement: fieldOf(problem)}))
+      .map(problem => ({...problem, element: problem.fieldElement?.offsetParent ? problem.fieldElement : null}))
+      .filter(problem => problem.element || problem.kind === 'form');
+    found.forEach(problem => problem.element?.classList.add('zfo-invalid'));
     const list = queryOne('[data-check-list]');
     list.innerHTML = found.length || scripts.length ? '' : '<div class="zfo-check-ok">Formulář je vyplněn správně.</div>';
     if (scripts.length) {
@@ -521,9 +524,10 @@
     for (const problem of found) {
       const item = document.createElement('button');
       item.className = 'zfo-check-item';
-      item.innerHTML = `${escapeHtml(shortOneLine(labelFor(problem.element)))}<small>${problem.kind === 'required' ? 'Povinná položka není vyplněna'
+      const label = problem.fieldElement ? labelFor(problem.fieldElement) : 'Kontrola formuláře';
+      item.innerHTML = `${escapeHtml(shortOneLine(label))}<small>${problem.kind === 'required' ? 'Povinná položka není vyplněna'
         : escapeHtml(problem.message || 'Hodnota nesplňuje podmínku formuláře')}</small>`;
-      item.addEventListener('click', () => { problem.element.scrollIntoView({block: 'center'}); problem.element.focus(); });
+      if (problem.element) item.addEventListener('click', () => { problem.element.scrollIntoView({block: 'center'}); problem.element.focus(); });
       list.append(item);
     }
     queryOne('[data-check]').hidden = false;

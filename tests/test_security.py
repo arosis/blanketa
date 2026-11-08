@@ -23,7 +23,15 @@ from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 from lxml import etree
 from pypdf import PdfReader
-from support import ISDS_SAMPLES, ROOT, isds_sample_tool, page_data, ui_source
+from support import (
+    ISDS_SAMPLES,
+    ROOT,
+    form_with_stylesheets,
+    isds_sample_tool,
+    page_data,
+    stylesheet,
+    ui_source,
+)
 
 import app
 import asic_verify
@@ -482,6 +490,61 @@ class HostileFormScripts(unittest.TestCase):
         self.assertNotEqual(doc.get_value("b"), "spusteno")
         engine.handle(doc, "store_val", {"field": "a", "value": "nove", "input_id": "x", "repe": ""})
         self.assertEqual(doc.get_value("b"), "spusteno")
+
+
+class HostileFormStylesheets(unittest.TestCase):
+    """The stylesheets a form runs with XSLCheck and GetFormData, and the JScript they carry."""
+
+    def check(self, *stylesheets):
+        doc = engine.open_document(form_with_stylesheets("GetDocument().GetElement().SetDataTo('a', 'zmeneno'); GetDocument().XSLCheck('Zla');",
+                                                         stylesheets, "puvodni"))
+        result = form_scripts.run_button_script(doc, 0, "", [])
+        self.assertEqual(doc.get_value("a"), "puvodni")
+        return result
+
+    def test_stylesheet_reads_no_file_and_no_address(self):
+        for body in ("<x><xsl:value-of select=\"document('file:///etc/passwd')\"/></x>",
+                     "<x><xsl:value-of select=\"document('https://example.org/')\"/></x>"):
+            with self.subTest(body):
+                self.assertIn("refused", self.check(stylesheet("Zla", body)))
+
+    def test_stylesheet_loads_no_other_stylesheet(self):
+        template = stylesheet("Zla", "<control/>").replace("<msxsl:script", '<xsl:import href="file:///etc/x.xsl"/><msxsl:script')
+        self.assertIn("refused", self.check(template))
+
+    def test_stylesheet_writes_no_file(self):
+        with tempfile.TemporaryDirectory() as folder:
+            target = Path(folder) / "zapsano"
+            template = stylesheet("Zla", f'<x><exsl:document href="{target.as_uri()}">x</exsl:document></x>').replace(
+                'exclude-result-prefixes="', 'xmlns:exsl="http://exslt.org/common" extension-element-prefixes="exsl" exclude-result-prefixes="')
+            self.assertIn("refused", self.check(template))
+            self.assertFalse(target.exists())
+
+    def test_its_functions_reach_nothing_of_the_form_or_the_host(self):
+        for reach in ("GetDocument()", "MessageBox('x')", "SetNamedParam('a', 'b')", "eval('1')", "require('os')"):
+            with self.subTest(reach):
+                self.assertIn("refused", self.check(stylesheet("Zla", "<x><xsl:value-of select='js:f()'/></x>", f"function f() {{ return {reach}; }}")))
+
+    def test_endless_function_stops(self):
+        self.assertIn("refused", self.check(stylesheet("Zla", "<x><xsl:value-of select='js:f()'/></x>", "function f() { while (true) {} }")))
+        self.assertIn("refused", self.check(stylesheet("Zla", "<x><xsl:value-of select='js:f(1)'/></x>", "function f(n) { return f(n + 1); }")))
+
+    def test_calls_of_one_check_share_one_budget(self):
+        busy = "function f() { for (var i = 0; i < 300000; i++) {} return 1; }"
+        self.assertIn("refused", self.check(stylesheet("Zla", "<x><xsl:for-each select='(//node())[position() &lt; 50]'><xsl:value-of select='js:f()'/></xsl:for-each>"
+                                                             "<xsl:value-of select='js:f()'/><xsl:value-of select='js:f()'/><xsl:value-of select='js:f()'/></x>", busy)))
+
+    def test_a_loop_of_checks_stops(self):
+        busy = "function f() { for (var i = 0; i < 300000; i++) {} return 1; }"
+        doc = engine.open_document(form_with_stylesheets("GetDocument().GetElement().SetDataTo('a', 'zmeneno'); while (true) GetDocument().XSLCheck('Zla');",
+                                                         [stylesheet("Zla", "<control><x><xsl:value-of select='js:f()'/></x></control>", busy)], "puvodni"))
+        self.assertIn("refused", form_scripts.run_button_script(doc, 0, "", []))
+        self.assertEqual(doc.get_value("a"), "puvodni")
+        cheap = engine.open_document(form_with_stylesheets("while (true) GetDocument().XSLCheck('Zla');", [stylesheet("Zla", "<control/>")]))
+        self.assertIn("refused", form_scripts.run_button_script(cheap, 0, "", []))
+
+    def test_functions_in_other_languages_do_not_run(self):
+        self.assertIn("refused", self.check(stylesheet("Zla", "<x><xsl:value-of select='js:f()'/></x>", "public string f() { return \"x\"; }", language="C#")))
 
 
 class LocalServer(unittest.TestCase):

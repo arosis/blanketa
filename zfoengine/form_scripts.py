@@ -22,7 +22,7 @@ import re
 import lxml.etree as etree
 
 from . import evaluate as ev
-from . import js602, ns
+from . import form_stylesheets, js602, ns
 
 log = logging.getLogger("zfo.form_scripts")
 
@@ -32,7 +32,11 @@ MAX_SECTION_CHANGES_PER_RUN = 200
 MAX_MESSAGES_PER_RUN = 5
 MAX_QUESTIONS_PER_RUN = 8
 MAX_NAMED_PARAMETERS = 1_000
-ADDRESS_CHECK_STYLESHEET = "Validace_AdresaWS_XpathAdres"
+MAX_STYLESHEET_RUNS_PER_RUN = 50  # a stylesheet's own work spends no budget; MPSV forms run 7 per click
+# Lists of the addresses a form checks in RÚIAN, in the two generations of MPSV forms. Empty here: no address gets checked.
+ADDRESS_LIST_STYLESHEETS = {"Validace_AdresaWS_XpathAdres", "XsltGetAdresy"}
+KEEP_EARLIER_CHECK_RESULTS = "noclean"
+CHECK_RESULT_TAG = "control"
 ADDRESS_NOT_CHECKED_NOTICE = "Adresy nebyly ověřeny v registru RÚIAN, Blanketa formulářům síť nepovoluje. Před odesláním je zkontrolujte."
 WHISPERER_FIELD_TYPE = "acm"
 DATA_ROOT_PATH = "/*"
@@ -71,6 +75,16 @@ def name_repeating_sections_by_bind(root):
       element.set("blanketa-section-by-bind", "true")
 
 
+def _plain_text(element):
+  return "" if element is None else " ".join("".join(element.itertext()).split())
+
+
+def _node_key(node):
+  if etree.iselement(node):
+    return node
+  return (node.getparent(), node.attrname) if getattr(node, "is_attribute", False) else node.getparent()
+
+
 def _repetitions_of(repe):
   repetitions = {}
   for token in filter(None, (repe or "").split("|||")):
@@ -99,6 +113,7 @@ class FormActionHost:
     self.messages = []
     self.notices = []
     self.problems = None
+    self.stylesheet_runs = 0
     self.focus_bind = None
     self.has_section_changes = False
 
@@ -244,11 +259,57 @@ class FormActionHost:
     return not self.problems
 
   def form_data(self, stylesheet_name):
-    if stylesheet_name != ADDRESS_CHECK_STYLESHEET:
+    if stylesheet_name in ADDRESS_LIST_STYLESHEETS:
+      if ADDRESS_NOT_CHECKED_NOTICE not in self.notices:
+        self.notices.append(ADDRESS_NOT_CHECKED_NOTICE)
+      return ""
+    if self.document.get_template_text(stylesheet_name) is None:
       raise js602.Unsupported("GetFormData")
-    if ADDRESS_NOT_CHECKED_NOTICE not in self.notices:
-      self.notices.append(ADDRESS_NOT_CHECKED_NOTICE)
-    return ""
+    return str(self._run_stylesheet(stylesheet_name))
+
+  def _run_stylesheet(self, stylesheet_name):
+    self.stylesheet_runs += 1
+    if self.stylesheet_runs > MAX_STYLESHEET_RUNS_PER_RUN:
+      raise js602.Exhausted("šablony")
+    return form_stylesheets.transform(self.document, stylesheet_name, self.document.script_interpreter().budget)
+
+  def _fields_by_data_node(self):
+    document = self.document
+    fields = {}
+    for bind in document.root.xpath("//fm:bind", namespaces={"fm": ns.FM_URI}):
+      path = document._get_abs_data_path(bind)
+      try:
+        nodes = document._get_data_root().xpath(path, namespaces=document._get_used_ns_prefix(path))
+      except (etree.LxmlError, ValueError, TypeError):
+        continue
+      for index, node in enumerate(nodes if isinstance(nodes, list) else []):
+        fields.setdefault(_node_key(node), (bind.get("Id"), index))
+    return fields
+
+  def _check_problem(self, item, fields):
+    field, index = None, 0
+    path = (item.findtext("focus") or "").strip()
+    if path:
+      document = self.document
+      try:
+        found = document._get_data_root().xpath(path, namespaces=document._get_used_ns_prefix(path))
+      except (etree.LxmlError, ValueError, TypeError):
+        found = []
+      if isinstance(found, list) and found:
+        field, index = fields.get(_node_key(found[0]), (None, 0))
+    return {"field": field, "index": index, "kind": "form", "message": _plain_text(item.find("text"))}
+
+  def xsl_check(self, stylesheet_name, mode):
+    # The stylesheet answers with <control><item><text/><focus/></item>…</control>, one item for each fault it found.
+    output = self._run_stylesheet(stylesheet_name).getroot()
+    if output is None or output.tag != CHECK_RESULT_TAG:
+      raise js602.Unsupported("XSLCheck")
+    items = output.findall("item")
+    if mode != KEEP_EARLIER_CHECK_RESULTS or self.problems is None:
+      self.problems = []
+    fields = self._fields_by_data_node() if items else {}
+    self.problems.extend(self._check_problem(item, fields) for item in items)
+    return not items
 
   def set_named_parameter(self, name, value):
     if name not in self.named_parameters and len(self.named_parameters) >= MAX_NAMED_PARAMETERS:

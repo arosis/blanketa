@@ -36,7 +36,7 @@ from . import app_events, js602, msg_types, ns, tags, tools
 log = logging.getLogger("zfo.xpath_ext")
 
 
-def _stylesheet_loads_other_stylesheets(template):
+def stylesheet_loads_other_stylesheets(template):
   # zfoengine: libxslt loads these while compiling, which XSLTAccessControl does not cover: it applies to the run only.
   return next(template.iter("{%s}import" % ns.XSLT_URI, "{%s}include" % ns.XSLT_URI), None) is not None
 
@@ -423,7 +423,7 @@ class ExtendedXpathEvaluator:
         
     data = context.context_node.xpath(data_xpath, 
                                       namespaces = self._doc._get_used_ns_prefix(data_xpath))[0]
-    if _stylesheet_loads_other_stylesheets(template):
+    if stylesheet_loads_other_stylesheets(template):
       log.warning("DataTransform template that loads other stylesheets is refused")
       return ""
     # zfoengine: without this a form's stylesheet reads files and addresses with document() and writes files with exsl:document
