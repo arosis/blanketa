@@ -45,3 +45,20 @@ def page_data(page):
 
 def ui_source(name):
     return (ROOT / "ui" / name).read_text(encoding="utf-8")
+
+
+# Runs whole page scripts the way a page loads them, on a window without a host and a document that draws nothing.
+UI_SCRIPTS_IN_NODE = """
+const vm = require('node:vm'), fs = require('node:fs');
+const element = () => ({style: {}, append() {}, addEventListener() {}});
+const document = {addEventListener() {}, querySelectorAll: () => [], createElement: element, head: element(), body: element()};
+const context = vm.createContext({console, setTimeout, process, navigator: {platform: 'Linux'}, document});
+context.window = context;
+for (const path of %s) vm.runInContext(fs.readFileSync(path, 'utf8'), context, {filename: path});
+vm.runInContext(%s, context);
+"""
+
+
+def run_ui_scripts(names, script, *args):
+    paths = [str(ROOT / "ui" / name) for name in names]
+    return run_in_node(UI_SCRIPTS_IN_NODE % (json.dumps(paths), json.dumps(script)), *args)
