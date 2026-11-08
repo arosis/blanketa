@@ -113,7 +113,9 @@ jobs:
             Get-Content dist\serve-out.txt, dist\serve-err.txt -ErrorAction SilentlyContinue
             throw "server did not answer (exited: $($server.HasExited), code: $($server.ExitCode))"
           }
-          if ($page.Content -notmatch 'pdf.html|zfoNative|SESSION') { throw 'page did not render' }
+          if ($page.Content -notmatch 'data-zfo-page') { throw 'page did not render' }
+          $script = Invoke-WebRequest http://127.0.0.1:8700/pdf.mjs -UseBasicParsing
+          if ($script.Content -notmatch 'data-zfo-page') { throw 'page script is missing from the build' }
           Stop-Process $server
           Start-Process dist\Blanketa\Blanketa.exe -ArgumentList "$PWD\samples\cssz-onz\form.zfo"
           Start-Sleep 45

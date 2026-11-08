@@ -4,7 +4,9 @@
     .venv/bin/python -I -m unittest discover -s tests -p test_pdf.py      # one file
 """
 import importlib.util
+import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -35,3 +37,11 @@ def isds_sample_tool():
 
 def isds_sample(name):
     return (ISDS_SAMPLES / f"{name}.zfo").read_bytes()
+
+
+def page_data(page):
+    return json.loads(re.search(r'<script type="application/json" data-zfo-page[^>]*>(.*?)</script>', page, re.S).group(1))
+
+
+def ui_source(name):
+    return (ROOT / "ui" / name).read_text(encoding="utf-8")

@@ -1,6 +1,5 @@
 """Data messages and delivery receipts from data boxes (ISDS)."""
 import base64
-import json
 import re
 import tempfile
 import unittest
@@ -10,7 +9,13 @@ from unittest import mock
 from asn1crypto import cms
 from cryptography import x509
 from lxml import etree
-from support import ISDS_SAMPLES, ROOT, isds_sample, isds_sample_tool
+from support import (
+    ROOT,
+    isds_sample,
+    isds_sample_tool,
+    page_data,
+    ui_source,
+)
 
 import app
 import isds_message
@@ -116,9 +121,8 @@ class IsdsMessages(unittest.TestCase):
             path.write_bytes(isds_sample_tool().build_message(subject="__SIGNATURES__ __SUBMITTED__ __SESSION__ __FILE__"))
             with mock.patch.dict(app.FORMS, {"placeholders": path}):
                 page = app.render_message_page("placeholders")
-        message = json.loads(page.split("const MESSAGE = ")[1].split(";\n")[0])
-        self.assertEqual(message["subject"], "__SIGNATURES__ __SUBMITTED__ __SESSION__ __FILE__")
-        self.assertEqual(json.loads(page.split("let signatures = ")[1].split(";\n")[0])[0]["subject"], "ISDS TEST")
+        self.assertEqual(page_data(page)["message"]["subject"], "__SIGNATURES__ __SUBMITTED__ __SESSION__ __FILE__")
+        self.assertEqual(page_data(page)["signatures"][0]["subject"], "ISDS TEST")
 
     def test_attachment_text_stays_json(self):
         hostile = "</script><img src=x onerror=alert(1)>"
@@ -128,7 +132,7 @@ class IsdsMessages(unittest.TestCase):
             with mock.patch.dict(app.FORMS, {"hostile": path}):
                 page = app.render_message_page("hostile")
         self.assertNotIn("<img src=x", page)
-        attachment = json.loads(page.split("const MESSAGE = ")[1].split(";\n")[0])["attachments"][0]
+        attachment = page_data(page)["message"]["attachments"][0]
         self.assertEqual(attachment["mime"], hostile)
         self.assertTrue(attachment["main"])
 
@@ -160,13 +164,12 @@ class IsdsMessages(unittest.TestCase):
                 self.assertIsNone(message.info["status"])
 
     def test_message_page_answers_form_menu_commands(self):
-        with mock.patch.dict(app.FORMS, {"prijata": ISDS_SAMPLES / "prijata.zfo"}):
-            page = app.render_message_page("prijata")
+        page = ui_source("message.js")
         fallback = re.search(r"window\.zfoAction = name => \(actions\[name\] \?\? (\w+)\)", page).group(1)
         self.assertIn("Datová zpráva je jen ke čtení", page.split(f"const {fallback} = ")[1].split("\n")[0])
 
     def test_message_page_keeps_czech_typography(self):
-        page = (ROOT / "ui/message.html").read_text(encoding="utf-8")
+        page = ui_source("message.html") + ui_source("message.js")
         self.assertNotIn("razítka v pečetěném", page)
         self.assertNotRegex(page, r"\} (B|kB|MB)`")
 

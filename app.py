@@ -67,10 +67,17 @@ SHELL_STYLE = re.search(r"<style>.*?</style>", SHELL, re.S).group(0).replace("__
 PDF_PAGE = (RESOURCES / "ui/pdf.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
 MESSAGE_PAGE = (RESOURCES / "ui/message.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
 CONTAINER_PAGE = (RESOURCES / "ui/container.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
+PAGE_SCRIPTS = {"files.js", "shell.js", "pdf.mjs", "message.js", "container.js"}
 
 
 def json_for_script(value):
     return json.dumps(value, ensure_ascii=False).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+
+
+def page_with_data(template, data, fonts=""):
+    values = {"__PAGE_DATA__": json_for_script(data), "__FONTS__": fonts}
+    # One pass: a placeholder name inside a file name, a message or a font must stay text.
+    return re.sub("__PAGE_DATA__|__FONTS__", lambda match: values[match.group(0)], template)
 
 
 def new_session(content):
@@ -121,7 +128,7 @@ def remove_data_objects(layer):
 
 
 def render_empty_window():
-    return SHELL.replace("__SESSION__", "").replace("__FILE__", '""').replace("__FONTS__", "").replace("__EMPTY__", "true")
+    return page_with_data(SHELL, {"session": "", "file": "", "empty": True})
 
 
 def judge_time_stamps(signature):
@@ -179,10 +186,8 @@ def pdf_info(pdf):
 def render_pdf_page(name):
     pdf = form_path(name).read_bytes()
     session = new_session({"name": name, "pdf": pdf})
-    return (PDF_PAGE.replace("__SESSION__", session)
-            .replace("__FILE__", json_for_script(form_path(name).name))
-            .replace("__SIGNATURES__", json_for_script(pdf_signatures(pdf)))
-            .replace("__INFO__", json_for_script(pdf_info(pdf))))
+    return page_with_data(PDF_PAGE, {"session": session, "file": form_path(name).name,
+                                     "signatures": pdf_signatures(pdf), "info": pdf_info(pdf)})
 
 
 def container_signatures(signatures):
@@ -201,8 +206,7 @@ def render_container_page(name):
     description, entries = asic_verify.describe(path.read_bytes())
     description["signatures"] = container_signatures(description["signatures"])
     content = {"name": name, "entries": entries, "names": [file["name"] for file in description["files"]]}
-    values = {"SESSION": new_session(content), "FILE": json_for_script(path.name), "CONTAINER": json_for_script(description)}
-    return re.sub(r"__(SESSION|FILE|CONTAINER)__", lambda marker: values[marker.group(1)], CONTAINER_PAGE)
+    return page_with_data(CONTAINER_PAGE, {"session": new_session(content), "file": path.name, "container": description})
 
 
 def file_start(path):
@@ -214,11 +218,8 @@ def render_message_page(name):
     message = isds_message.read_message(form_path(name).read_bytes())
     signatures = add_trust_verdicts([isds_message.describe_seal(message)])
     session = new_session({"name": name, "message": message})
-    values = {"__SESSION__": session, "__FILE__": json_for_script(form_path(name).name),
-              "__MESSAGE__": json_for_script(message.info), "__SIGNATURES__": json_for_script(signatures),
-              "__SUBMITTED__": json_for_script(isds_message.submission_stamp(message))}
-    # One pass: a placeholder name inside the message's own text must stay text.
-    return re.sub("|".join(values), lambda match: values[match.group(0)], MESSAGE_PAGE)
+    return page_with_data(MESSAGE_PAGE, {"session": session, "file": form_path(name).name, "message": message.info,
+                                         "signatures": signatures, "submitted": isds_message.submission_stamp(message)})
 
 
 def save_pdf(session, values, identity_id=None, placement=None, password=None):
@@ -309,17 +310,10 @@ def render_zfo_page(name, blank=False, data=None):
         hidden.getparent().remove(hidden)
     html = etree.tostring(XSLT(etree.ElementTree(doc), PATH_TO_JS="'/static/scripts/'",
                                PATH_TO_CSS="'/static/styles/'"), method="html", encoding="unicode")
-    shell = (SHELL.replace("__SESSION__", session)
-             .replace("__FILE__", json_for_script(form_path(name).name if SINGLE_FILE else name))
-             .replace("__SIGNATURES__", json_for_script(zfo_signatures(fo)))
-             .replace("__PAGE__", json_for_script(page_geometry(doc)))
-             .replace("__COLORS__", json_for_script(field_colors(doc)))
-             .replace("__INFO__", json_for_script(form_info(name)))
-             .replace("__BLANK__", json_for_script(blank))
-             .replace("__FONTS__", embedded_fonts(doc))
-             .replace("__BUTTONS__", json_for_script(user_buttons(doc)))
-             .replace("__CODES__", json_for_script(binds_of_lists_showing_codes(doc)))
-             .replace("__EMPTY__", "false"))
+    shell = page_with_data(SHELL, {
+        "session": session, "file": form_path(name).name if SINGLE_FILE else name, "empty": False,
+        "signatures": zfo_signatures(fo), "page": page_geometry(doc), "colors": field_colors(doc), "info": form_info(name),
+        "blank": blank, "buttons": user_buttons(doc), "codes": binds_of_lists_showing_codes(doc)}, fonts=embedded_fonts(doc))
     return html.replace("</head>", OPENING_PLACEHOLDER_STYLE + "</head>", 1).replace("</body>", shell + "</body>", 1)
 
 
@@ -546,8 +540,8 @@ class Handler(BaseHTTPRequestHandler):
         desktop_flag = b"window.ZFO_DESKTOP = true;\n" if os.environ.get("ZFO_DESKTOP") else b""
         self._send_response(200, desktop_flag + (RESOURCES / "ui/bridge.js").read_bytes(), "text/javascript")
 
-    def _serve_files_script(self):
-        self._send_response(200, (RESOURCES / "ui/files.js").read_bytes(), "text/javascript")
+    def _serve_page_script(self, name):
+        self._send_response(200, (RESOURCES / "ui" / name).read_bytes(), "text/javascript")
 
     def _serve_session_pdf(self, query):
         session = SESSIONS.get(first_query_value(query, "s"))
@@ -624,8 +618,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_file_inside(PDFJS, url.path[len("/pdfjs/"):], PDFJS_CONTENT_TYPES)
         if url.path == "/bridge.js":
             return self._serve_bridge_script()
-        if url.path == "/files.js":
-            return self._serve_files_script()
+        if url.path[1:] in PAGE_SCRIPTS:
+            return self._serve_page_script(url.path[1:])
         if url.path == "/pdf":
             return self._serve_session_pdf(url.query)
         if url.path == "/container-file":

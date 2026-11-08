@@ -101,8 +101,9 @@ Stránky jsou na všech systémech stejné; s aplikací kolem sebe mluví přes 
 |---|---|
 | `app.py` | HTTP server: převod FO → HTML (XSLT), relace formuláře, uložení, podpis, PDF |
 | `zfoengine/` | port backendu zfo-editoru (Python 3, bez GTK): model, výpočty, opakované sekce, kontrola; `js602.py` je izolovaný interpret JavaScriptu 602 |
-| `ui/shell.html` | rozhraní ZFO (lišta, panely, dialogy) vkládané do vykreslené stránky formuláře |
-| `ui/pdf.html` | rozhraní PDF nad PDF.js |
+| `ui/shell.html`, `ui/shell.js` | rozhraní ZFO (lišta, panely, dialogy) vkládané do vykreslené stránky formuláře |
+| `ui/pdf.html`, `ui/pdf.mjs` | rozhraní PDF nad PDF.js |
+| `ui/message.html`, `ui/container.html` a jejich `.js` | datové zprávy a podepsané kontejnery; server předává data stránce jedním blokem JSON |
 | `ui/fo2html.xsl` | doplněk XSLT zfo-editoru (obrázky, rozměry) |
 | `zfo_sign.py`, `zfo_verify.py` | podpis a ověření vrstev XMLDSig |
 | `pdf_sign.py` | vyplnění a podpis PDF, ověření podpisů |

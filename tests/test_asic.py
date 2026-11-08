@@ -3,9 +3,7 @@ import base64
 import datetime
 import http.client
 import io
-import json
 import os
-import re
 import struct
 import tempfile
 import threading
@@ -23,7 +21,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import NameOID
 from lxml import etree
-from support import ROOT
+from support import ROOT, page_data
 
 import app
 import asic_verify
@@ -721,8 +719,8 @@ class ContainerPages(unittest.TestCase):
         response = connection.getresponse()
         return response.status, response.getheader("Content-Type"), response.getheader(header), response.read()
 
-    def page_json(self, page, marker):
-        return json.loads(re.search(rf"const {marker} = (.*);\n", page).group(1))
+    def page_json(self, page, key):
+        return page_data(page)[key]
 
     def post(self, path, body=b"[]"):
         connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=30)
@@ -740,12 +738,12 @@ class ContainerPages(unittest.TestCase):
     def render(self, data):
         self.open_container(data)
         page = app.render_container_page("container-test")
-        return page, re.search(r"const SESSION = '([\w-]+)'", page).group(1)
+        return page, page_data(page)["session"]
 
     def test_container_page_carries_files_and_signatures_as_json(self):
         page, session = self.render(self.signed())
-        container = self.page_json(page, "CONTAINER")
-        self.assertEqual(self.page_json(page, "FILE"), "smlouva.asice")
+        container = self.page_json(page, "container")
+        self.assertEqual(self.page_json(page, "file"), "smlouva.asice")
         self.assertEqual([file["name"] for file in container["files"]], ["smlouva.pdf"])
         self.assertEqual(container["signatures"][0]["files"], ["smlouva.pdf"])
         self.assertNotIn("der", container["signatures"][0])
@@ -796,15 +794,15 @@ class ContainerPages(unittest.TestCase):
         page, _ = self.render(self.signed({self.HOSTILE: b"x"}))
         self.assertNotIn("</script><img", page)
         self.assertNotIn("<img src=x", page)
-        self.assertEqual(self.page_json(page, "CONTAINER")["files"][0]["name"], self.HOSTILE)
+        self.assertEqual(self.page_json(page, "container")["files"][0]["name"], self.HOSTILE)
 
     def test_markers_in_file_data_are_not_substituted(self):
         page, _ = self.render(self.signed({"__FILE__.txt": b"x", "__SESSION__.txt": b"y"}))
-        self.assertEqual([file["name"] for file in self.page_json(page, "CONTAINER")["files"]], ["__FILE__.txt", "__SESSION__.txt"])
+        self.assertEqual([file["name"] for file in self.page_json(page, "container")["files"]], ["__FILE__.txt", "__SESSION__.txt"])
         self.open_container(self.signed(), "__CONTAINER__.asice")
         page = app.render_container_page("container-test")
-        self.assertEqual(self.page_json(page, "FILE"), "__CONTAINER__.asice")
-        self.assertEqual(self.page_json(page, "CONTAINER")["files"][0]["name"], "smlouva.pdf")
+        self.assertEqual(self.page_json(page, "file"), "__CONTAINER__.asice")
+        self.assertEqual(self.page_json(page, "container")["files"][0]["name"], "smlouva.pdf")
 
     def test_huge_index_is_not_found(self):
         _, session = self.render(self.signed())
@@ -812,18 +810,18 @@ class ContainerPages(unittest.TestCase):
 
     def test_container_without_pdf_renders(self):
         page, _ = self.render(self.signed({"a.txt": b"a", "b.txt": b"b"}))
-        self.assertEqual(len(self.page_json(page, "CONTAINER")["files"]), 2)
+        self.assertEqual(len(self.page_json(page, "container")["files"]), 2)
 
     def test_untrusted_intact_signature_is_not_broken(self):
         page, _ = self.render(self.signed())
-        signature = self.page_json(page, "CONTAINER")["signatures"][0]
+        signature = self.page_json(page, "container")["signatures"][0]
         self.assertIs(signature["intact"], True)
         self.assertIs(signature["trusted"], False)
 
     def test_signature_file_without_certificate_still_renders(self):
         data = asic_samples.asic_e({"smlouva.pdf": self.PDF}, {"signatures.xml": b"<broken"})
         page, _ = self.render(data)
-        signature = self.page_json(page, "CONTAINER")["signatures"][0]
+        signature = self.page_json(page, "container")["signatures"][0]
         self.assertEqual((signature["intact"], signature["trusted"], signature["unverifiable"], signature["certificate"]),
                          (False, False, False, ""))
         self.assertNotIn("der", signature)
