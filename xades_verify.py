@@ -90,8 +90,11 @@ def _canonicalize(node, algorithm, *, with_comments, prefixes=None):
                          namespaces={"xml": XML_NS}):
             raise _Refused(UNSUPPORTED_C14N)
     exclusive = algorithm in (EXC, EXC_COMMENTS)
-    return etree.tostring(node, method="c14n", exclusive=exclusive, with_comments=with_comments,
-                          inclusive_ns_prefixes=prefixes if exclusive else None)
+    try:
+        return etree.tostring(node, method="c14n", exclusive=exclusive, with_comments=with_comments,
+                              inclusive_ns_prefixes=prefixes if exclusive else None)
+    except etree.C14NError as error:
+        raise _Refused(UNSUPPORTED_C14N) from error
 
 
 def _inclusive_prefixes(method):
@@ -113,11 +116,11 @@ def _signed_at(signed_properties):
     text = signed_properties.findtext(f"{{{namespace}}}SignedSignatureProperties/{{{namespace}}}SigningTime")
     try:
         moment = datetime.fromisoformat((text or "").strip())
-    except ValueError:
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=timezone.utc)
+        return moment.astimezone(timezone.utc).isoformat()
+    except (ValueError, OverflowError):
         return None
-    if moment.tzinfo is None:
-        moment = moment.replace(tzinfo=timezone.utc)
-    return moment.astimezone(timezone.utc).isoformat()
 
 
 class _Verification:

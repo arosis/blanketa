@@ -165,6 +165,30 @@ class XadesVerifyTest(unittest.TestCase):
         signature = asic_samples.xades_signature(FILES, sign_key_info=True, mutate=duplicate_key_info)
         self.assertBroken(xades_verify.verify(signature, resolver(FILES)), xades_verify.WRAPPED)
 
+    def test_relative_namespace_in_signed_info_is_unsupported(self):
+        signature = asic_samples.xades_signature(FILES)
+        signature.find(f"{{{DS}}}SignedInfo").append(etree.fromstring(b'<r:x xmlns:r="rel"/>'))
+        self.assertBroken(xades_verify.verify(signature, resolver(FILES)), xades_verify.UNSUPPORTED_C14N)
+
+    def test_relative_namespace_in_canonicalized_file_is_unsupported(self):
+        files = {"data.xml": b'<a xmlns="rel"/>'}
+        def canonicalize_file(signature):
+            reference = signature.find(f"{{{DS}}}SignedInfo/{{{DS}}}Reference")
+            transforms = etree.Element(f"{{{DS}}}Transforms")
+            etree.SubElement(transforms, f"{{{DS}}}Transform", Algorithm=asic_samples.C14N10)
+            reference.insert(0, transforms)
+        signature = asic_samples.xades_signature(files, mutate=canonicalize_file)
+        result = xades_verify.verify(signature, resolver(files))
+        self.assertBroken(result, xades_verify.UNSUPPORTED_C14N)
+        self.assertEqual(result["references"], [{"name": "data.xml", "outcome": "refused"}])
+
+    def test_signing_time_out_of_range_does_not_crash(self):
+        signature = asic_samples.xades_signature(FILES)
+        signature.find(f".//{{{XADES}}}SigningTime").text = "0001-01-01T00:00:00+14:00"
+        result = xades_verify.verify(signature, resolver(FILES))
+        self.assertFalse(result["intact"])
+        self.assertIsNone(result["signed_at"])
+
     def test_duplicate_id_is_wrapping(self):
         def duplicate_signed_properties(signature):
             key_info = signature.find(f"{{{DS}}}KeyInfo")
