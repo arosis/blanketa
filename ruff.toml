@@ -5,3 +5,7 @@ target-version = "py312"
 
 [lint]
 select = ["E9", "F", "B", "I"]
+
+[lint.isort]
+# tests/support.py puts the project on the import path, so it has to be imported before the project's own modules.
+known-third-party = ["support"]

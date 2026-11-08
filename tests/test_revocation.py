@@ -1,9 +1,4 @@
-"""Certificate revocation lists: which are believed, and what they say about a certificate. Runs without a network.
-
-    python -I tests/test_revocation.py
-"""
-import os
-import sys
+"""Certificate revocation lists: which are believed, and what they say about a certificate. Runs without a network."""
 import tempfile
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -14,12 +9,8 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
-os.environ["ZFO_OFFLINE"] = "1"
-
-import revocation  # noqa: E402
-import trustlist  # noqa: E402
+import revocation
+import trustlist
 
 NOW = datetime.now(timezone.utc)
 URL = "http://crl.test/ca.crl"
@@ -199,7 +190,3 @@ class Revocation(unittest.TestCase):
             for _ in range(3):
                 revocation.check_certificate_revocation(der(certificate()), self.folder, self.folder / "crl")
         self.assertEqual(calls, [URL, SECOND_URL])
-
-
-if __name__ == "__main__":
-    unittest.main(verbosity=2)

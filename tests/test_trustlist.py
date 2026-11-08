@@ -1,12 +1,8 @@
-"""EU trusted lists: which lists are authentic, and which certificates they vouch for. Runs without a network.
-
-    python -I tests/test_trustlist.py
-"""
+"""EU trusted lists: which lists are authentic, and which certificates they vouch for. Runs without a network."""
 import base64
 import hashlib
 import os
 import re
-import sys
 import tempfile
 import threading
 import time
@@ -20,12 +16,8 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa
 from lxml import etree
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
-os.environ["ZFO_OFFLINE"] = "1"
-
-import certstore  # noqa: E402
-import trustlist  # noqa: E402
+import certstore
+import trustlist
 
 NS = "http://uri.etsi.org/02231/v2#"
 DSNS = "http://www.w3.org/2000/09/xmldsig#"
@@ -414,7 +406,3 @@ class Verdicts(unittest.TestCase):
     def test_pinned_certificates_are_those_of_the_official_journal(self):
         self.assertEqual(len(trustlist.PINNED_SIGNERS), 6)
         self.assertTrue(all(len(p) == 64 for p in trustlist.PINNED_SIGNERS))
-
-
-if __name__ == "__main__":
-    unittest.main(verbosity=2)

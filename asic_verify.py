@@ -119,7 +119,8 @@ def _is_xades(signature):
 
 
 def _check_info(info):
-    _check_name(info.filename)
+    # zipfile on Windows already turned "\" into "/" in filename; orig_filename is the name as stored.
+    _check_name(info.orig_filename)
     if info.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED):
         raise ContainerError("unsupported compression")
     if info.flag_bits & 1:

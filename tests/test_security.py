@@ -1,15 +1,10 @@
-"""Attacks a hostile form or web page could try, checked against the server, the verifier and the hosts' guards.
-
-    python -I tests/test_security.py
-"""
+"""Attacks a hostile form or web page could try, checked against the server, the verifier and the hosts' guards."""
 import base64
 import copy
 import hashlib
 import http.client
-import importlib.util
 import io
 import json
-import os
 import re
 import sys
 import tempfile
@@ -23,40 +18,27 @@ from pathlib import Path
 from unittest import mock
 from xml.sax.saxutils import quoteattr
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / "tests"))
-os.environ["ZFO_OFFLINE"] = "1"  # tests never download trusted lists
+import asic_samples
+from cryptography import x509
+from cryptography.hazmat.primitives import serialization
+from lxml import etree
+from pypdf import PdfReader
+from support import ISDS_SAMPLES, ROOT, isds_sample_tool
 
-import asic_samples  # noqa: E402
-from cryptography import x509  # noqa: E402
-from cryptography.hazmat.primitives import serialization  # noqa: E402
-from lxml import etree  # noqa: E402
-from pypdf import PdfReader  # noqa: E402
-
-import app  # noqa: E402
-import asic_verify  # noqa: E402
-import certstore  # noqa: E402
-import desktop  # noqa: E402
-import isds_message  # noqa: E402
-import pdf_form_data  # noqa: E402
-import xades_verify  # noqa: E402
-import zfo_verify  # noqa: E402
-from zfoengine import api as engine  # noqa: E402
-from zfoengine import form_scripts  # noqa: E402
+import app
+import asic_verify
+import certstore
+import desktop
+import isds_message
+import pdf_form_data
+import xades_verify
+import zfo_verify
+from zfoengine import api as engine
+from zfoengine import form_scripts
 
 DS = zfo_verify.DS
 FM = "http://software602.cz/forms"
 SIGNED = ROOT / "samples/mac-vyplneny/form.zfo"
-ISDS_SAMPLES = ROOT / "samples-isds"
-
-
-def isds_sample_tool():
-    if not hasattr(isds_sample_tool, "module"):
-        spec = importlib.util.spec_from_file_location("make_isds_samples", ROOT / "tools/make-isds-samples.py")
-        isds_sample_tool.module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(isds_sample_tool.module)
-    return isds_sample_tool.module
 OUTSIDE_FILE_TEXT = "OBSAH-CIZIHO-SOUBORU"
 
 
@@ -1003,7 +985,3 @@ class ContainerAttacks(unittest.TestCase):
         self.assertEqual(len(entries), 1001)
         with self.assertRaises(asic_verify.ContainerError):
             asic_verify.describe(self.zip_of(entries))
-
-
-if __name__ == "__main__":
-    unittest.main(verbosity=2)

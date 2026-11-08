@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Writes samples-pdf/razitka/: PDFs with time stamps from a throwaway test authority, for tests/test_app.py.
+"""Writes samples-pdf/razitka/: PDFs with time stamps from a throwaway test authority, for tests/test_pdf.py.
 
     .venv/bin/python tools/make-timestamp-samples.py
 

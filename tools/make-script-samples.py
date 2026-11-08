@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Writes samples/skripty/vypocty.zfo: a form with the kinds of 602 JavaScript that published forms use, for tests/test_app.py.
+"""Writes samples/skripty/vypocty.zfo: a form with the kinds of 602 JavaScript that published forms use, for tests/test_form_scripts.py.
 
     .venv/bin/python tools/make-script-samples.py
 
