@@ -334,6 +334,18 @@ class IsdsMessages(unittest.TestCase):
         self.assertEqual(message["subject"], "__SIGNATURES__ __SUBMITTED__ __SESSION__ __FILE__")
         self.assertEqual(json.loads(page.split("let signatures = ")[1].split(";\n")[0])[0]["subject"], "ISDS TEST")
 
+    def test_attachment_text_stays_json(self):
+        hostile = "</script><img src=x onerror=alert(1)>"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "zprava.zfo"
+            path.write_bytes(isds_sample_tool().build_message(attachments=((hostile + ".pdf", hostile, "main", b"%PDF-1.4\n"),)))
+            with mock.patch.dict(app.FORMS, {"hostile": path}):
+                page = app.render_message_page("hostile")
+        self.assertNotIn("<img src=x", page)
+        attachment = json.loads(page.split("const MESSAGE = ")[1].split(";\n")[0])["attachments"][0]
+        self.assertEqual(attachment["mime"], hostile)
+        self.assertTrue(attachment["main"])
+
     def test_receipt_has_no_stamp(self):
         self.assertEqual(isds_message.describe_seal(isds_message.read_message(isds_sample("dorucenka")))["stamps"], [])
 
@@ -416,11 +428,11 @@ class ContainerPages(unittest.TestCase):
         signature = asic_samples.xades_signature(files, **options)
         return asic_samples.asic_e(files, {"signatures.xml": asic_samples.signatures_xml(signature)})
 
-    def request(self, path, host=None):
+    def request(self, path, host=None, header="Content-Disposition"):
         connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=30)
         connection.request("GET", path, headers={"Host": host or f"127.0.0.1:{self.port}"})
         response = connection.getresponse()
-        return response.status, response.getheader("Content-Type"), response.getheader("Content-Disposition"), response.read()
+        return response.status, response.getheader("Content-Type"), response.getheader(header), response.read()
 
     def page_json(self, page, marker):
         return json.loads(re.search(rf"const {marker} = (.*);\n", page).group(1))
@@ -434,7 +446,6 @@ class ContainerPages(unittest.TestCase):
         page, session = self.render(self.signed())
         container = self.page_json(page, "CONTAINER")
         self.assertEqual(self.page_json(page, "FILE"), "smlouva.asice")
-        self.assertEqual(self.page_json(page, "FOLDER"), str(self.folder))
         self.assertEqual([file["name"] for file in container["files"]], ["smlouva.pdf"])
         self.assertEqual(container["signatures"][0]["files"], ["smlouva.pdf"])
         self.assertNotIn("der", container["signatures"][0])
@@ -449,10 +460,28 @@ class ContainerPages(unittest.TestCase):
 
     def test_container_file_route_serves_by_index(self):
         _, session = self.render(self.signed())
-        status, content_type, _, body = self.request(f"/container-file?s={session}&i=0")
-        self.assertEqual((status, content_type, body), (200, "application/pdf", self.PDF))
+        status, content_type, disposition, body = self.request(f"/container-file?s={session}&i=0")
+        self.assertEqual((status, content_type, body), (200, "application/octet-stream", self.PDF))
+        self.assertEqual(disposition, "attachment; filename*=UTF-8''smlouva.pdf")
         for index in ("99", "-1", "x", ""):
             self.assertEqual(self.request(f"/container-file?s={session}&i={index}")[0], 404, index)
+
+    def test_no_entry_is_sniffed_as_a_page(self):
+        _, session = self.render(self.signed({"smlouva.pdf": self.PDF, "stranka.html": b"<script>alert(1)</script>"}))
+        for index in (0, 1):
+            status, content_type, sniffing, _ = self.request(f"/container-file?s={session}&i={index}", header="X-Content-Type-Options")
+            self.assertEqual((status, content_type, sniffing), (200, "application/octet-stream", "nosniff"), index)
+
+    def test_shared_files_script_is_served_without_a_session(self):
+        status, content_type, _, body = self.request("/files.js")
+        self.assertEqual((status, content_type), (200, "text/javascript"))
+        self.assertEqual(body, (ROOT / "ui/files.js").read_bytes())
+        self.assertEqual(self.request("/files.js", host="attacker.example")[0], 403)
+
+    def test_both_pages_use_the_shared_files_script(self):
+        for page in ("container", "message"):
+            self.assertIn('<script src="/files.js"></script>', (ROOT / f"ui/{page}.html").read_text(encoding="utf-8"), page)
+        self.assertNotRegex((ROOT / "ui/files.js").read_text(encoding="utf-8"), r"\} (B|kB|MB|%)`")
 
     def test_non_pdf_entry_is_a_download_named_by_its_basename(self):
         files = {"složka/příloha č. 1.txt": b"text"}
@@ -468,13 +497,12 @@ class ContainerPages(unittest.TestCase):
         self.assertEqual(self.page_json(page, "CONTAINER")["files"][0]["name"], self.HOSTILE)
 
     def test_markers_in_file_data_are_not_substituted(self):
-        page, _ = self.render(self.signed({"__FOLDER__.txt": b"x", "__SESSION__.txt": b"y"}))
-        self.assertEqual([file["name"] for file in self.page_json(page, "CONTAINER")["files"]], ["__FOLDER__.txt", "__SESSION__.txt"])
+        page, _ = self.render(self.signed({"__FILE__.txt": b"x", "__SESSION__.txt": b"y"}))
+        self.assertEqual([file["name"] for file in self.page_json(page, "CONTAINER")["files"]], ["__FILE__.txt", "__SESSION__.txt"])
         self.open_container(self.signed(), "__CONTAINER__.asice")
         page = app.render_container_page("container-test")
         self.assertEqual(self.page_json(page, "FILE"), "__CONTAINER__.asice")
         self.assertEqual(self.page_json(page, "CONTAINER")["files"][0]["name"], "smlouva.pdf")
-        self.assertEqual(self.page_json(page, "FOLDER"), str(self.folder))
 
     def test_huge_index_is_not_found(self):
         _, session = self.render(self.signed())

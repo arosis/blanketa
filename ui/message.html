@@ -4,25 +4,18 @@
 <meta charset="utf-8">
 <title></title>
 __SHELL_STYLE__
+<link rel="stylesheet" href="/pdfjs/web/pdf_viewer.css">
 <style>
-  .zfo-stage { overflow: auto; }
-  .zfo-message { max-width: 760px; margin: 24px auto; padding: 24px 28px; background: #fff; border-radius: 10px;
+  .zfo-message-info { user-select: text; -webkit-user-select: text; }
+  .zfo-message-info .kind { margin: 2px 0 8px; }
+  .zfo-message-info dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 10px; margin: 0; }
+  .zfo-message-info dd { margin: 0; color: var(--text); overflow-wrap: anywhere; white-space: pre-line; }
+  .zfo-events { width: min(760px, calc(100% - 48px)); box-sizing: border-box; margin: 24px auto; padding: 24px 28px; background: #fff; border-radius: 10px;
     box-shadow: 0 1px 3px rgba(0, 0, 0, .12), 0 8px 28px rgba(0, 0, 0, .10); user-select: text; -webkit-user-select: text; }
-  .zfo-message h1 { margin: 0 0 4px; font-size: 20px; line-height: 1.3; overflow-wrap: anywhere; }
-  .zfo-message .kind { margin: 0 0 18px; color: var(--muted); }
-  .zfo-message dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 0 0 22px; }
-  .zfo-message dt { color: var(--muted); }
-  .zfo-message dd { margin: 0; overflow-wrap: anywhere; white-space: pre-line; }
-  .zfo-message h2 { display: flex; align-items: center; gap: 12px; margin: 0 0 8px; font-size: 15px; }
-  .zfo-message h2 .zfo-btn { margin-left: auto; }
-  .zfo-message table { width: 100%; border-collapse: collapse; }
-  .zfo-message td { padding: 7px 6px; border-top: 1px solid var(--line); vertical-align: middle; overflow-wrap: anywhere; }
-  .zfo-message td.size, .zfo-message td.type { color: var(--muted); white-space: nowrap; }
-  .zfo-message td.save { width: 1%; text-align: right; }
-  .zfo-message .main-file { margin-left: 6px; color: var(--muted); font-size: 12px; }
-  .zfo-message ol { margin: 0; padding-left: 20px; }
-  .zfo-message li { margin-bottom: 4px; }
-  .zfo-message li time { color: var(--muted); margin-right: 8px; }
+  .zfo-events h2 { margin: 0 0 8px; font-size: 15px; }
+  .zfo-events ol { margin: 0; padding-left: 20px; }
+  .zfo-events li { margin-bottom: 4px; }
+  .zfo-events li time { color: var(--muted); margin-right: 8px; }
   .zfo-notice.zfo-foreign-seal { background: #fde7e6; color: #8a1c17; font-weight: 600; }
 </style>
 </head>
@@ -34,9 +27,10 @@ __SHELL_STYLE__
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1H3z"/><path d="M3 10h18l-2 9H5z"/></svg>
     </button>
   </div>
+  <div data-file-tools></div>
   <div class="zfo-spacer"></div>
   <div class="zfo-group">
-    <button class="zfo-btn icon active" data-action="panel" title="Informace o pečeti (⌥⌘2)">
+    <button class="zfo-btn icon active" data-action="panel" title="Informace o zprávě a pečeti (⌥⌘2)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 3h9l4 4v14H6z"/><circle cx="12" cy="13" r="3"/><path d="M10.5 15.5 10 20l2-1 2 1-.5-4.5"/></svg>
     </button>
   </div>
@@ -45,24 +39,24 @@ __SHELL_STYLE__
 <div class="zfo-notice" data-notice role="alert" hidden><span></span><button title="Zavřít upozornění">✕</button></div>
 
 <main class="zfo-stage">
-  <article class="zfo-message">
-    <h1 data-subject></h1>
-    <p class="kind" data-kind></p>
-    <dl data-fields></dl>
-    <section data-attachments hidden>
-      <h2><span data-attachments-title></span>
-        <button class="zfo-btn" type="button" data-save-all>Uložit všechny…</button></h2>
-      <table><tbody data-attachment-rows></tbody></table>
-    </section>
-    <section data-events hidden>
-      <h2>Události</h2>
-      <ol data-event-list></ol>
-    </section>
+  <article class="zfo-events" data-events hidden>
+    <h2>Události</h2>
+    <ol data-event-list></ol>
   </article>
 </main>
 
 <aside class="zfo-panel">
   <h2>Informace <button class="zfo-close" data-action="panel" title="Skrýt panel">✕</button></h2>
+  <h2>Zpráva</h2>
+  <div class="zfo-info zfo-message-info">
+    <b data-subject></b>
+    <div class="kind" data-kind></div>
+    <dl data-fields></dl>
+  </div>
+  <section data-attachments hidden>
+    <h2 data-attachments-title></h2>
+    <div class="zfo-files" data-attachment-list></div>
+  </section>
   <h2>Pečeť</h2>
   <div data-signatures></div>
   <h2>Podání</h2>
@@ -79,6 +73,7 @@ __SHELL_STYLE__
 </footer>
 
 <script src="/bridge.js"></script>
+<script src="/files.js"></script>
 <script>
   const SESSION = '__SESSION__';
   const MESSAGE = __MESSAGE__;
@@ -94,9 +89,6 @@ __SHELL_STYLE__
   const queryOne = selector => document.querySelector(selector);
   const escapeHtml = text => String(text).replace(/[&<>"]/g, character => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[character]));
   const formatDateTime = iso => iso ? new Date(iso).toLocaleString('cs-CZ', {dateStyle: 'medium', timeStyle: 'short'}) : '–';
-  const formatSize = bytes => bytes < 1024 ? `${bytes}\u00a0B`
-    : bytes < 1024 * 1024 ? `${(bytes / 1024).toLocaleString('cs-CZ', {maximumFractionDigits: 1})}\u00a0kB`
-    : `${(bytes / 1024 / 1024).toLocaleString('cs-CZ', {maximumFractionDigits: 1})}\u00a0MB`;
   const status = queryOne('[data-status]');
   const element = (tag, text, className) => {
     const created = document.createElement(tag);
@@ -132,42 +124,20 @@ __SHELL_STYLE__
   }
   if (MESSAGE.suspicious) showNotice('ISDS zprávu označil jako podezřelou.');
 
-  const saveAttachments = (indexes, folder) => {
-    const files = indexes.map(index => ({url: `/attachment?s=${SESSION}&i=${index}`, name: MESSAGE.attachments[index].name}));
-    if (native) { native.postMessage({action: 'saveAttachment', files, folder}); return; }
-    for (const file of files) {
-      const link = Object.assign(document.createElement('a'), {href: file.url, download: file.name});
-      document.body.append(link);
-      link.click();
-      link.remove();
-    }
-  };
-  window.zfoAttachmentSaved = path => {
-    status.replaceChildren(element('span', 'Uloženo: '), element('b', path.split(/[\\/]/).pop()));
-    if (!native) return;
-    const reveal = element('a', window.zfoIsMac ? ' Zobrazit ve Finderu' : ' Zobrazit ve složce');
-    reveal.addEventListener('click', () => native.postMessage({action: 'reveal', path}));
-    status.append(reveal);
-  };
-  window.zfoAttachmentFailed = reason => { status.textContent = `Přílohu se nepodařilo uložit: ${reason}`; };
+  let fileView = null;
   if (MESSAGE.kind !== 'receipt') {
+    const attachments = MESSAGE.attachments;
+    const isPdf = attachment => attachment.mime === 'application/pdf' || /\.pdf$/i.test(attachment.name);
+    const initial = [attachments.findIndex(attachment => attachment.main), attachments.findIndex(isPdf), 0].find(index => index >= 0);
     queryOne('[data-attachments]').hidden = false;
-    queryOne('[data-attachments-title]').textContent = `Přílohy (${MESSAGE.attachments.length})`;
-    queryOne('[data-save-all]').hidden = MESSAGE.attachments.length < 2 || !native;
-    queryOne('[data-save-all]').addEventListener('click', () => saveAttachments(MESSAGE.attachments.map((_, index) => index), true));
-    MESSAGE.attachments.forEach((attachment, index) => {
-      const row = document.createElement('tr');
-      const name = element('td', attachment.name);
-      if (attachment.main) name.append(element('span', 'hlavní dokument', 'main-file'));
-      const save = element('button', 'Uložit…', 'zfo-btn');
-      save.type = 'button';
-      save.addEventListener('click', () => saveAttachments([index], false));
-      const saveCell = element('td', undefined, 'save');
-      saveCell.append(save);
-      row.append(name, element('td', attachment.mime, 'type'), element('td', formatSize(attachment.size), 'size'), saveCell);
-      queryOne('[data-attachment-rows]').append(row);
+    queryOne('[data-attachments-title]').textContent = `Přílohy (${attachments.length})`;
+    fileView = window.zfoFiles({
+      files: attachments.map((attachment, index) => ({...attachment, url: `/attachment?s=${SESSION}&i=${index}`, pdf: isPdf(attachment)})),
+      list: queryOne('[data-attachment-list]'), stage: queryOne('.zfo-stage'), toolbar: queryOne('[data-file-tools]'), status, initial,
+      emptyText: 'Zpráva nemá žádné přílohy.', failedText: 'Přílohu se nepodařilo uložit',
     });
   } else {
+    queryOne('[data-file-tools]').remove();
     queryOne('[data-events]').hidden = !MESSAGE.events.length;
     for (const event of MESSAGE.events) {
       const item = element('li');
@@ -227,6 +197,7 @@ __SHELL_STYLE__
   renderSeal();
 
   const actions = {
+    ...fileView?.actions,
     open: () => native?.postMessage({action: 'open'}),
     support: () => zfoSupport(),
     panel: () => {

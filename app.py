@@ -201,9 +201,8 @@ def render_container_page(name):
     description, entries = asic_verify.describe(path.read_bytes())
     description["signatures"] = container_signatures(description["signatures"])
     content = {"name": name, "entries": entries, "names": [file["name"] for file in description["files"]]}
-    values = {"SESSION": new_session(content), "FILE": json_for_script(path.name),
-              "CONTAINER": json_for_script(description), "FOLDER": json_for_script(data_file_folder(content))}
-    return re.sub(r"__(SESSION|FILE|CONTAINER|FOLDER)__", lambda marker: values[marker.group(1)], CONTAINER_PAGE)
+    values = {"SESSION": new_session(content), "FILE": json_for_script(path.name), "CONTAINER": json_for_script(description)}
+    return re.sub(r"__(SESSION|FILE|CONTAINER)__", lambda marker: values[marker.group(1)], CONTAINER_PAGE)
 
 
 def file_start(path):
@@ -547,6 +546,9 @@ class Handler(BaseHTTPRequestHandler):
         desktop_flag = b"window.ZFO_DESKTOP = true;\n" if os.environ.get("ZFO_DESKTOP") else b""
         self._send_response(200, desktop_flag + (RESOURCES / "ui/bridge.js").read_bytes(), "text/javascript")
 
+    def _serve_files_script(self):
+        self._send_response(200, (RESOURCES / "ui/files.js").read_bytes(), "text/javascript")
+
     def _serve_session_pdf(self, query):
         session = SESSIONS.get(first_query_value(query, "s"))
         if session is None or "pdf" not in session:
@@ -561,12 +563,11 @@ class Handler(BaseHTTPRequestHandler):
         index = int(index)
         if index >= len(session["entries"]):
             return self._send_not_found()
-        content = session["entries"][index]
-        if content.startswith(b"%PDF-"):
-            return self._send_response(200, content, "application/pdf")
         entry_name = session["names"][index]
-        return self._send_response(200, content, "application/octet-stream",
-                                   {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(entry_name.rsplit('/', 1)[-1])}"})
+        # Never rendered by the app window, PDFs included: PDF.js fetches the bytes itself.
+        return self._send_response(200, session["entries"][index], "application/octet-stream",
+                                   {"X-Content-Type-Options": "nosniff",
+                                    "Content-Disposition": f"attachment; filename*=UTF-8''{quote(entry_name.rsplit('/', 1)[-1])}"})
 
     def _serve_attachment(self, query):
         session = SESSIONS.get(first_query_value(query, "s"))
@@ -623,6 +624,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_file_inside(PDFJS, url.path[len("/pdfjs/"):], PDFJS_CONTENT_TYPES)
         if url.path == "/bridge.js":
             return self._serve_bridge_script()
+        if url.path == "/files.js":
+            return self._serve_files_script()
         if url.path == "/pdf":
             return self._serve_session_pdf(url.query)
         if url.path == "/container-file":
