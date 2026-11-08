@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, quote, urlparse
 from cryptography import x509
 from lxml import etree
 
+import asic_verify
 import barcode
 import certstore
 import isds_message
@@ -65,6 +66,7 @@ SHELL = (RESOURCES / "ui/shell.html").read_text(encoding="utf-8")
 SHELL_STYLE = re.search(r"<style>.*?</style>", SHELL, re.S).group(0).replace("__FONTS__", "")
 PDF_PAGE = (RESOURCES / "ui/pdf.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
 MESSAGE_PAGE = (RESOURCES / "ui/message.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
+CONTAINER_PAGE = (RESOURCES / "ui/container.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
 
 
 def json_for_script(value):
@@ -181,6 +183,26 @@ def render_pdf_page(name):
             .replace("__FILE__", json_for_script(form_path(name).name))
             .replace("__SIGNATURES__", json_for_script(pdf_signatures(pdf)))
             .replace("__INFO__", json_for_script(pdf_info(pdf))))
+
+
+def container_signatures(signatures):
+    readable = [signature for signature in signatures if signature["der"] is not None]
+    for signature in signatures:
+        if signature["der"] is None:
+            del signature["der"]
+            judge_time_stamps(signature)
+            signature.update(trusted=False, unverifiable=False, reason="", trust_source="", certificate="")
+    add_trust_verdicts(readable)
+    return signatures
+
+
+def render_container_page(name):
+    path = form_path(name)
+    description, entries = asic_verify.describe(path.read_bytes())
+    description["signatures"] = container_signatures(description["signatures"])
+    content = {"name": name, "entries": entries, "names": [file["name"] for file in description["files"]]}
+    values = {"SESSION": new_session(content), "FILE": json_for_script(path.name), "CONTAINER": json_for_script(description)}
+    return re.sub(r"__(SESSION|FILE|CONTAINER)__", lambda marker: values[marker.group(1)], CONTAINER_PAGE)
 
 
 def file_start(path):
@@ -483,9 +505,11 @@ class Handler(BaseHTTPRequestHandler):
         if sys.stderr:
             super().log_message(format, *args)
 
-    def _send_response(self, code, body, content_type):
+    def _send_response(self, code, body, content_type, headers=None):
         self.send_response(code)
         self.send_header("Content-Type", content_type)
+        for header, value in (headers or {}).items():
+            self.send_header(header, value)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -522,11 +546,28 @@ class Handler(BaseHTTPRequestHandler):
         desktop_flag = b"window.ZFO_DESKTOP = true;\n" if os.environ.get("ZFO_DESKTOP") else b""
         self._send_response(200, desktop_flag + (RESOURCES / "ui/bridge.js").read_bytes(), "text/javascript")
 
+    def _serve_files_script(self):
+        self._send_response(200, (RESOURCES / "ui/files.js").read_bytes(), "text/javascript")
+
     def _serve_session_pdf(self, query):
         session = SESSIONS.get(first_query_value(query, "s"))
         if session is None or "pdf" not in session:
             return self._send_not_found()
         return self._send_response(200, session["pdf"], "application/pdf")
+
+    def _serve_container_file(self, query):
+        session = SESSIONS.get(first_query_value(query, "s"))
+        index = first_query_value(query, "i")
+        if session is None or "entries" not in session or not index.isascii() or not index.isdigit() or len(index) > 6:
+            return self._send_not_found()
+        index = int(index)
+        if index >= len(session["entries"]):
+            return self._send_not_found()
+        entry_name = session["names"][index]
+        # Never rendered by the app window, PDFs included: PDF.js fetches the bytes itself.
+        return self._send_response(200, session["entries"][index], "application/octet-stream",
+                                   {"X-Content-Type-Options": "nosniff",
+                                    "Content-Disposition": f"attachment; filename*=UTF-8''{quote(entry_name.rsplit('/', 1)[-1])}"})
 
     def _serve_attachment(self, query):
         session = SESSIONS.get(first_query_value(query, "s"))
@@ -551,15 +592,20 @@ class Handler(BaseHTTPRequestHandler):
         links = "".join(f'<li><a href="/?form={quote(name)}">{name}</a></li>' for name in sorted(FORMS))
         self._send_response(200, f"<meta charset=utf-8><h1>Formuláře</h1><ul>{links}</ul>".encode(), HTML_UTF8)
 
+    def _render_form_page(self, name, query, data):
+        path = form_path(name)
+        if path.suffix.lower() == ".pdf":
+            return render_pdf_page(name)
+        if isds_message.looks_like_message(file_start(path)):
+            return render_message_page(name)
+        if asic_verify.is_signed_path(path):
+            return render_container_page(name)
+        return render_zfo_page(name, first_query_value(query, "blank") == "1", data)
+
     def _serve_form_page(self, name, query):
         try:
             data = IMPORTS.pop(first_query_value(query, "import"), None)
-            if form_path(name).suffix.lower() == ".pdf":
-                page = render_pdf_page(name)
-            elif isds_message.looks_like_message(file_start(form_path(name))):
-                page = render_message_page(name)
-            else:
-                page = render_zfo_page(name, first_query_value(query, "blank") == "1", data)
+            page = self._render_form_page(name, query, data)
             self._send_response(200, page.encode(), HTML_UTF8)
         except FileNotFoundError:
             self._send_response(404, b"form not found", PLAIN_TEXT)
@@ -578,8 +624,12 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_file_inside(PDFJS, url.path[len("/pdfjs/"):], PDFJS_CONTENT_TYPES)
         if url.path == "/bridge.js":
             return self._serve_bridge_script()
+        if url.path == "/files.js":
+            return self._serve_files_script()
         if url.path == "/pdf":
             return self._serve_session_pdf(url.query)
+        if url.path == "/container-file":
+            return self._serve_container_file(url.query)
         if url.path == "/attachment":
             return self._serve_attachment(url.query)
         if url.path == "/identities":
@@ -661,7 +711,7 @@ class Handler(BaseHTTPRequestHandler):
         session = SESSIONS.get(first_query_value(url.query, "s"))
         if session is None:
             return self._send_response(404, "Relace vypršela, načti formulář znovu".encode(), PLAIN_TEXT_UTF8)
-        if "message" in session and url.path != "/revocation":
+        if ("message" in session or "entries" in session) and url.path != "/revocation":
             return self._send_not_found()
         if url.path == "/add-certificate":
             return self._add_certificate()

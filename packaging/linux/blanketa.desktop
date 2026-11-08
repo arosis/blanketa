@@ -2,9 +2,9 @@
 Type=Application
 Name=Blanketa
 GenericName=Formuláře ZFO a PDF
-Comment=Vyplňování a podepisování formulářů ZFO (602XML) a PDF, prohlížení datových zpráv
+Comment=Vyplňování a podepisování formulářů ZFO (602XML) a PDF, prohlížení datových zpráv a kontejnerů ASiC
 Exec=blanketa %F
 Icon=blanketa
 Terminal=false
 Categories=Office;Viewer;
-MimeType=application/vnd.software602.filler.form-xml-zip;application/vnd.software602.filler.form+xml;application/pdf;
+MimeType=application/vnd.software602.filler.form-xml-zip;application/vnd.software602.filler.form+xml;application/pdf;application/vnd.etsi.asic-e+zip;application/vnd.etsi.asic-s+zip;

@@ -4,6 +4,7 @@
 """
 import base64
 import copy
+import http.client
 import importlib.util
 import io
 import json
@@ -19,6 +20,7 @@ import time
 import unittest
 import zipfile
 from datetime import datetime, timedelta, timezone
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
@@ -41,7 +43,10 @@ from pypdf.generic import (
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "tests"))
 os.environ["ZFO_OFFLINE"] = "1"  # tests never download trusted lists
+
+import asic_samples  # noqa: E402
 
 import app  # noqa: E402
 import barcode  # noqa: E402
@@ -330,6 +335,18 @@ class IsdsMessages(unittest.TestCase):
         self.assertEqual(message["subject"], "__SIGNATURES__ __SUBMITTED__ __SESSION__ __FILE__")
         self.assertEqual(json.loads(page.split("let signatures = ")[1].split(";\n")[0])[0]["subject"], "ISDS TEST")
 
+    def test_attachment_text_stays_json(self):
+        hostile = "</script><img src=x onerror=alert(1)>"
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "zprava.zfo"
+            path.write_bytes(isds_sample_tool().build_message(attachments=((hostile + ".pdf", hostile, "main", b"%PDF-1.4\n"),)))
+            with mock.patch.dict(app.FORMS, {"hostile": path}):
+                page = app.render_message_page("hostile")
+        self.assertNotIn("<img src=x", page)
+        attachment = json.loads(page.split("const MESSAGE = ")[1].split(";\n")[0])["attachments"][0]
+        self.assertEqual(attachment["mime"], hostile)
+        self.assertTrue(attachment["main"])
+
     def test_receipt_has_no_stamp(self):
         self.assertEqual(isds_message.describe_seal(isds_message.read_message(isds_sample("dorucenka")))["stamps"], [])
 
@@ -377,6 +394,167 @@ class IsdsMessages(unittest.TestCase):
 PYWEBVIEW_FILE_TYPE_PATTERN = r"^([\w ]+)\((\*(?:\.(?:\w+|\*))*(?:;\*(?:\.(?:\w+|\*))*)*)\)$"
 
 
+class ContainerPages(unittest.TestCase):
+    PDF = b"%PDF-1.7 smlouva"
+    HOSTILE = "</script><img src=x onerror=alert(1)>.txt"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), app.Handler)
+        cls.port = cls.server.server_address[1]
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.folder = Path(folder.name)
+        patcher = mock.patch.object(app, "SINGLE_FILE", True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def open_container(self, data, name="smlouva.asice"):
+        path = self.folder / name
+        path.write_bytes(data)
+        app.FORMS["container-test"] = path
+        self.addCleanup(app.FORMS.pop, "container-test", None)
+        return path
+
+    def signed(self, files=None, **options):
+        files = files or {"smlouva.pdf": self.PDF}
+        signature = asic_samples.xades_signature(files, **options)
+        return asic_samples.asic_e(files, {"signatures.xml": asic_samples.signatures_xml(signature)})
+
+    def request(self, path, host=None, header="Content-Disposition"):
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=30)
+        connection.request("GET", path, headers={"Host": host or f"127.0.0.1:{self.port}"})
+        response = connection.getresponse()
+        return response.status, response.getheader("Content-Type"), response.getheader(header), response.read()
+
+    def page_json(self, page, marker):
+        return json.loads(re.search(rf"const {marker} = (.*);\n", page).group(1))
+
+    def post(self, path, body=b"[]"):
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=30)
+        connection.request("POST", path, body=body, headers={"Host": f"127.0.0.1:{self.port}"})
+        response = connection.getresponse()
+        return response.status, response.read()
+
+    def test_container_session_answers_only_revocation_posts(self):
+        _, session = self.render(self.signed())
+        self.assertEqual(self.post(f"/revocation?s={session}"), (200, b"{}"))
+        for path in ("/ipc", "/save", "/pdf-save", "/export-data"):
+            with self.subTest(path=path):
+                self.assertEqual(self.post(f"{path}?s={session}", b"{}")[0], 404)
+
+    def render(self, data):
+        self.open_container(data)
+        page = app.render_container_page("container-test")
+        return page, re.search(r"const SESSION = '([\w-]+)'", page).group(1)
+
+    def test_container_page_carries_files_and_signatures_as_json(self):
+        page, session = self.render(self.signed())
+        container = self.page_json(page, "CONTAINER")
+        self.assertEqual(self.page_json(page, "FILE"), "smlouva.asice")
+        self.assertEqual([file["name"] for file in container["files"]], ["smlouva.pdf"])
+        self.assertEqual(container["signatures"][0]["files"], ["smlouva.pdf"])
+        self.assertNotIn("der", container["signatures"][0])
+        self.assertEqual(app.SESSIONS[session]["entries"], [self.PDF])
+        self.assertEqual(self.request("/?form=container-test")[0], 200)
+
+    def test_container_file_route_needs_the_session(self):
+        self.render(self.signed())
+        self.assertEqual(self.request("/container-file?i=0")[0], 404)
+        self.assertEqual(self.request("/container-file?s=nope&i=0")[0], 404)
+        self.assertEqual(self.request("/container-file?s=x&i=0", host="attacker.example")[0], 403)
+
+    def test_container_file_route_serves_by_index(self):
+        _, session = self.render(self.signed())
+        status, content_type, disposition, body = self.request(f"/container-file?s={session}&i=0")
+        self.assertEqual((status, content_type, body), (200, "application/octet-stream", self.PDF))
+        self.assertEqual(disposition, "attachment; filename*=UTF-8''smlouva.pdf")
+        for index in ("99", "-1", "x", ""):
+            self.assertEqual(self.request(f"/container-file?s={session}&i={index}")[0], 404, index)
+
+    def test_no_entry_is_sniffed_as_a_page(self):
+        _, session = self.render(self.signed({"smlouva.pdf": self.PDF, "stranka.html": b"<script>alert(1)</script>"}))
+        for index in (0, 1):
+            status, content_type, sniffing, _ = self.request(f"/container-file?s={session}&i={index}", header="X-Content-Type-Options")
+            self.assertEqual((status, content_type, sniffing), (200, "application/octet-stream", "nosniff"), index)
+
+    def test_shared_files_script_is_served_without_a_session(self):
+        status, content_type, _, body = self.request("/files.js")
+        self.assertEqual((status, content_type), (200, "text/javascript"))
+        self.assertEqual(body, (ROOT / "ui/files.js").read_bytes())
+        self.assertEqual(self.request("/files.js", host="attacker.example")[0], 403)
+
+    def test_both_pages_use_the_shared_files_script(self):
+        for page in ("container", "message"):
+            self.assertIn('<script src="/files.js"></script>', (ROOT / f"ui/{page}.html").read_text(encoding="utf-8"), page)
+        script = (ROOT / "ui/files.js").read_text(encoding="utf-8")
+        self.assertNotRegex(script, r"\} (B|kB|MB|%)`")
+        self.assertIn("Math.round(event.scale * 100) + '\u00a0%'", script)
+
+    def test_non_pdf_entry_is_a_download_named_by_its_basename(self):
+        files = {"složka/příloha č. 1.txt": b"text"}
+        _, session = self.render(self.signed(files))
+        status, content_type, disposition, body = self.request(f"/container-file?s={session}&i=0")
+        self.assertEqual((status, content_type, body), (200, "application/octet-stream", b"text"))
+        self.assertEqual(disposition, "attachment; filename*=UTF-8''p%C5%99%C3%ADloha%20%C4%8D.%201.txt")
+
+    def test_hostile_file_name_stays_json(self):
+        page, _ = self.render(self.signed({self.HOSTILE: b"x"}))
+        self.assertNotIn("</script><img", page)
+        self.assertNotIn("<img src=x", page)
+        self.assertEqual(self.page_json(page, "CONTAINER")["files"][0]["name"], self.HOSTILE)
+
+    def test_markers_in_file_data_are_not_substituted(self):
+        page, _ = self.render(self.signed({"__FILE__.txt": b"x", "__SESSION__.txt": b"y"}))
+        self.assertEqual([file["name"] for file in self.page_json(page, "CONTAINER")["files"]], ["__FILE__.txt", "__SESSION__.txt"])
+        self.open_container(self.signed(), "__CONTAINER__.asice")
+        page = app.render_container_page("container-test")
+        self.assertEqual(self.page_json(page, "FILE"), "__CONTAINER__.asice")
+        self.assertEqual(self.page_json(page, "CONTAINER")["files"][0]["name"], "smlouva.pdf")
+
+    def test_huge_index_is_not_found(self):
+        _, session = self.render(self.signed())
+        self.assertEqual(self.request(f"/container-file?s={session}&i={'9' * 5000}")[0], 404)
+
+    def test_container_without_pdf_renders(self):
+        page, _ = self.render(self.signed({"a.txt": b"a", "b.txt": b"b"}))
+        self.assertEqual(len(self.page_json(page, "CONTAINER")["files"]), 2)
+
+    def test_untrusted_intact_signature_is_not_broken(self):
+        page, _ = self.render(self.signed())
+        signature = self.page_json(page, "CONTAINER")["signatures"][0]
+        self.assertIs(signature["intact"], True)
+        self.assertIs(signature["trusted"], False)
+
+    def test_signature_file_without_certificate_still_renders(self):
+        data = asic_samples.asic_e({"smlouva.pdf": self.PDF}, {"signatures.xml": b"<broken"})
+        page, _ = self.render(data)
+        signature = self.page_json(page, "CONTAINER")["signatures"][0]
+        self.assertEqual((signature["intact"], signature["trusted"], signature["unverifiable"], signature["certificate"]),
+                         (False, False, False, ""))
+        self.assertNotIn("der", signature)
+
+    def test_damaged_container_shows_the_damaged_page(self):
+        data = self.signed()
+        self.open_container(data[:len(data) // 2])
+        status, _, _, body = self.request("/?form=container-test")
+        self.assertEqual(status, 422)
+        self.assertIn("Soubor nelze otevřít".encode(), body)
+
+    def test_zfo_is_not_taken_for_a_container(self):
+        self.open_container((ROOT / "samples/cuzk/form.zfo").read_bytes(), "form.zfo")
+        self.assertEqual(self.request("/?form=container-test")[0], 200)
+        self.assertNotIn("const CONTAINER", self.request("/?form=container-test")[3].decode())
+
+
 class FileAssociations(unittest.TestCase):
     FO_MIME_TYPE = "application/vnd.software602.filler.form+xml"
 
@@ -398,6 +576,35 @@ class FileAssociations(unittest.TestCase):
             self.assertIn(self.FO_MIME_TYPE, (ROOT / "packaging/linux" / name).read_text(encoding="utf-8"), name)
         for name in ("blanketa-mime.xml", "install.sh"):
             self.assertIn('<glob pattern="*.fo" weight="60"/>', (ROOT / "packaging/linux" / name).read_text(encoding="utf-8"), name)
+
+    ASIC_TYPES = {"application/vnd.etsi.asic-e+zip": ("asice", "sce"), "application/vnd.etsi.asic-s+zip": ("asics", "scs")}
+
+    def test_asic_containers_are_registered_on_every_platform(self):
+        with open(ROOT / "macapp/Info.plist", "rb") as info:
+            plist = plistlib.load(info)
+        document_types = [content_type for item in plist["CFBundleDocumentTypes"] for content_type in item["LSItemContentTypes"]]
+        for mime, extensions in self.ASIC_TYPES.items():
+            declared = next(item for item in plist["UTImportedTypeDeclarations"]
+                            if item["UTTypeTagSpecification"]["public.mime-type"] == mime)
+            self.assertEqual(declared["UTTypeTagSpecification"]["public.filename-extension"], list(extensions))
+            self.assertIn("public.zip-archive", declared["UTTypeConformsTo"])
+            self.assertIn(declared["UTTypeIdentifier"], document_types)
+        script = (ROOT / "packaging/windows/blanketa.iss").read_text(encoding="utf-8")
+        self.assertIn(r'Software\Classes\Blanketa.asic\shell\open\command', script)
+        for extension in ("asice", "sce", "asics", "scs"):
+            self.assertIn(rf'Software\Classes\.{extension}\OpenWithProgids"; ValueType: string; ValueName: "Blanketa.asic"', script)
+        for extension in ("asice", "asics"):
+            self.assertIn(rf'Software\Classes\.{extension}"; ValueType: string; ValueName: ""; ValueData: "Blanketa.asic"; Tasks: asicdefault', script)
+        for name in ("blanketa.desktop", "install.sh"):
+            text = (ROOT / "packaging/linux" / name).read_text(encoding="utf-8")
+            for mime in self.ASIC_TYPES:
+                self.assertIn(mime + ";", text, name)
+        for name in ("blanketa-mime.xml", "install.sh"):
+            text = (ROOT / "packaging/linux" / name).read_text(encoding="utf-8")
+            for mime, extensions in self.ASIC_TYPES.items():
+                self.assertIn(f'<mime-type type="{mime}">', text, name)
+                for extension in extensions:
+                    self.assertIn(f'<glob pattern="*.{extension}"/>', text, name)
 
     def test_zfo_type_names_data_messages_too(self):
         description = "Formulář 602XML nebo datová zpráva (ZFO)"
@@ -899,6 +1106,23 @@ class RadioButtonsInSectionCopies(unittest.TestCase):
         page = self.page_after("fill_inputs(null, {sekce: [{r: 'b'}, {r: 'b'}]}); lastField = radios[5]; applyDefault({field: 'r', value: 'a'})")
         self.assertEqual(page["checked"], ["sekce-rep-0:b", "sekce-rep-1:a"])
         self.assertEqual(page["sent"], [{"type": "store_val", "data": {"field": "r", "value": "a", "repe": "block---sekce-rep-1", "input_id": "r-b"}}])
+
+
+@unittest.skipUnless(shutil.which("node"), "needs Node.js; CI runners have it")
+class SavedFileNames(unittest.TestCase):
+    """Runs plainName from ui/files.js: a name the hosts refuse would drop the whole save request silently."""
+
+    def test_every_name_becomes_one_the_hosts_accept(self):
+        names = ["smlouva: v2.pdf", "složka/příloha.pdf", "a:b.pdf", "C:\\dokumenty\\x.pdf", "slozka/", ".", "..", "a/..",
+                 "", "x\x00y.txt", "tab\tname.txt", "obyčejný název.pdf"]
+        source = (ROOT / "ui/files.js").read_text(encoding="utf-8")
+        block = re.search(r"  const plainName = .*?\n  \};", source, re.S).group(0)
+        script = f"{block}\nconsole.log(JSON.stringify(JSON.parse(process.argv[1]).map(plainName)));"
+        out = subprocess.run(["node", "-e", script, "--", json.dumps(names)], capture_output=True, text=True, check=True).stdout
+        plain = json.loads(out)
+        self.assertTrue(all(desktop.is_plain_file_name(name) for name in plain), plain)
+        self.assertEqual(plain[:6], ["smlouva_ v2.pdf", "příloha.pdf", "a_b.pdf", "x.pdf", "soubor", "soubor"])
+        self.assertEqual(plain[-1], "obyčejný název.pdf")
 
 
 @unittest.skipUnless(shutil.which("node"), "needs Node.js; CI runners have it")
@@ -1435,6 +1659,59 @@ class DesktopAttachmentSaving(unittest.TestCase):
             with self.subTest(files=files):
                 self.bridge.message({"action": "saveAttachment", "files": files, "folder": True})
         self.assertEqual(list(self.folder.iterdir()), [])
+
+
+class DesktopContainerFileSaving(DesktopAttachmentSaving):
+    def setUp(self):
+        super().setUp()
+        self.container = app.new_session({"entries": [b"%PDF-1.7 smlouva", b"data"], "names": ["smlouva.pdf", "data.txt"]})
+        self.bridge._app.open_window = mock.Mock()
+
+    def one(self, index=0, name="smlouva.pdf"):
+        return [{"url": f"/container-file?s={self.container}&i={index}", "name": name}]
+
+    def test_container_file_url_rule(self):
+        self.assertTrue(desktop.attachment_url_is_allowed("/container-file?s=Ab_c-9&i=12"))
+        for url in ("/container-file?s=x&i=1&j=2", "//evil.example/container-file?s=x&i=1", "http://127.0.0.1/container-file?s=x&i=1",
+                    "/container-file?s=x&i=1#", "/container-file?s=x&i=-1", "/container-files?s=x&i=1",
+                    "/container-file?s=x&i=\u0661", "/container-file?s=x&i=1\n"):
+            with self.subTest(url=url):
+                self.assertFalse(desktop.attachment_url_is_allowed(url))
+
+    def test_saves_a_container_file(self):
+        self.window.create_file_dialog.return_value = str(self.folder / "kopie.pdf")
+        self.bridge.message({"action": "saveAttachment", "files": self.one(), "folder": False})
+        self.assertEqual((self.folder / "kopie.pdf").read_bytes(), b"%PDF-1.7 smlouva")
+        self.bridge._app.open_window.assert_not_called()
+
+    def test_open_opens_the_saved_copy_in_a_new_window(self):
+        self.window.create_file_dialog.return_value = str(self.folder / "kopie.pdf")
+        self.bridge.message({"action": "saveAttachment", "files": self.one(), "folder": False, "open": True})
+        self.bridge._app.open_window.assert_called_once_with(self.folder / "kopie.pdf")
+
+    def test_open_with_a_cancelled_dialog_opens_nothing(self):
+        self.window.create_file_dialog.return_value = None
+        self.bridge.message({"action": "saveAttachment", "files": self.one(), "folder": False, "open": True})
+        self.bridge._app.open_window.assert_not_called()
+
+    def test_open_is_refused_for_a_folder_or_several_files(self):
+        files = self.one() + self.one(1, "data.txt")
+        for request in ({"files": self.one(), "folder": True}, {"files": files, "folder": False}, {"files": files, "folder": True}):
+            with self.subTest(request=request):
+                self.bridge.message({"action": "saveAttachment", "open": True, **request})
+        self.window.create_file_dialog.assert_not_called()
+        self.bridge._app.open_window.assert_not_called()
+
+    def test_open_dialog_offers_containers(self):
+        self.assertEqual(desktop.OPEN_DIALOG_FILE_TYPES,
+                         ("Podporované soubory (*.zfo;*.fo;*.pdf;*.asice;*.sce;*.asics;*.scs)", "Všechny soubory (*.*)"))
+        first = desktop.OPEN_DIALOG_FILE_TYPES[0]
+        for extension in ("zfo", "fo", "pdf", "asice", "sce", "asics", "scs"):
+            self.assertIn(f"*.{extension}", first)
+        main = (ROOT / "macapp/main.swift").read_text(encoding="utf-8")
+        for extension in ("asice", "sce", "asics", "scs"):
+            self.assertIn(f'"{extension}"', main)
+        self.assertIn('&i=[0-9]+\\z"#', main)
 
 
 class LinuxPdfPrinting(unittest.TestCase):

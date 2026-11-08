@@ -30,11 +30,13 @@ from cryptography import x509  # noqa: E402
 from lxml import etree  # noqa: E402
 
 import app  # noqa: E402
+import asic_verify  # noqa: E402
 import isds_message  # noqa: E402
 import pdf_form_data  # noqa: E402
 import pdf_sign  # noqa: E402
 import revocation  # noqa: E402
 import trustlist  # noqa: E402
+import xades_verify  # noqa: E402
 import zfo_verify  # noqa: E402
 from zfoengine import js602  # noqa: E402
 
@@ -141,6 +143,23 @@ def fuzz_pdf(data):
             continue
 
 
+def fuzz_asic(data):
+    try:
+        asic_verify.describe(data)
+    except (asic_verify.ContainerError, xades_verify.XadesError):
+        pass
+
+
+def asic_seeds():
+    sys.path.insert(0, str(ROOT / "tests"))
+    import asic_samples as samples
+    files = {"smlouva.pdf": b"%PDF-1.7 smlouva"}
+    signed = samples.signatures_xml(samples.xades_signature(files))
+    return [samples.asic_e(files, {"signatures.xml": signed}),
+            samples.asic_s("smlouva.pdf", files["smlouva.pdf"], signed),
+            samples.enveloping(files["smlouva.pdf"], "application/pdf", base64_transform=True)]
+
+
 def fuzz_form_data(data):
     try:
         values = pdf_form_data.read_form_data(data)
@@ -209,6 +228,7 @@ TARGETS = {
     "zfo-signatures": (fuzz_zfo_signatures, fo_seeds),
     "zfo-description": (fuzz_zfo_description, fo_seeds),
     "pdf": (fuzz_pdf, pdf_seeds),
+    "asic": (fuzz_asic, asic_seeds),
     "form-data": (fuzz_form_data, form_data_seeds),
     "isds-message": (fuzz_isds_message, isds_message_seeds),
     "script": (fuzz_script, script_seeds),

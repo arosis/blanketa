@@ -19,6 +19,7 @@ os.environ["ZFO_OFFLINE"] = "1"  # tests never download trusted lists
 from lxml import etree  # noqa: E402
 from pypdf import PdfWriter  # noqa: E402
 
+import asic_verify  # noqa: E402
 import certstore  # noqa: E402
 import pdf_sign  # noqa: E402
 import zfo_sign  # noqa: E402
@@ -55,6 +56,17 @@ def main(source, password=None):
     layers = zfo_verify.describe_signature_layers(root)
     print("zfo:", [(l["subject"], l["intact"]) for l in layers])
     assert layers[0]["intact"] and layers[0]["subject"] == found[0]["subject"], "ZFO signature does not verify"
+
+    sys.path.insert(0, str(ROOT / "tests"))
+    import asic_samples
+    files = {"smlouva.pdf": b"%PDF-1.7 selftest"}
+    signatures = asic_samples.signatures_xml(asic_samples.xades_signature(files, key=key, cert=cert))
+    description, _ = asic_verify.describe(asic_samples.asic_e(files, {"signatures.xml": signatures}))
+    print("asic:", [(s["subject"], s["intact"]) for s in description["signatures"]], [f["state"] for f in description["files"]])
+    assert description["signatures"][0]["intact"] and description["files"][0]["state"] == "signed", "ASiC signature does not verify"
+    description, _ = asic_verify.describe(asic_samples.asic_e({"smlouva.pdf": b"%PDF-1.7 Selftest"}, {"signatures.xml": signatures}))
+    assert description["files"][0]["state"] == "changed" and not description["signatures"][0]["intact"], \
+        "a changed ASiC file is not detected"
 
     print("trust:", certstore.trust_verdicts([der for der in [l["der"] for l in layers[:1]]]))
     print("selftest ok")

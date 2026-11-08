@@ -1,7 +1,7 @@
 ; Inno Setup installer for Blanketa on Windows (built by tools/build_desktop.py):
 ;   iscc /DVersion=0.2.1 /DSource=dist\Blanketa /Odist packaging\windows\blanketa.iss
 ; Installs for the current user without admin rights (or for everyone if chosen), adds Blanketa to
-; "Otevřít v programu" for .zfo, .fo and .pdf and, as an optional task, makes it the default for .zfo and .fo files.
+; "Otevřít v programu" for .zfo, .fo, .pdf and ASiC containers and, as optional tasks, makes it the default for .zfo and .fo files and for ASiC containers.
 
 #ifndef Version
   #define Version "0.0.0"
@@ -33,6 +33,7 @@ Name: "czech"; MessagesFile: "compiler:Languages\Czech.isl"
 
 [Tasks]
 Name: "zfodefault"; Description: "Otevírat soubory .zfo a .fo v Blanketě (místo Form Filleru)"
+Name: "asicdefault"; Description: "Otevírat kontejnery ASiC (.asice, .asics) v Blanketě"
 Name: "desktopicon"; Description: "Zástupce na ploše"; Flags: unchecked
 
 [Files]
@@ -53,6 +54,15 @@ Root: HKA; Subkey: "Software\Classes\Blanketa.fo\DefaultIcon"; ValueType: string
 Root: HKA; Subkey: "Software\Classes\Blanketa.fo\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Blanketa.exe"" ""%1"""
 Root: HKA; Subkey: "Software\Classes\.fo\OpenWithProgids"; ValueType: string; ValueName: "Blanketa.fo"; ValueData: ""; Flags: uninsdeletevalue
 Root: HKA; Subkey: "Software\Classes\.fo"; ValueType: string; ValueName: ""; ValueData: "Blanketa.fo"; Tasks: zfodefault; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\Blanketa.asic"; ValueType: string; ValueName: ""; ValueData: "Kontejner ASiC s podpisy"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\Blanketa.asic\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\Blanketa.exe,0"
+Root: HKA; Subkey: "Software\Classes\Blanketa.asic\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Blanketa.exe"" ""%1"""
+Root: HKA; Subkey: "Software\Classes\.asice\OpenWithProgids"; ValueType: string; ValueName: "Blanketa.asic"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.sce\OpenWithProgids"; ValueType: string; ValueName: "Blanketa.asic"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.asics\OpenWithProgids"; ValueType: string; ValueName: "Blanketa.asic"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.scs\OpenWithProgids"; ValueType: string; ValueName: "Blanketa.asic"; ValueData: ""; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.asice"; ValueType: string; ValueName: ""; ValueData: "Blanketa.asic"; Tasks: asicdefault; Flags: uninsdeletevalue
+Root: HKA; Subkey: "Software\Classes\.asics"; ValueType: string; ValueName: ""; ValueData: "Blanketa.asic"; Tasks: asicdefault; Flags: uninsdeletevalue
 Root: HKA; Subkey: "Software\Classes\Blanketa.pdf"; ValueType: string; ValueName: ""; ValueData: "Dokument PDF"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\Blanketa.pdf\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Blanketa.exe"" ""%1"""
 Root: HKA; Subkey: "Software\Classes\.pdf\OpenWithProgids"; ValueType: string; ValueName: "Blanketa.pdf"; ValueData: ""; Flags: uninsdeletevalue

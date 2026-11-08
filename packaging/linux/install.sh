@@ -11,12 +11,12 @@ cat > "$DATA/applications/blanketa.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
 Name=Blanketa
-Comment=Vyplňování a podepisování formulářů ZFO (602XML) a PDF, prohlížení datových zpráv
+Comment=Vyplňování a podepisování formulářů ZFO (602XML) a PDF, prohlížení datových zpráv a kontejnerů ASiC
 Exec=$DATA/blanketa/Blanketa %F
 Icon=blanketa
 Terminal=false
 Categories=Office;Viewer;
-MimeType=application/vnd.software602.filler.form-xml-zip;application/vnd.software602.filler.form+xml;application/pdf;
+MimeType=application/vnd.software602.filler.form-xml-zip;application/vnd.software602.filler.form+xml;application/pdf;application/vnd.etsi.asic-e+zip;application/vnd.etsi.asic-s+zip;
 DESKTOP
 cp "$HERE/_internal/assets/blanketa.png" "$DATA/icons/hicolor/512x512/apps/blanketa.png"
 cat > "$DATA/mime/packages/blanketa.xml" <<'XML'
@@ -30,6 +30,18 @@ cat > "$DATA/mime/packages/blanketa.xml" <<'XML'
     <comment>Formulář 602XML (FO)</comment>
     <sub-class-of type="application/xml"/>
     <glob pattern="*.fo" weight="60"/>
+  </mime-type>
+  <mime-type type="application/vnd.etsi.asic-e+zip">
+    <comment>Kontejner ASiC s podpisy (ASiC-E)</comment>
+    <sub-class-of type="application/zip"/>
+    <glob pattern="*.asice"/>
+    <glob pattern="*.sce"/>
+  </mime-type>
+  <mime-type type="application/vnd.etsi.asic-s+zip">
+    <comment>Kontejner ASiC s podpisy (ASiC-S)</comment>
+    <sub-class-of type="application/zip"/>
+    <glob pattern="*.asics"/>
+    <glob pattern="*.scs"/>
   </mime-type>
 </mime-info>
 XML
