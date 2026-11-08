@@ -8,6 +8,8 @@ Aplikace pro macOS, Windows a Linux (Ubuntu, Debian, Mint …) na vyplňování 
 - **formulářů 602XML (`.zfo` a `.fo`)**, které jinak otevře jen Software602 Form Filler pro Windows (např. ČÚZK návrh na vklad, formuláře ČSSZ a krajů);
 - **PDF formulářů (AcroForm)**.
 
+Otevře také datové zprávy a doručenky z datových schránek uložené jako `.zfo`, jen ke čtení.
+
 Podepisuje se certifikátem:
 
 | Systém | Odkud certifikát |
@@ -67,6 +69,15 @@ Windows potřebují Microsoft Edge WebView2 (Windows 10/11 ho mají; instalátor
   - nebo neviditelně.
 - Panel podpisů: totéž co u ZFO a navíc časová razítka (viz [Časová razítka](#časová-razítka)).
 - Tisk vyplněného souboru v plné kvalitě.
+
+**Datové zprávy a doručenky (ZFO z datových schránek)**
+- Odesílatel, příjemce, věc, čísla jednací, data dodání a doručení, stav; u doručenky seznam událostí.
+- Přílohy jde uložit jednotlivě nebo všechny do složky; Blanketa je sama neotevírá.
+- Pečeť ISDS: neporušenost, důvěryhodnost certifikátu, zda nebyl zrušen, časové razítko. Zpráva zapečetěná někým jiným
+  než provozovatelem ISDS se zobrazí s výrazným upozorněním.
+- Zprávu nejde upravit ani znovu podepsat. Blanketa pozná zprávu podle obsahu, ne podle přípony.
+- Formát podle Provozního řádu ISDS, příloha „WS manipulace s datovými zprávami“
+  ([datovka.gov.cz](https://datovka.gov.cz/info/cs/80.html)).
 
 Technický popis formátu ZFO: [docs/zfo-format.md](docs/zfo-format.md).
 

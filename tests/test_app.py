@@ -352,6 +352,16 @@ class FileAssociations(unittest.TestCase):
         for name in ("blanketa-mime.xml", "install.sh"):
             self.assertIn('<glob pattern="*.fo" weight="60"/>', (ROOT / "packaging/linux" / name).read_text(encoding="utf-8"), name)
 
+    def test_zfo_type_names_data_messages_too(self):
+        description = "Formulář 602XML nebo datová zpráva (ZFO)"
+        for path in ("macapp/Info.plist", "packaging/windows/blanketa.iss", "packaging/linux/blanketa-mime.xml",
+                     "packaging/linux/install.sh"):
+            text = (ROOT / path).read_text(encoding="utf-8")
+            self.assertIn(description, text, path)
+            self.assertNotIn("Formulář 602XML (ZFO)", text, path)
+        for path in ("packaging/linux/blanketa.desktop", "packaging/linux/install.sh", "packaging/linux/control"):
+            self.assertIn("datových zpráv", (ROOT / path).read_text(encoding="utf-8"), path)
+
     def test_file_dialogs_offer_the_extension(self):
         self.assertTrue(any("*.fo" in file_type for file_type in desktop.OPEN_DIALOG_FILE_TYPES))
         for file_type in desktop.OPEN_DIALOG_FILE_TYPES:

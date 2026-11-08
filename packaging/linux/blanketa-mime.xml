@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
   <mime-type type="application/vnd.software602.filler.form-xml-zip">
-    <comment>Formulář 602XML (ZFO)</comment>
+    <comment>Formulář 602XML nebo datová zpráva (ZFO)</comment>
     <sub-class-of type="application/zip"/>
     <glob pattern="*.zfo"/>
   </mime-type>

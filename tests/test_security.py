@@ -31,6 +31,7 @@ from lxml import etree  # noqa: E402
 import app  # noqa: E402
 import certstore  # noqa: E402
 import desktop  # noqa: E402
+import isds_message  # noqa: E402
 import pdf_form_data  # noqa: E402
 import zfo_verify  # noqa: E402
 from zfoengine import api as engine  # noqa: E402
@@ -107,6 +108,54 @@ class HostileIsdsPages(unittest.TestCase):
         self.assertNotIn("<script>window.pwned", page)
         self.assertIn("\\u003c/script\\u003e", page)
         self.assertNotIn("innerHTML", page.split("const MESSAGE")[1].split("renderSeal")[0])
+
+
+class HostileIsdsMessages(unittest.TestCase):
+    def assert_refused_quickly(self, data, reason=None):
+        started = time.monotonic()
+        with self.assertRaises(ValueError) as refused:
+            isds_message.read_message(data)
+        self.assertLess(time.monotonic() - started, 2)
+        if reason:
+            self.assertIn(str(refused.exception), reason)
+
+    def test_entities_are_never_expanded(self):
+        laughs = (b'<?xml version="1.0"?><!DOCTYPE q [<!ENTITY a "aaaaaaaaaa">' + b"".join(
+            f'<!ENTITY {chr(98 + i)} "{("&" + chr(97 + i) + ";") * 10}">'.encode() for i in range(8))
+            + b']><q:MessageDownloadResponse xmlns:q="http://isds.czechpoint.cz/v20/message">&i;</q:MessageDownloadResponse>')
+        self.assert_refused_quickly(isds_sample_tool().build_message(xml=laughs), {"message content declares a DTD", "message content is not XML"})
+        external = (b'<?xml version="1.0"?><!DOCTYPE q [<!ENTITY x SYSTEM "file:///etc/passwd">]>'
+                    b'<q:MessageDownloadResponse xmlns:q="http://isds.czechpoint.cz/v20/message">&x;</q:MessageDownloadResponse>')
+        self.assert_refused_quickly(isds_sample_tool().build_message(xml=external), {"message content declares a DTD"})
+
+    def test_truncated_envelope_is_refused(self):
+        data = (ISDS_SAMPLES / "prijata-ber.zfo").read_bytes()
+        for end in (1, 2, 10, 100, 1000, 3000, 6000, len(data) // 2, len(data) - 10, len(data) - 1):
+            with self.subTest(end=end):
+                self.assert_refused_quickly(data[:end])
+
+    def test_huge_declared_length_is_refused(self):
+        self.assert_refused_quickly(b"\x30\x88" + (1 << 40).to_bytes(8, "big") + b"\x06\x09" + b"\x00" * 64)
+
+    def test_invalid_base64_attachment_is_refused(self):
+        xml = isds_message.read_message((ISDS_SAMPLES / "prijata.zfo").read_bytes()).content
+        broken = re.sub(rb"(<p:dmEncodedContent>)[^<]+", rb"\1!!!not base64!!!", xml, count=1)
+        self.assertNotEqual(broken, xml)
+        self.assert_refused_quickly(isds_sample_tool().build_message(xml=broken), {"attachment is not valid base64"})
+
+    def test_many_attachments_with_one_name(self):
+        started = time.monotonic()
+        names = isds_message.safe_file_names(["a.pdf"] * 2000)
+        self.assertEqual(len(set(name.lower() for name in names)), 2000)
+        self.assertLess(time.monotonic() - started, 2)
+
+    def test_message_without_the_seal_certificate_is_refused(self):
+        from asn1crypto import cms
+        info = cms.ContentInfo.load((ISDS_SAMPLES / "prijata.zfo").read_bytes())
+        del info["content"]["certificates"]
+        message = isds_message.read_message(info.dump(force=True))
+        with self.assertRaises(ValueError):
+            isds_message.describe_seal(message)
 
 
 class FormExpressions(unittest.TestCase):

@@ -11,7 +11,7 @@ cat > "$DATA/applications/blanketa.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
 Name=Blanketa
-Comment=Vyplňování a podepisování formulářů ZFO (602XML) a PDF
+Comment=Vyplňování a podepisování formulářů ZFO (602XML) a PDF, prohlížení datových zpráv
 Exec=$DATA/blanketa/Blanketa %F
 Icon=blanketa
 Terminal=false
@@ -23,7 +23,7 @@ cat > "$DATA/mime/packages/blanketa.xml" <<'XML'
 <?xml version="1.0" encoding="UTF-8"?>
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
   <mime-type type="application/vnd.software602.filler.form-xml-zip">
-    <comment>Formulář 602XML (ZFO)</comment>
+    <comment>Formulář 602XML nebo datová zpráva (ZFO)</comment>
     <glob pattern="*.zfo"/>
   </mime-type>
   <mime-type type="application/vnd.software602.filler.form+xml">
