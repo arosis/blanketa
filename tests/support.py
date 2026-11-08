@@ -67,10 +67,13 @@ def run_ui_scripts(names, script, *args):
 
 FORM_WITH_STYLESHEETS = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#" Id="_1"><dsig:Object Id="_2" MimeType="text/xml">
 <fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:fm="http://software602.cz/forms" xmlns:d="http://software602.cz/sample">
-<fm:formparams><fm:model><fm:instance><d:root><d:a>%s</d:a><d:b/></d:root></fm:instance>
-<fm:bind Id="k" nodeset="/d:root"><fm:bind Id="a" nodeset="d:a"/><fm:bind Id="b" nodeset="d:b"/></fm:bind></fm:model>
+<fm:formparams><fm:model><fm:instance><d:root><d:a>%s</d:a><d:b/><d:sekce><d:c/></d:sekce></d:root></fm:instance>
+<fm:bind Id="k" nodeset="/d:root"><fm:bind Id="a" nodeset="d:a"/><fm:bind Id="b" nodeset="d:b"/>
+<fm:bind Id="sekce" nodeset="d:sekce"><fm:bind Id="c" nodeset="d:c"/></fm:bind></fm:bind></fm:model>
 %s</fm:formparams>
-<fo:inline form602ct="txt" form602bind="a"/><fo:inline form602ct="btn" form602bind="b" form602btnclick=%s><![CDATA[Tlacitko]]></fo:inline>
+<fo:inline form602ct="txt" form602bind="a"/>
+<fo:block form602ct="rep" form602bind="sekce" form602id="s"><fo:inline form602ct="txt" form602bind="c"/></fo:block>
+<fo:inline form602ct="btn" form602bind="b" form602btnclick=%s><![CDATA[Tlacitko]]></fo:inline>
 </fo:root></dsig:Object></dsig:Signature>"""
 STYLESHEET = """<fm:template name="%s"><xsl:stylesheet version="1.0" xmlns:xsl="http://www.w3.org/1999/XSL/Transform"
  xmlns:msxsl="urn:schemas-microsoft-com:xslt" xmlns:js="http://www.software602.com/js" xmlns:d="http://software602.cz/sample"

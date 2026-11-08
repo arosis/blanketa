@@ -185,6 +185,12 @@ class FormStylesheetChecks(unittest.TestCase):
         cleaned = self.click("var d = GetDocument(); d.XSLCheck('Kontrola'); d.XSLCheck('Bez');")
         self.assertEqual(cleaned["problems"], [])
 
+    def test_faults_in_a_copy_added_between_checks_find_their_field(self):
+        copy_fault = stylesheet("Kopie", "<control><item><text>F002</text><focus>/d:root[1]/d:sekce[2]/d:c[1]</focus></item></control>")
+        result = self.click("var d = GetDocument(); d.XSLCheck('Kontrola'); d.GetElement().InsertSection('//*[@form602id=\"s\"]');"
+                            "d.XSLCheck('Kopie', 'noclean');", stylesheets=(REQUIRED_A, copy_fault))
+        self.assertEqual(result["problems"][-1], {"field": "c", "index": 1, "kind": "form", "message": "F002"})
+
     def test_form_data_of_a_stylesheet_reaches_the_script(self):
         result = self.click("var p = new DataParam(); p.xslName = 'Seznam'; var r = GetDocument().GetFormData(p);"
                             "GetDocument().GetElement().SetDataTo('a', /<xpath>([^<]*)<\\/xpath>/.exec(r.data)[1]);")
@@ -198,6 +204,11 @@ class FormStylesheetChecks(unittest.TestCase):
                                     stylesheets=(stylesheet(name, "<x><xpath>/d:root/d:a</xpath></x>"),))
                 self.assertEqual(result["values"], {"a": "prazdny"})
                 self.assertEqual(result["notices"], [form_scripts.ADDRESS_NOT_CHECKED_NOTICE])
+
+    def test_a_check_that_answers_otherwise_is_refused_instead_of_passing(self):
+        for body in ("", "<x/>", '<control xmlns="urn:jiny"/>'):
+            with self.subTest(body):
+                self.assertEqual(self.click("GetDocument().XSLCheck('Jina');", stylesheets=(stylesheet("Jina", body),))["refused"], "XSLCheck")
 
     def test_unknown_stylesheet_is_refused(self):
         self.assertEqual(self.click("var p = new DataParam(); p.xslName = 'Neni'; GetDocument().GetFormData(p);")["refused"], "GetFormData")

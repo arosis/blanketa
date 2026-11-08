@@ -534,6 +534,15 @@ class HostileFormStylesheets(unittest.TestCase):
         self.assertIn("refused", self.check(stylesheet("Zla", "<x><xsl:for-each select='(//node())[position() &lt; 50]'><xsl:value-of select='js:f()'/></xsl:for-each>"
                                                              "<xsl:value-of select='js:f()'/><xsl:value-of select='js:f()'/><xsl:value-of select='js:f()'/></x>", busy)))
 
+    def test_a_loop_of_checks_stops(self):
+        busy = "function f() { for (var i = 0; i < 300000; i++) {} return 1; }"
+        doc = engine.open_document(form_with_stylesheets("GetDocument().GetElement().SetDataTo('a', 'zmeneno'); while (true) GetDocument().XSLCheck('Zla');",
+                                                         [stylesheet("Zla", "<control><x><xsl:value-of select='js:f()'/></x></control>", busy)], "puvodni"))
+        self.assertIn("refused", form_scripts.run_button_script(doc, 0, "", []))
+        self.assertEqual(doc.get_value("a"), "puvodni")
+        cheap = engine.open_document(form_with_stylesheets("while (true) GetDocument().XSLCheck('Zla');", [stylesheet("Zla", "<control/>")]))
+        self.assertIn("refused", form_scripts.run_button_script(cheap, 0, "", []))
+
     def test_functions_in_other_languages_do_not_run(self):
         self.assertIn("refused", self.check(stylesheet("Zla", "<x><xsl:value-of select='js:f()'/></x>", "public string f() { return \"x\"; }", language="C#")))
 

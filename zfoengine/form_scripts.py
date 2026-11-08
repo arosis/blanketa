@@ -32,9 +32,11 @@ MAX_SECTION_CHANGES_PER_RUN = 200
 MAX_MESSAGES_PER_RUN = 5
 MAX_QUESTIONS_PER_RUN = 8
 MAX_NAMED_PARAMETERS = 1_000
+MAX_STYLESHEET_RUNS_PER_RUN = 50  # a stylesheet's own work spends no budget; MPSV forms run 7 per click
 # Lists of the addresses a form checks in RÚIAN, in the two generations of MPSV forms. Empty here: no address gets checked.
 ADDRESS_LIST_STYLESHEETS = {"Validace_AdresaWS_XpathAdres", "XsltGetAdresy"}
 KEEP_EARLIER_CHECK_RESULTS = "noclean"
+CHECK_RESULT_TAG = "control"
 ADDRESS_NOT_CHECKED_NOTICE = "Adresy nebyly ověřeny v registru RÚIAN, Blanketa formulářům síť nepovoluje. Před odesláním je zkontrolujte."
 WHISPERER_FIELD_TYPE = "acm"
 DATA_ROOT_PATH = "/*"
@@ -73,6 +75,10 @@ def name_repeating_sections_by_bind(root):
       element.set("blanketa-section-by-bind", "true")
 
 
+def _plain_text(element):
+  return "" if element is None else " ".join("".join(element.itertext()).split())
+
+
 def _node_key(node):
   if etree.iselement(node):
     return node
@@ -107,7 +113,7 @@ class FormActionHost:
     self.messages = []
     self.notices = []
     self.problems = None
-    self._fields_by_node = None
+    self.stylesheet_runs = 0
     self.focus_bind = None
     self.has_section_changes = False
 
@@ -259,24 +265,28 @@ class FormActionHost:
       return ""
     if self.document.get_template_text(stylesheet_name) is None:
       raise js602.Unsupported("GetFormData")
-    return str(form_stylesheets.transform(self.document, stylesheet_name))
+    return str(self._run_stylesheet(stylesheet_name))
 
-  def _field_of_data_node(self):
-    if self._fields_by_node is None:
-      document = self.document
-      self._fields_by_node = {}
-      for bind in document.root.xpath("//fm:bind", namespaces={"fm": ns.FM_URI}):
-        path = document._get_abs_data_path(bind)
-        try:
-          nodes = document._get_data_root().xpath(path, namespaces=document._get_used_ns_prefix(path))
-        except (etree.LxmlError, ValueError, TypeError):
-          continue
-        for index, node in enumerate(nodes if isinstance(nodes, list) else []):
-          self._fields_by_node.setdefault(_node_key(node), (bind.get("Id"), index))
-    return self._fields_by_node
+  def _run_stylesheet(self, stylesheet_name):
+    self.stylesheet_runs += 1
+    if self.stylesheet_runs > MAX_STYLESHEET_RUNS_PER_RUN:
+      raise js602.Exhausted("šablony")
+    return form_stylesheets.transform(self.document, stylesheet_name, self.document.script_interpreter().budget)
 
-  def _check_problem(self, item):
-    message = " ".join("".join(item.find("text").itertext()).split()) if item.find("text") is not None else ""
+  def _fields_by_data_node(self):
+    document = self.document
+    fields = {}
+    for bind in document.root.xpath("//fm:bind", namespaces={"fm": ns.FM_URI}):
+      path = document._get_abs_data_path(bind)
+      try:
+        nodes = document._get_data_root().xpath(path, namespaces=document._get_used_ns_prefix(path))
+      except (etree.LxmlError, ValueError, TypeError):
+        continue
+      for index, node in enumerate(nodes if isinstance(nodes, list) else []):
+        fields.setdefault(_node_key(node), (bind.get("Id"), index))
+    return fields
+
+  def _check_problem(self, item, fields):
     field, index = None, 0
     path = (item.findtext("focus") or "").strip()
     if path:
@@ -286,16 +296,19 @@ class FormActionHost:
       except (etree.LxmlError, ValueError, TypeError):
         found = []
       if isinstance(found, list) and found:
-        field, index = self._field_of_data_node().get(_node_key(found[0]), (None, 0))
-    return {"field": field, "index": index, "kind": "form", "message": message}
+        field, index = fields.get(_node_key(found[0]), (None, 0))
+    return {"field": field, "index": index, "kind": "form", "message": _plain_text(item.find("text"))}
 
   def xsl_check(self, stylesheet_name, mode):
     # The stylesheet answers with <control><item><text/><focus/></item>…</control>, one item for each fault it found.
-    output = form_stylesheets.transform(self.document, stylesheet_name).getroot()
-    items = [] if output is None else output.findall("item")
+    output = self._run_stylesheet(stylesheet_name).getroot()
+    if output is None or output.tag != CHECK_RESULT_TAG:
+      raise js602.Unsupported("XSLCheck")
+    items = output.findall("item")
     if mode != KEEP_EARLIER_CHECK_RESULTS or self.problems is None:
       self.problems = []
-    self.problems.extend(self._check_problem(item) for item in items)
+    fields = self._fields_by_data_node() if items else {}
+    self.problems.extend(self._check_problem(item, fields) for item in items)
     return not items
 
   def set_named_parameter(self, name, value):

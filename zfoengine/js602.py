@@ -2697,14 +2697,13 @@ def run_form_action(interpreter, source, host):
 
 
 class StylesheetFunctions:
-  # The functions a stylesheet declares in its msxsl:script blocks, for the stylesheet to call. One transformation shares
-  # one budget across all its calls: a stylesheet calls them per node, and a fresh budget each time would never run out.
+  # The functions a stylesheet declares in its msxsl:script blocks, for the stylesheet to call. They spend the budget of
+  # the script that ran the stylesheet: a stylesheet calls them per node, and a script runs stylesheets in a loop.
 
-  def __init__(self, sources):
+  def __init__(self, sources, budget):
     self.interpreter = Interpreter(sources)
-    self.interpreter.budget.left = STEP_BUDGET
+    self.interpreter.budget = budget
     self.interpreter._load_library()
-    self.interpreter.budget.left = STEP_BUDGET
 
   def names(self):
     return [name for name, value in self.interpreter.globals.vars.items() if isinstance(value, Function)]

@@ -46,7 +46,7 @@ def _call(functions, name, _context, *args):
   return _to_xpath_value(functions.call(name, [_to_script_value(arg) for arg in args]))
 
 
-def _script_functions(template):
+def _script_functions(template, budget):
   sources = {}
   for script in template.iter("{%s}script" % MSXSL_URI):
     namespace = script.nsmap.get(script.get("implements-prefix"))
@@ -54,19 +54,19 @@ def _script_functions(template):
       sources.setdefault(namespace, []).append(script.text)
   extensions = {}
   for namespace, namespace_sources in sources.items():
-    functions = js602.StylesheetFunctions(namespace_sources)
+    functions = js602.StylesheetFunctions(namespace_sources, budget)
     for name in functions.names():
       extensions[(namespace, name)] = functools.partial(_call, functions, name)
   return extensions
 
 
-def transform(document, name):
+def transform(document, name, budget):
   template = document.get_template_text(name)
   if template is None or stylesheet_loads_other_stylesheets(template):
     raise js602.Unsupported(f"šablona {name}")
   try:
     # without DENY_ALL a form's stylesheet reads files and addresses with document() and writes files with exsl:document
-    stylesheet = etree.XSLT(template, access_control=etree.XSLTAccessControl.DENY_ALL, extensions=_script_functions(template))
+    stylesheet = etree.XSLT(template, access_control=etree.XSLTAccessControl.DENY_ALL, extensions=_script_functions(template, budget))
     return stylesheet(document._get_data_root())
   except (etree.XSLTParseError, etree.XSLTApplyError) as error:
     raise js602.Unsupported(f"šablona {name}") from error
