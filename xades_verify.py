@@ -215,14 +215,16 @@ class _Verification:
         prefixes = _inclusive_prefixes(method) if method is not None else None
         return _canonicalize(node, algorithm, with_comments=False, prefixes=prefixes)
 
-    def file_data(self, uri, transforms):
+    def resolved_file(self, uri):
+        return None if self.standalone else self.resolve(uri)
+
+    def file_data(self, resolved, transforms):
         if self.standalone:
             raise _Refused(BAD_REFERENCE)
         method = self.canonical_transforms(transforms, enveloped_allowed=False)
-        resolved = self.resolve(uri)
         if resolved is None:
             raise _Refused(BAD_REFERENCE)
-        name, data = resolved
+        _, data = resolved
         if method is not None:
             try:
                 document = parse(data)
@@ -231,7 +233,7 @@ class _Verification:
             algorithm = method.get("Algorithm")
             data = _canonicalize(document.getroottree(), algorithm, with_comments=algorithm.endswith("WithComments"),
                                  prefixes=_inclusive_prefixes(method))
-        return name, data
+        return data
 
     def internal_data(self, target, transforms):
         algorithms = [transform.get("Algorithm") for transform in transforms]
@@ -248,21 +250,24 @@ class _Verification:
     def check_reference(self, reference, *, in_manifest):
         uri = reference.get("URI")
         is_file = uri is None or not uri.startswith("#")
-        entry = {"name": unquote(uri) if uri else "", "outcome": "refused"}
+        # Resolved before any other check, so a refused reference still names the listed file it points at.
+        resolved = self.resolved_file(uri) if is_file and uri != "" else None
+        entry = {"name": resolved[0] if resolved else unquote(uri) if uri else "", "outcome": "refused"}
         target = None
         try:
             transforms = self.transforms(reference)
             if uri == "":
                 data = self.whole_document(transforms)
             elif is_file:
-                entry["name"], data = self.file_data(uri, transforms)
+                data = self.file_data(resolved, transforms)
             else:
                 target = self.internal_target(uri)
                 if target.tag == _ds("Manifest") and in_manifest:
                     raise _Refused(WRAPPED)
                 data = self.internal_data(target, transforms)
-                if [transform.get("Algorithm") for transform in transforms] == [BASE64]:
-                    entry.update(content=data, mime=target.get("MimeType") or "")
+                if self.standalone and target.tag == _ds("Object"):
+                    decoded = [transform.get("Algorithm") for transform in transforms] == [BASE64]
+                    entry.update(content=data, mime=(target.get("MimeType") or "") if decoded else "application/xml")
             is_properties = target is not None and etree.QName(target).localname == "SignedProperties"
             method = self.child(reference, "DigestMethod")
             digests = LEGACY_DIGESTS if (is_file and uri != "") or is_properties else STRONG_DIGESTS
@@ -283,16 +288,26 @@ class _Verification:
             self.fail(refused.reason)
         if is_file or (target is not None and target.tag == _ds("Object")):
             self.references.append(entry)
-        return target if entry["outcome"] == "ok" else None
+        return target, entry["outcome"]
+
+    def unchecked_manifest_entry(self, reference, outcome):
+        uri = reference.get("URI")
+        if uri is not None and (uri == "" or uri.startswith("#")):
+            return
+        resolved = self.resolved_file(uri)
+        self.references.append({"name": resolved[0] if resolved else unquote(uri) if uri else "", "outcome": outcome})
 
     def check_references(self, signed_info):
         verified = set()
         for reference in signed_info.findall(_ds("Reference")):
-            target = self.check_reference(reference, in_manifest=False)
+            target, outcome = self.check_reference(reference, in_manifest=False)
             if target is not None and target.tag == _ds("Manifest") and target not in verified:
                 verified.add(target)
                 for manifest_reference in target.findall(_ds("Reference")):
-                    self.check_reference(manifest_reference, in_manifest=True)
+                    if outcome == "ok":
+                        self.check_reference(manifest_reference, in_manifest=True)
+                    else:
+                        self.unchecked_manifest_entry(manifest_reference, outcome)
 
     def signed_properties(self, signed_info):
         signature_id = self.signature.get("Id")

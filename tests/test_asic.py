@@ -401,6 +401,14 @@ class ContainerTest(unittest.TestCase):
         self.assertEqual(states(description), [("podepsaný obsah.pdf", "changed")])
         self.assertEqual(contents, [b"jiny obsah"])
 
+    def test_enveloping_xml_content_is_listed_as_verified(self):
+        data = asic_samples.enveloping(PDF, "application/pdf", base64_transform=False)
+        description, contents = asic_verify.describe(data)
+        self.assertEqual(states(description), [("podepsaný obsah.xml", "signed")])
+        content = etree.fromstring(data).find(f"{{{DS}}}Object[@Id='S1-content']")
+        self.assertEqual(contents, [etree.tostring(content, method="c14n")])
+        self.assertFalse(description["files"][0]["pdf"])
+
     def test_enveloped_document_verifies(self):
         data = asic_samples.enveloped(etree.fromstring(b"<faktura><castka>100</castka></faktura>"))
         self.assertTrue(asic_verify.is_signed_file(data))
@@ -434,6 +442,43 @@ class ContainerTest(unittest.TestCase):
         description, _ = asic_verify.describe(data)
         self.assertEqual(states(description), [(nfc, "signed"), (nfd, "unsigned")])
         self.assertEqual(description["signatures"][0]["files"], [nfc])
+
+    def test_refused_reference_marks_the_file_invalid(self):
+        nfc = unicodedata.normalize("NFC", "Příloha.pdf")
+        def xpath_transform(uri):
+            def mutate(signature):
+                reference = signature.find(f"{{{DS}}}SignedInfo/{{{DS}}}Reference")
+                reference.set("URI", uri)
+                transforms = etree.Element(f"{{{DS}}}Transforms")
+                etree.SubElement(transforms, f"{{{DS}}}Transform", Algorithm="http://www.w3.org/TR/1999/REC-xpath-19991116")
+                reference.insert(0, transforms)
+            return mutate
+        for name, uri in (("smlouva.pdf", "/smlouva.pdf"), (nfc, "P%C5%99%C3%ADloha.pdf")):
+            signatures = signatures_file({name: PDF}, mutate=xpath_transform(uri))
+            description, _ = asic_verify.describe(asic_samples.asic_e({name: PDF}, {"META-INF/signatures001.xml": signatures}))
+            [signature] = description["signatures"]
+            self.assertEqual(signature["broken_reason"], xades_verify.UNKNOWN_TRANSFORM)
+            self.assertEqual(states(description), [(name, "invalid")])
+            self.assertEqual(signature["files"], [name])
+
+    def test_unparsable_reference_uri_is_refused(self):
+        def odd_uri(signature):
+            signature.find(f"{{{DS}}}SignedInfo/{{{DS}}}Reference").set("URI", "//[x")
+        signatures = signatures_file(FILES, mutate=odd_uri)
+        description, _ = asic_verify.describe(asic_samples.asic_e(FILES, {"META-INF/signatures001.xml": signatures}))
+        self.assertEqual(description["signatures"][0]["broken_reason"], xades_verify.BAD_REFERENCE)
+        self.assertEqual(states(description), [("smlouva.pdf", "unsigned")])
+
+    def test_files_behind_a_changed_manifest_are_changed(self):
+        files = {"smlouva.pdf": PDF, "priloha.txt": b"priloha"}
+        signature = asic_samples.xades_signature(files, manifest=True)
+        signature.find(f"{{{DS}}}Object/{{{DS}}}Manifest/{{{DS}}}Reference/{{{DS}}}DigestValue").text = base64.b64encode(bytes(32)).decode()
+        data = asic_samples.asic_e(files, {"META-INF/signatures001.xml": asic_samples.signatures_xml(signature)})
+        description, _ = asic_verify.describe(data)
+        [described] = description["signatures"]
+        self.assertTrue(described["content_changed"])
+        self.assertEqual(states(description), [("smlouva.pdf", "changed"), ("priloha.txt", "changed")])
+        self.assertEqual(described["files"], ["smlouva.pdf", "priloha.txt"])
 
     def test_malformed_signature_file_is_one_invalid_card(self):
         data = asic_samples.asic_e(FILES, {"META-INF/signatures001.xml": signatures_file(FILES),
@@ -471,7 +516,7 @@ class ContainerTest(unittest.TestCase):
             self.assertEqual(asic_verify.uri_to_name(uri, names, single=None), name, uri)
         for uri in ("//smlouva.pdf", "../smlouva.pdf", "a/../smlouva.pdf", "%2E%2E/smlouva.pdf", "file:///smlouva.pdf",
                     "http://example.com/smlouva.pdf", "a\\b.txt", "a%5Cb.txt", "META-INF/signatures.xml",
-                    "/META-INF/signatures.xml", "%FF.pdf", "chybi.pdf", ""):
+                    "/META-INF/signatures.xml", "%FF.pdf", "chybi.pdf", "", "//[x", "http://[::1/smlouva.pdf"):
             self.assertIsNone(asic_verify.uri_to_name(uri, names, single="smlouva.pdf"), uri)
         self.assertEqual(asic_verify.uri_to_name(None, names, single="smlouva.pdf"), "smlouva.pdf")
         self.assertIsNone(asic_verify.uri_to_name(None, names, single=None))

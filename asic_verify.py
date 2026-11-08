@@ -47,7 +47,10 @@ class ContainerError(ValueError):
 def uri_to_name(uri, names, *, single):
     if uri is None:
         return single
-    if urlsplit(uri).scheme:
+    try:
+        if urlsplit(uri).scheme:
+            return None
+    except ValueError:
         return None
     try:
         name = unquote(uri, errors="strict")
