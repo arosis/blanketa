@@ -79,7 +79,7 @@ window.zfoFiles = (() => {
   };
 
   // files: [{name, size, url, pdf, main?, state?, stateLabel?}]
-  return ({files, list, stage, toolbar, status, initial = 0, emptyText, failedText}) => {
+  const show = ({files, list, stage, toolbar, status, initial = 0, emptyText, failedText}) => {
     const native = window.zfoNative;
     const tools = fragment(TOOLS);
     const toolButton = name => tools.querySelector(`[data-file-action="${name}"]`);
@@ -226,4 +226,5 @@ window.zfoFiles = (() => {
     }
     return {actions};
   };
+  return Object.assign(show, {plainName});
 })();

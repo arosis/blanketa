@@ -3,7 +3,7 @@ import json
 import re
 import unittest
 
-from support import ROOT, needs_node, run_in_node, ui_source
+from support import needs_node, run_in_node, run_ui_scripts, ui_source
 
 import desktop
 
@@ -132,10 +132,8 @@ class SavedFileNames(unittest.TestCase):
     def test_every_name_becomes_one_the_hosts_accept(self):
         names = ["smlouva: v2.pdf", "složka/příloha.pdf", "a:b.pdf", "C:\\dokumenty\\x.pdf", "slozka/", ".", "..", "a/..",
                  "", "x\x00y.txt", "tab\tname.txt", "obyčejný název.pdf"]
-        source = (ROOT / "ui/files.js").read_text(encoding="utf-8")
-        block = re.search(r"  const plainName = .*?\n  \};", source, re.S).group(0)
-        script = f"{block}\nconsole.log(JSON.stringify(JSON.parse(process.argv[1]).map(plainName)));"
-        out = run_in_node(script, json.dumps(names))
+        script = "console.log(JSON.stringify(JSON.parse(process.argv[1]).map(window.zfoFiles.plainName)));"
+        out = run_ui_scripts(["bridge.js", "files.js"], script, json.dumps(names))
         plain = json.loads(out)
         self.assertTrue(all(desktop.is_plain_file_name(name) for name in plain), plain)
         self.assertEqual(plain[:6], ["smlouva_ v2.pdf", "příloha.pdf", "a_b.pdf", "x.pdf", "soubor", "soubor"])
@@ -147,18 +145,15 @@ class RevocationVerdict(unittest.TestCase):
     """Runs the decision in ui/bridge.js: the certificate below was revoked on 1 June."""
     BEFORE, AFTER = "2026-01-01T00:00:00+00:00", "2026-09-01T00:00:00+00:00"
     SCRIPT = """
-    const window = {}, fetch = async () => ({ok: true, json: async () => ({c: {status: 'revoked', revoked_at: '2026-06-01T00:00:00+00:00'}})});
-    %s
+    window.fetch = async () => ({ok: true, json: async () => ({c: {status: 'revoked', revoked_at: '2026-06-01T00:00:00+00:00'}})});
     const sigs = JSON.parse(process.argv[1]), r = window.zfoRevocation;
     r.ask('s', sigs, () => {});
     setTimeout(() => console.log(JSON.stringify(sigs.map(sig => [r.provenBeforeRevocation(sig), r.revoked(sig), r.revokedBeforeSigning(sig)]))), 50);
     """
 
     def verdict(self, kind, proof_at, signed_at):
-        source = (ROOT / "ui/bridge.js").read_text(encoding="utf-8")
-        block = re.search(r"window\.zfoRevocation = .*?\n\}\)\(\);", source, re.S).group(0)
         sig = {"certificate": "c", "signed_at": signed_at, "proof": {"kind": kind, "at": proof_at} if kind else None}
-        out = run_in_node(self.SCRIPT % block, json.dumps([sig]))
+        out = run_ui_scripts(["bridge.js"], self.SCRIPT, json.dumps([sig]))
         return tuple(json.loads(out)[0])
 
     def test_stamp_before_revocation_keeps_the_signature_valid(self):
