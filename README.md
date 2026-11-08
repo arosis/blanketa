@@ -98,6 +98,7 @@ Stránky jsou na všech systémech stejné; s aplikací kolem sebe mluví přes 
 | `certstore.py` | podpisové identity na všech systémech: klíčenka (`keychain.py` + `macsign`), úložiště Windows (`winsign.ps1`), soubory `.pfx`; důvěryhodnost certifikátů podle systému |
 | `trustlist.py`, `revocation.py` | důvěryhodné seznamy EU a seznamy zrušených certifikátů |
 | `desktop.py` | okna aplikace pro Windows a Linux |
+| `linux_print.py` | náhled tisku PDF na Linuxu (PDFium) |
 | `ui/bridge.js` | spojení stránek s aplikací (macOS / Windows a Linux / prohlížeč), sdílený výběr certifikátu |
 
 ## Sestavení
@@ -187,7 +188,6 @@ Kontrola podpisu bez okna (používá ji i CI):
 - PDF formuláře XFA nejsou podporované; Blanketa na ně při otevření upozorní.
 - Aplikace není notarizovaná (macOS) ani podepsaná certifikátem vydavatele (Windows SmartScreen ji při prvním spuštění může varovat).
 - Tokeny přes PKCS#11 zatím nejsou podporované (jen soubory `.pfx`).
-- Na Windows a Linuxu se PDF tiskne přes výchozí prohlížeč PDF v systému.
 
 ## Důvěryhodnost podpisů
 

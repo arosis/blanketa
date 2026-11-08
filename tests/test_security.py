@@ -5,6 +5,7 @@
 import base64
 import copy
 import http.client
+import io
 import json
 import os
 import re
@@ -26,6 +27,7 @@ os.environ["ZFO_OFFLINE"] = "1"  # tests never download trusted lists
 from cryptography import x509  # noqa: E402
 from cryptography.hazmat.primitives import serialization  # noqa: E402
 from lxml import etree  # noqa: E402
+from pypdf import PdfReader  # noqa: E402
 
 import app  # noqa: E402
 import certstore  # noqa: E402
@@ -571,6 +573,15 @@ class HostGuards(unittest.TestCase):
             self.assertFalse(desktop.is_print_file(other))
         self.assertFalse(desktop.is_print_file(sys.executable))
 
+    def test_print_request_with_another_file_prints_nothing(self):
+        form = mock.Mock(home="http://127.0.0.1:1/")
+        form.window.get_current_url.return_value = form.home
+        with tempfile.NamedTemporaryFile(prefix="zfo-tisk-", suffix=".pdf", dir=tempfile.gettempdir()) as print_file, \
+                mock.patch.object(desktop, "print_pdf_file") as print_pdf_file:
+            for path in (sys.executable, print_file.name):
+                desktop.Bridge(mock.Mock(), form).message({"action": "printPdf", "path": path})
+        print_pdf_file.assert_called_once_with(Path(print_file.name), form.window)
+
 
 class LinuxTrust(unittest.TestCase):
     """The Linux verdict comes from pyhanko-certvalidator and the distribution's CA bundle; it runs anywhere one exists."""
@@ -661,7 +672,7 @@ class HostileFormDataFiles(unittest.TestCase):
         _, page = request("/?form=pdf-data-route", body=None)
         session = page.decode().split("const SESSION = '")[1].split("'")[0]
         data = pdf_form_data.write_xfdf({"jmeno": "Jan"}, "zadost.pdf").encode()
-        for path in ("/pdf-import-data", "/pdf-export-data"):
+        for path in ("/pdf-import-data", "/pdf-export-data", "/pdf-print-document"):
             with self.subTest(path=path):
                 self.assertEqual(request(path, data)[0], 404)
                 self.assertEqual(request(f"{path}?s={session}", data, origin="https://attacker.example")[0], 403)
@@ -671,6 +682,9 @@ class HostileFormDataFiles(unittest.TestCase):
         status, answer = request(f"/pdf-export-data?s={session}", json.dumps({"values": {"jmeno": "Jan"}}).encode())
         self.assertEqual(status, 200)
         self.assertIn("<value>Jan</value>", json.loads(answer)["contents"]["xfdf"])
+        status, answer = request(f"/pdf-print-document?s={session}", json.dumps({"values": {"jmeno": "Jan"}}).encode())
+        self.assertEqual((status, PdfReader(io.BytesIO(answer)).get_fields()["jmeno"]["/V"]), (200, "Jan"))
+        self.assertEqual(request(f"/pdf-print-document?s={session}", b"{")[0], 400)
 
 
 if __name__ == "__main__":

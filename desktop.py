@@ -35,6 +35,22 @@ def open_with_system(path):
         subprocess.Popen(["xdg-open", str(path)])
 
 
+def print_pdf_file(path, window):
+    if IS_WINDOWS:
+        open_with_system(path)
+        return
+    import linux_print
+    linux_print.run_on_gui_thread(lambda: show_print_preview_or_open(path, window))
+
+
+def show_print_preview_or_open(path, window):
+    import linux_print
+    try:
+        linux_print.show_print_preview(path, window.title, window.native)
+    except Exception:  # whatever breaks the preview, the system viewer still prints the file
+        open_with_system(path)
+
+
 def reveal_in_file_manager(path):
     if IS_WINDOWS:
         subprocess.Popen(["explorer", "/select,", str(path)])
@@ -95,7 +111,7 @@ class Bridge:
         elif action == "reveal":
             reveal_in_file_manager(Path(msg["path"]))
         elif action == "printPdf" and is_print_file(msg["path"]):
-            open_with_system(msg["path"])
+            print_pdf_file(Path(msg["path"]), window)
         elif action == "openUrl" and str(msg.get("url", "")).startswith(("https://", "http://")):
             webbrowser.open(msg["url"])
         elif action == "saveFile":
