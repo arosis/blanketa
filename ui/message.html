@@ -127,7 +127,7 @@ __SHELL_STYLE__
   let fileView = null;
   if (MESSAGE.kind !== 'receipt') {
     const attachments = MESSAGE.attachments;
-    const isPdf = attachment => attachment.mime === 'application/pdf' || /\.pdf$/i.test(attachment.name);
+    const isPdf = attachment => String(attachment.mime).toLowerCase() === 'application/pdf' || /\.pdf$/i.test(attachment.name);
     const initial = [attachments.findIndex(attachment => attachment.main), attachments.findIndex(isPdf), 0].find(index => index >= 0);
     queryOne('[data-attachments]').hidden = false;
     queryOne('[data-attachments-title]').textContent = `Přílohy (${attachments.length})`;

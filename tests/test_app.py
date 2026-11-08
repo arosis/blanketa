@@ -1064,6 +1064,23 @@ class RadioButtonsInSectionCopies(unittest.TestCase):
 
 
 @unittest.skipUnless(shutil.which("node"), "needs Node.js; CI runners have it")
+class SavedFileNames(unittest.TestCase):
+    """Runs plainName from ui/files.js: a name the hosts refuse would drop the whole save request silently."""
+
+    def test_every_name_becomes_one_the_hosts_accept(self):
+        names = ["smlouva: v2.pdf", "složka/příloha.pdf", "a:b.pdf", "C:\\dokumenty\\x.pdf", "slozka/", ".", "..", "a/..",
+                 "", "x\x00y.txt", "tab\tname.txt", "obyčejný název.pdf"]
+        source = (ROOT / "ui/files.js").read_text(encoding="utf-8")
+        block = re.search(r"  const plainName = .*?\n  \};", source, re.S).group(0)
+        script = f"{block}\nconsole.log(JSON.stringify(JSON.parse(process.argv[1]).map(plainName)));"
+        out = subprocess.run(["node", "-e", script, "--", json.dumps(names)], capture_output=True, text=True, check=True).stdout
+        plain = json.loads(out)
+        self.assertTrue(all(desktop.is_plain_file_name(name) for name in plain), plain)
+        self.assertEqual(plain[:6], ["smlouva_ v2.pdf", "příloha.pdf", "a_b.pdf", "x.pdf", "soubor", "soubor"])
+        self.assertEqual(plain[-1], "obyčejný název.pdf")
+
+
+@unittest.skipUnless(shutil.which("node"), "needs Node.js; CI runners have it")
 class RevocationVerdict(unittest.TestCase):
     """Runs the decision in ui/bridge.js: the certificate below was revoked on 1 June."""
     BEFORE, AFTER = "2026-01-01T00:00:00+00:00", "2026-09-01T00:00:00+00:00"

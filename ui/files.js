@@ -60,8 +60,11 @@ window.zfoFiles = (() => {
   const formatSize = bytes => bytes < 1024 ? `${bytes} B`
     : bytes < 1024 * 1024 ? `${(bytes / 1024).toLocaleString('cs-CZ', {maximumFractionDigits: 1})} kB`
     : `${(bytes / 1024 / 1024).toLocaleString('cs-CZ', {maximumFractionDigits: 1})} MB`;
-  // The hosts accept plain names only; an entry inside a folder of the container is saved under its own name.
-  const plainName = name => name.split('/').pop();
+  // The hosts drop the whole request for a name with a path, a colon or NUL: the file is saved under its last segment.
+  const plainName = name => {
+    const plain = name.split(/[\\/]/).pop().replace(/[:\x00-\x1f\x7f]/g, '_');
+    return ['', '.', '..'].includes(plain) ? 'soubor' : plain;
+  };
   const opensInBlanketa = name => /\.(pdf|zfo)$/i.test(name);
   const fragment = html => {
     const template = document.createElement('template');
