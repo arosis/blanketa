@@ -30,3 +30,6 @@ dist/
 
 # test coverage data
 .coverage
+
+# design notes and implementation plans of Claude sessions: working files only, decisions go to the PR description
+docs/superpowers/
