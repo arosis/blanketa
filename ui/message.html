@@ -149,6 +149,7 @@ __SHELL_STYLE__
     reveal.addEventListener('click', () => native.postMessage({action: 'reveal', path}));
     status.append(reveal);
   };
+  window.zfoAttachmentFailed = reason => { status.textContent = `Přílohu se nepodařilo uložit: ${reason}`; };
   if (MESSAGE.kind !== 'receipt') {
     queryOne('[data-attachments]').hidden = false;
     queryOne('[data-attachments-title]').textContent = `Přílohy (${MESSAGE.attachments.length})`;

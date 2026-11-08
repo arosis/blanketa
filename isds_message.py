@@ -19,9 +19,12 @@ KINDS = {"message": "received", "SentMessage": "sent", "delivery": "receipt"}
 BODIES = {"received": "dmReturnedMessage", "sent": "dmReturnedMessage", "receipt": "dmDelivery"}
 WINDOWS_RESERVED_STEMS = {"CON", "PRN", "AUX", "NUL", *(f"COM{n}" for n in range(1, 10)), *(f"LPT{n}" for n in range(1, 10))}
 MAX_FILE_NAME = 200
+# "C:x" is relative to drive C: whatever folder it is joined to, "a:b" names an NTFS stream.
+WINDOWS_FORBIDDEN_CHARACTERS = re.compile(r'[:<>"|?*]')
 SIGNATURE_TIME_STAMP_TOKEN_OID = "1.2.840.113549.1.9.16.2.14"
-# IČO of the ISDS operator: Digitální a informační agentura, before it Ministerstvo vnitra.
-ISDS_OPERATOR_IDS = ("17651921", "00007064")
+DIGITAL_AND_INFORMATION_AGENCY_ID = "NTRCZ-17651921"
+INTERIOR_MINISTRY_ID = "NTRCZ-00007064"
+ISDS_OPERATOR_IDS = (DIGITAL_AND_INFORMATION_AGENCY_ID, INTERIOR_MINISTRY_ID)
 XML_PARSER = etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False, huge_tree=True)
 
 
@@ -135,12 +138,12 @@ def read_message(data):
 def _safe_file_name(name, number):
     name = re.split(r"[/\\]", name)[-1]
     name = "".join(character for character in name if not unicodedata.category(character).startswith("C"))
-    name = name.lstrip(".").rstrip(". ")
+    name = WINDOWS_FORBIDDEN_CHARACTERS.sub("_", name).lstrip(".").rstrip(". ")
     if not name:
         return f"priloha-{number}"
     stem, dot, extension = name.rpartition(".") if "." in name else (name, "", "")
-    if stem.upper() in WINDOWS_RESERVED_STEMS:
-        name, stem = "_" + name, "_" + stem
+    if name.split(".")[0].rstrip(" ").upper() in WINDOWS_RESERVED_STEMS:
+        name = "_" + name
     if len(name) > MAX_FILE_NAME:
         tail = dot + extension if len(extension) < 20 else ""
         name = name[:MAX_FILE_NAME - len(tail)] + tail if tail else name[:MAX_FILE_NAME]
@@ -167,10 +170,9 @@ def _display_name(name):
 
 
 def is_isds_operator(certificate):
+    # A seal of the operator, not any certificate of its staff: a person's certificate names the person.
     subject = certificate.subject.native
-    identifiers = [str(subject.get(key) or "") for key in ("organization_identifier", "serial_number", "organization_name")]
-    return any(identifier.endswith(operator_id) or f"IČ {operator_id}" in identifier or f"IČO {operator_id}" in identifier
-               for identifier in identifiers for operator_id in ISDS_OPERATOR_IDS)
+    return subject.get("organization_identifier") in ISDS_OPERATOR_IDS and not subject.keys() & {"given_name", "surname"}
 
 
 def _content_digest(message):

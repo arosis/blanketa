@@ -192,11 +192,11 @@ def render_message_page(name):
     message = isds_message.read_message(form_path(name).read_bytes())
     signatures = add_trust_verdicts([isds_message.describe_seal(message)])
     session = new_session({"name": name, "message": message})
-    return (MESSAGE_PAGE.replace("__SESSION__", session)
-            .replace("__FILE__", json_for_script(form_path(name).name))
-            .replace("__MESSAGE__", json_for_script(message.info))
-            .replace("__SIGNATURES__", json_for_script(signatures))
-            .replace("__SUBMITTED__", json_for_script(isds_message.submission_stamp(message))))
+    values = {"__SESSION__": session, "__FILE__": json_for_script(form_path(name).name),
+              "__MESSAGE__": json_for_script(message.info), "__SIGNATURES__": json_for_script(signatures),
+              "__SUBMITTED__": json_for_script(isds_message.submission_stamp(message))}
+    # One pass: a placeholder name inside the message's own text must stay text.
+    return re.sub("|".join(values), lambda match: values[match.group(0)], MESSAGE_PAGE)
 
 
 def save_pdf(session, values, identity_id=None, placement=None, password=None):

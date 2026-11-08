@@ -51,7 +51,7 @@ def attachment_url_is_allowed(url):
 
 
 def is_plain_file_name(name):
-    return isinstance(name, str) and name not in ("", ".", "..") and not any(character in name for character in "/\\\0")
+    return isinstance(name, str) and name not in ("", ".", "..") and not any(character in name for character in "/\\:\0")
 
 
 def free_target(folder, name):
@@ -123,20 +123,27 @@ class Bridge:
                 for file in files):
             return
         server = self._form.home.rstrip("/")
-        if request.get("folder"):
+        try:
+            saved = self._save_downloads(window, server, files, request.get("folder"))
+        except OSError as error:
+            window.evaluate_js(f"window.zfoAttachmentFailed && zfoAttachmentFailed({json.dumps(str(error))})")
+            return
+        if saved is not None:
+            window.evaluate_js(f"window.zfoAttachmentSaved && zfoAttachmentSaved({json.dumps(str(saved))})")
+
+    def _save_downloads(self, window, server, files, into_folder):
+        if into_folder:
             chosen = window.create_file_dialog(self._app.webview.FileDialog.FOLDER)
             if not chosen:
-                return
+                return None
             folder = Path(chosen if isinstance(chosen, str) else chosen[0])
             for file in files:
                 write_downloaded(server + file["url"], free_target(folder, file["name"]))
-            saved = folder
-        else:
-            saved = self._ask_for_save_target(window, "", files[0]["name"], ())
-            if saved is None:
-                return
+            return folder
+        saved = self._ask_for_save_target(window, "", files[0]["name"], ())
+        if saved is not None:
             write_downloaded(server + files[0]["url"], saved)
-        window.evaluate_js(f"window.zfoAttachmentSaved && zfoAttachmentSaved({json.dumps(str(saved))})")
+        return saved
 
     def message(self, msg):
         action, window = msg.get("action"), self._form.window

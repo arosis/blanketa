@@ -266,6 +266,8 @@ class IsdsMessages(unittest.TestCase):
         self.assertEqual(isds_message.safe_file_names(["../../evil.txt", "C:\\x\\a.pdf", "CON.txt", ".bashrc", "a\u202egpj.exe",
                                                        "x\x00y", "", "A.pdf", "a.pdf"]),
                          ["evil.txt", "a.pdf", "_CON.txt", "bashrc", "agpj.exe", "xy", "priloha-7", "A (2).pdf", "a (3).pdf"])
+        self.assertEqual(isds_message.safe_file_names(["C:x.txt", 'a<b>c"d|e?f*g.txt', "CON.tar.gz", "nul .txt", "a:b"]),
+                         ["C_x.txt", "a_b_c_d_e_f_g.txt", "_CON.tar.gz", "_nul .txt", "a_b"])
         self.assertEqual(len(isds_message.safe_file_names(["a" * 300 + ".pdf"])[0]), 200)
         self.assertTrue(isds_message.safe_file_names(["a" * 300 + ".pdf"])[0].endswith(".pdf"))
 
@@ -299,6 +301,33 @@ class IsdsMessages(unittest.TestCase):
 
     def test_earlier_operator_counts_as_isds(self):
         self.assertTrue(isds_message.describe_seal(isds_message.read_message(isds_sample("vyprsela")))["isds_operator"])
+
+    def test_only_the_operators_own_seal_counts(self):
+        tool = isds_sample_tool()
+
+        def operator(*names):
+            cert, _ = tool.issue([(x509.NameOID.COUNTRY_NAME, "CZ"), *names], tool.CA, tool.CA_KEY)
+            return isds_message.is_isds_operator(tool.asn1_certificate(cert))
+
+        organization = (x509.NameOID.ORGANIZATION_NAME, "Digitální a informační agentura")
+        self.assertTrue(operator(organization, (x509.NameOID.ORGANIZATION_IDENTIFIER, "NTRCZ-17651921"),
+                                 (x509.NameOID.COMMON_NAME, "ISDS")))
+        self.assertTrue(operator((x509.NameOID.ORGANIZATION_IDENTIFIER, "NTRCZ-00007064"), (x509.NameOID.COMMON_NAME, "ISDS")))
+        self.assertFalse(operator(organization, (x509.NameOID.ORGANIZATION_IDENTIFIER, "NTRCZ-17651921"),
+                                  (x509.NameOID.GIVEN_NAME, "Jan"), (x509.NameOID.SURNAME, "Úředník"), (x509.NameOID.COMMON_NAME, "Jan Úředník")))
+        self.assertFalse(operator((x509.NameOID.ORGANIZATION_IDENTIFIER, "NTRCZ-117651921"), (x509.NameOID.COMMON_NAME, "ISDS")))
+        self.assertFalse(operator((x509.NameOID.SERIAL_NUMBER, "P100007064"), (x509.NameOID.COMMON_NAME, "ISDS")))
+        self.assertFalse(operator((x509.NameOID.ORGANIZATION_NAME, "Firma IČO 00007064"), (x509.NameOID.COMMON_NAME, "ISDS")))
+
+    def test_message_text_cannot_fill_page_placeholders(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "zprava.zfo"
+            path.write_bytes(isds_sample_tool().build_message(subject="__SIGNATURES__ __SUBMITTED__ __SESSION__ __FILE__"))
+            with mock.patch.dict(app.FORMS, {"placeholders": path}):
+                page = app.render_message_page("placeholders")
+        message = json.loads(page.split("const MESSAGE = ")[1].split(";\n")[0])
+        self.assertEqual(message["subject"], "__SIGNATURES__ __SUBMITTED__ __SESSION__ __FILE__")
+        self.assertEqual(json.loads(page.split("let signatures = ")[1].split(";\n")[0])[0]["subject"], "ISDS TEST")
 
     def test_receipt_has_no_stamp(self):
         self.assertEqual(isds_message.describe_seal(isds_message.read_message(isds_sample("dorucenka")))["stamps"], [])
@@ -1357,7 +1386,7 @@ class DesktopAttachmentSaving(unittest.TestCase):
         (self.folder / "a (2).pdf").write_bytes(b"2")
         self.assertEqual(desktop.free_target(self.folder, "a.pdf"), self.folder / "a (3).pdf")
         self.assertEqual(desktop.free_target(self.folder, "b"), self.folder / "b")
-        for name in ("..", ".", "a/b", "a\\b", "a\x00b", ""):
+        for name in ("..", ".", "a/b", "a\\b", "a\x00b", "", "C:x.txt"):
             with self.subTest(name=name), self.assertRaises(ValueError):
                 desktop.free_target(self.folder, name)
 
@@ -1376,6 +1405,11 @@ class DesktopAttachmentSaving(unittest.TestCase):
         self.assertEqual(sorted(path.name for path in self.folder.iterdir()), ["data (2).xml", "data.xml", "evil.txt", "rozhodnuti.pdf"])
         self.assertEqual((self.folder / "data.xml").read_bytes(), b"older")
         self.window.evaluate_js.assert_called_with(f"window.zfoAttachmentSaved && zfoAttachmentSaved({json.dumps(str(self.folder))})")
+
+    def test_desktop_reports_a_failed_save_on_the_page(self):
+        self.window.create_file_dialog.return_value = str(self.folder / "chybi" / "x.pdf")
+        self.bridge.message({"action": "saveAttachment", "files": self.files(0), "folder": False})
+        self.assertIn("zfoAttachmentFailed", self.window.evaluate_js.call_args.args[0])
 
     def test_desktop_refuses_foreign_urls_and_names(self):
         self.window.create_file_dialog.return_value = (str(self.folder),)

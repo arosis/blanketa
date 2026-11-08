@@ -17,7 +17,7 @@ enum AttachmentRequest {
     }
 
     static func isPlainFileName(_ name: String) -> Bool {
-        !["", ".", ".."].contains(name) && !name.contains("/") && !name.contains("\\") && !name.contains("\0")
+        !["", ".", ".."].contains(name) && !name.contains("/") && !name.contains("\\") && !name.contains(":") && !name.contains("\0")
     }
 
     static func freeTarget(in folder: URL, name: String) -> URL {
