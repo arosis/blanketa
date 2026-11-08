@@ -711,7 +711,7 @@ class Handler(BaseHTTPRequestHandler):
         session = SESSIONS.get(first_query_value(url.query, "s"))
         if session is None:
             return self._send_response(404, "Relace vypršela, načti formulář znovu".encode(), PLAIN_TEXT_UTF8)
-        if "message" in session and url.path != "/revocation":
+        if ("message" in session or "entries" in session) and url.path != "/revocation":
             return self._send_not_found()
         if url.path == "/add-certificate":
             return self._add_certificate()

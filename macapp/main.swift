@@ -9,7 +9,7 @@ enum AttachmentRequest {
         guard let list = value as? [[String: Any]], !list.isEmpty else { return nil }
         let files = list.compactMap { item -> (url: String, name: String)? in
             guard let url = item["url"] as? String, let name = item["name"] as? String,
-                  url.range(of: #"^/(?:attachment|container-file)\?s=[A-Za-z0-9_-]+&i=[0-9]+$"#, options: .regularExpression) != nil,
+                  url.range(of: #"^/(?:attachment|container-file)\?s=[A-Za-z0-9_-]+&i=[0-9]+\z"#, options: .regularExpression) != nil,
                   isPlainFileName(name) else { return nil }
             return (url, name)
         }

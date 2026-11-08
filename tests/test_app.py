@@ -46,8 +46,9 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 os.environ["ZFO_OFFLINE"] = "1"  # tests never download trusted lists
 
-import app  # noqa: E402
 import asic_samples  # noqa: E402
+
+import app  # noqa: E402
 import barcode  # noqa: E402
 import desktop  # noqa: E402
 import isds_message  # noqa: E402
@@ -437,6 +438,19 @@ class ContainerPages(unittest.TestCase):
     def page_json(self, page, marker):
         return json.loads(re.search(rf"const {marker} = (.*);\n", page).group(1))
 
+    def post(self, path, body=b"[]"):
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=30)
+        connection.request("POST", path, body=body, headers={"Host": f"127.0.0.1:{self.port}"})
+        response = connection.getresponse()
+        return response.status, response.read()
+
+    def test_container_session_answers_only_revocation_posts(self):
+        _, session = self.render(self.signed())
+        self.assertEqual(self.post(f"/revocation?s={session}"), (200, b"{}"))
+        for path in ("/ipc", "/save", "/pdf-save", "/export-data"):
+            with self.subTest(path=path):
+                self.assertEqual(self.post(f"{path}?s={session}", b"{}")[0], 404)
+
     def render(self, data):
         self.open_container(data)
         page = app.render_container_page("container-test")
@@ -481,7 +495,9 @@ class ContainerPages(unittest.TestCase):
     def test_both_pages_use_the_shared_files_script(self):
         for page in ("container", "message"):
             self.assertIn('<script src="/files.js"></script>', (ROOT / f"ui/{page}.html").read_text(encoding="utf-8"), page)
-        self.assertNotRegex((ROOT / "ui/files.js").read_text(encoding="utf-8"), r"\} (B|kB|MB|%)`")
+        script = (ROOT / "ui/files.js").read_text(encoding="utf-8")
+        self.assertNotRegex(script, r"\} (B|kB|MB|%)`")
+        self.assertIn("Math.round(event.scale * 100) + '\u00a0%'", script)
 
     def test_non_pdf_entry_is_a_download_named_by_its_basename(self):
         files = {"složka/příloha č. 1.txt": b"text"}
@@ -1657,7 +1673,8 @@ class DesktopContainerFileSaving(DesktopAttachmentSaving):
     def test_container_file_url_rule(self):
         self.assertTrue(desktop.attachment_url_is_allowed("/container-file?s=Ab_c-9&i=12"))
         for url in ("/container-file?s=x&i=1&j=2", "//evil.example/container-file?s=x&i=1", "http://127.0.0.1/container-file?s=x&i=1",
-                    "/container-file?s=x&i=1#", "/container-file?s=x&i=-1", "/container-files?s=x&i=1"):
+                    "/container-file?s=x&i=1#", "/container-file?s=x&i=-1", "/container-files?s=x&i=1",
+                    "/container-file?s=x&i=\u0661", "/container-file?s=x&i=1\n"):
             with self.subTest(url=url):
                 self.assertFalse(desktop.attachment_url_is_allowed(url))
 
@@ -1686,12 +1703,15 @@ class DesktopContainerFileSaving(DesktopAttachmentSaving):
         self.bridge._app.open_window.assert_not_called()
 
     def test_open_dialog_offers_containers(self):
+        self.assertEqual(desktop.OPEN_DIALOG_FILE_TYPES,
+                         ("Podporované soubory (*.zfo;*.fo;*.pdf;*.asice;*.sce;*.asics;*.scs)", "Všechny soubory (*.*)"))
         first = desktop.OPEN_DIALOG_FILE_TYPES[0]
         for extension in ("zfo", "fo", "pdf", "asice", "sce", "asics", "scs"):
             self.assertIn(f"*.{extension}", first)
         main = (ROOT / "macapp/main.swift").read_text(encoding="utf-8")
         for extension in ("asice", "sce", "asics", "scs"):
             self.assertIn(f'"{extension}"', main)
+        self.assertIn('&i=[0-9]+\\z"#', main)
 
 
 class LinuxPdfPrinting(unittest.TestCase):

@@ -15,9 +15,9 @@ IS_WINDOWS = sys.platform == "win32"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 SERVER_START_ATTEMPTS = 300
 MAX_RECENT_FILES = 10
-ATTACHMENT_URL = re.compile(r"/(?:attachment|container-file)\?s=[A-Za-z0-9_-]+&i=\d+")
+ATTACHMENT_URL = re.compile(r"/(?:attachment|container-file)\?s=[A-Za-z0-9_-]+&i=\d+", re.ASCII)
 ATTACHMENT_DOWNLOAD_SECONDS = 120
-OPEN_DIALOG_FILE_TYPES = ("Formuláře PDF a kontejnery ASiC (*.zfo;*.fo;*.pdf;*.asice;*.sce;*.asics;*.scs)", "Všechny soubory (*.*)")
+OPEN_DIALOG_FILE_TYPES = ("Podporované soubory (*.zfo;*.fo;*.pdf;*.asice;*.sce;*.asics;*.scs)", "Všechny soubory (*.*)")
 
 
 def server_command(args):

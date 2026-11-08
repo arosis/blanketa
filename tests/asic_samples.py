@@ -1,9 +1,9 @@
 """Synthetic XAdES signatures and ASiC containers signed with the pki/ test identity (or throwaway keys)."""
+import asyncio
 import base64
 import copy
-import hashlib
-import asyncio
 import datetime
+import hashlib
 import io
 import zipfile
 from pathlib import Path

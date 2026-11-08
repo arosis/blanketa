@@ -34,7 +34,7 @@ window.zfoFiles = (() => {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 3h11l3 3v15H5z"/><path d="M8 3v5h7V3M8 21v-7h8v7"/></svg>Uložit soubor…
       </button>
       <button class="zfo-btn" data-file-action="save-all-files" hidden title="Uložit všechny soubory do zvolené složky">Uložit všechny…</button>
-      <button class="zfo-btn" data-file-action="open-copy" hidden title="Uložit kopii souboru a otevřít ji v novém okně">
+      <button class="zfo-btn" data-file-action="open-copy" hidden title="Uložit kopii souboru a otevřít ji v novém okně">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1H3z"/><path d="M3 10h18l-2 9H5z"/></svg>Otevřít v Blanketě
       </button>
     </div>

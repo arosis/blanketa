@@ -11,7 +11,7 @@ cat > "$DATA/applications/blanketa.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
 Name=Blanketa
-Comment=Vyplňování a podepisování formulářů ZFO (602XML) a PDF, prohlížení datových zpráv
+Comment=Vyplňování a podepisování formulářů ZFO (602XML) a PDF, prohlížení datových zpráv a kontejnerů ASiC
 Exec=$DATA/blanketa/Blanketa %F
 Icon=blanketa
 Terminal=false
