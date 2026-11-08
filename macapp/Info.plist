@@ -33,7 +33,7 @@
 			<key>UTTypeIdentifier</key>
 			<string>cz.software602.filler.form-xml-zip</string>
 			<key>UTTypeDescription</key>
-			<string>Formulář 602XML (ZFO)</string>
+			<string>Formulář 602XML nebo datová zpráva (ZFO)</string>
 			<key>UTTypeConformsTo</key>
 			<array>
 				<string>public.data</string>
@@ -72,7 +72,7 @@
 	<array>
 		<dict>
 			<key>CFBundleTypeName</key>
-			<string>Formulář 602XML (ZFO)</string>
+			<string>Formulář 602XML nebo datová zpráva (ZFO)</string>
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>LSHandlerRank</key>

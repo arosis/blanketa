@@ -8,6 +8,8 @@ Aplikace pro macOS, Windows a Linux (Ubuntu, Debian, Mint …) na vyplňování 
 - **formulářů 602XML (`.zfo` a `.fo`)**, které jinak otevře jen Software602 Form Filler pro Windows (např. ČÚZK návrh na vklad, formuláře ČSSZ a krajů);
 - **PDF formulářů (AcroForm)**.
 
+Otevře také datové zprávy a doručenky z datových schránek uložené jako `.zfo`, jen ke čtení.
+
 Podepisuje se certifikátem:
 
 | Systém | Odkud certifikát |
@@ -68,6 +70,15 @@ Windows potřebují Microsoft Edge WebView2 (Windows 10/11 ho mají; instalátor
 - Panel podpisů: totéž co u ZFO a navíc časová razítka (viz [Časová razítka](#časová-razítka)).
 - Tisk vyplněného souboru v plné kvalitě.
 
+**Datové zprávy a doručenky (ZFO z datových schránek)**
+- Odesílatel, příjemce, věc, čísla jednací, data dodání a doručení, stav; u doručenky seznam událostí.
+- Přílohy jde uložit jednotlivě nebo všechny do složky; Blanketa je sama neotevírá.
+- Pečeť ISDS: neporušenost, důvěryhodnost certifikátu, zda nebyl zrušen, časové razítko. Zpráva zapečetěná někým jiným
+  než provozovatelem ISDS se zobrazí s výrazným upozorněním.
+- Zprávu nejde upravit ani znovu podepsat. Blanketa pozná zprávu podle obsahu, ne podle přípony.
+- Formát podle Provozního řádu ISDS, příloha „WS manipulace s datovými zprávami“
+  ([datovka.gov.cz](https://datovka.gov.cz/info/cs/80.html)).
+
 Technický popis formátu ZFO: [docs/zfo-format.md](docs/zfo-format.md).
 
 ## Architektura
@@ -98,6 +109,7 @@ Stránky jsou na všech systémech stejné; s aplikací kolem sebe mluví přes 
 | `certstore.py` | podpisové identity na všech systémech: klíčenka (`keychain.py` + `macsign`), úložiště Windows (`winsign.ps1`), soubory `.pfx`; důvěryhodnost certifikátů podle systému |
 | `trustlist.py`, `revocation.py` | důvěryhodné seznamy EU a seznamy zrušených certifikátů |
 | `desktop.py` | okna aplikace pro Windows a Linux |
+| `linux_print.py` | náhled tisku PDF na Linuxu (PDFium) |
 | `ui/bridge.js` | spojení stránek s aplikací (macOS / Windows a Linux / prohlížeč), sdílený výběr certifikátu |
 
 ## Sestavení
@@ -187,7 +199,6 @@ Kontrola podpisu bez okna (používá ji i CI):
 - PDF formuláře XFA nejsou podporované; Blanketa na ně při otevření upozorní.
 - Aplikace není notarizovaná (macOS) ani podepsaná certifikátem vydavatele (Windows SmartScreen ji při prvním spuštění může varovat).
 - Tokeny přes PKCS#11 zatím nejsou podporované (jen soubory `.pfx`).
-- Na Windows a Linuxu se PDF tiskne přes výchozí prohlížeč PDF v systému.
 
 ## Důvěryhodnost podpisů
 

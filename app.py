@@ -22,6 +22,7 @@ from lxml import etree
 import asic_verify
 import barcode
 import certstore
+import isds_message
 import pdf_form_data
 import pdf_sign
 import zfo_sign
@@ -62,10 +63,10 @@ PDFJS_CONTENT_TYPES = {".mjs": "text/javascript", ".js": "text/javascript", ".cs
                        ".png": "image/png"}
 
 SHELL = (RESOURCES / "ui/shell.html").read_text(encoding="utf-8")
-PDF_PAGE = (RESOURCES / "ui/pdf.html").read_text(encoding="utf-8").replace(
-    "__SHELL_STYLE__", re.search(r"<style>.*?</style>", SHELL, re.S).group(0).replace("__FONTS__", ""))
-CONTAINER_PAGE = (RESOURCES / "ui/container.html").read_text(encoding="utf-8").replace(
-    "__SHELL_STYLE__", re.search(r"<style>.*?</style>", SHELL, re.S).group(0).replace("__FONTS__", ""))
+SHELL_STYLE = re.search(r"<style>.*?</style>", SHELL, re.S).group(0).replace("__FONTS__", "")
+PDF_PAGE = (RESOURCES / "ui/pdf.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
+MESSAGE_PAGE = (RESOURCES / "ui/message.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
+CONTAINER_PAGE = (RESOURCES / "ui/container.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
 
 
 def json_for_script(value):
@@ -205,9 +206,25 @@ def render_container_page(name):
     return re.sub(r"__(SESSION|FILE|CONTAINER|FOLDER)__", lambda marker: values[marker.group(1)], CONTAINER_PAGE)
 
 
+def file_start(path):
+    with open(path, "rb") as file:
+        return file.read(1)
+
+
+def render_message_page(name):
+    message = isds_message.read_message(form_path(name).read_bytes())
+    signatures = add_trust_verdicts([isds_message.describe_seal(message)])
+    session = new_session({"name": name, "message": message})
+    values = {"__SESSION__": session, "__FILE__": json_for_script(form_path(name).name),
+              "__MESSAGE__": json_for_script(message.info), "__SIGNATURES__": json_for_script(signatures),
+              "__SUBMITTED__": json_for_script(isds_message.submission_stamp(message))}
+    # One pass: a placeholder name inside the message's own text must stay text.
+    return re.sub("|".join(values), lambda match: values[match.group(0)], MESSAGE_PAGE)
+
+
 def save_pdf(session, values, identity_id=None, placement=None, password=None):
     name = session["name"]
-    pdf = pdf_sign.fill_form_fields(session["pdf"], values) if values else session["pdf"]
+    pdf = filled_pdf(session, values)
     if identity_id:
         pdf = pdf_sign.sign_pdf(pdf, *certstore.load_identity(identity_id, password), placement=placement)
         target = output_path(name)
@@ -220,8 +237,12 @@ def save_pdf(session, values, identity_id=None, placement=None, password=None):
     return {"saved": str(target), "signatures": pdf_signatures(pdf), "signature_field": pdf_sign.empty_signature_field(pdf)}
 
 
+def filled_pdf(session, values):
+    return pdf_sign.fill_form_fields(session["pdf"], values) if values else session["pdf"]
+
+
 def write_pdf_for_printing(session, values):
-    pdf = pdf_sign.fill_form_fields(session["pdf"], values) if values else session["pdf"]
+    pdf = filled_pdf(session, values)
     target = Path(tempfile.gettempdir()) / f"zfo-tisk-{secrets.token_hex(4)}-{form_path(session['name']).name}"
     target.write_bytes(pdf)
     return {"path": str(target)}
@@ -236,7 +257,7 @@ def data_file_stem(session):
 
 
 def export_pdf_data(session, values):
-    pdf = pdf_sign.fill_form_fields(session["pdf"], values) if values else session["pdf"]
+    pdf = filled_pdf(session, values)
     current = pdf_form_data.form_data_values(pdf)
     pdf_name = form_path(session["name"]).name
     return {"name": f"{data_file_stem(session)}-data.xfdf", "folder": data_file_folder(session),
@@ -547,6 +568,25 @@ class Handler(BaseHTTPRequestHandler):
         return self._send_response(200, content, "application/octet-stream",
                                    {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(entry_name.rsplit('/', 1)[-1])}"})
 
+    def _serve_attachment(self, query):
+        session = SESSIONS.get(first_query_value(query, "s"))
+        index = first_query_value(query, "i")
+        if session is None or "message" not in session or not (index.isascii() and index.isdecimal()):
+            return self._send_not_found()
+        message = session["message"]
+        if int(index) >= len(message.attachments):
+            return self._send_not_found()
+        name = message.info["attachments"][int(index)]["name"]
+        body = message.attachments[int(index)]
+        self.send_response(200)
+        # Never rendered by the app window: a hostile attachment must not run as a page of the local server.
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Content-Disposition", f"attachment; filename*=UTF-8''{quote(name, safe='')}")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def _serve_form_list(self):
         links = "".join(f'<li><a href="/?form={quote(name)}">{name}</a></li>' for name in sorted(FORMS))
         self._send_response(200, f"<meta charset=utf-8><h1>Formuláře</h1><ul>{links}</ul>".encode(), HTML_UTF8)
@@ -555,6 +595,8 @@ class Handler(BaseHTTPRequestHandler):
         path = form_path(name)
         if path.suffix.lower() == ".pdf":
             return render_pdf_page(name)
+        if isds_message.looks_like_message(file_start(path)):
+            return render_message_page(name)
         if asic_verify.is_signed_file(path.read_bytes()):
             return render_container_page(name)
         return render_zfo_page(name, first_query_value(query, "blank") == "1", data)
@@ -585,6 +627,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_session_pdf(url.query)
         if url.path == "/container-file":
             return self._serve_container_file(url.query)
+        if url.path == "/attachment":
+            return self._serve_attachment(url.query)
         if url.path == "/identities":
             return self._send_json(certstore.signing_identities())
         name = first_query_value(url.query, "form", None)
@@ -635,6 +679,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_error_message(error)
         return self._send_json(result)
 
+    def _send_pdf_for_printing(self, session, body):
+        try:
+            pdf = filled_pdf(session, json.loads(body or b"{}").get("values") or {})
+        except (LookupError, ValueError) as error:
+            return self._send_error_message(error)
+        return self._send_response(200, pdf, "application/pdf")
+
     def _export_or_import_data(self, session, path, body):
         try:
             result = export_data(session) if path == "/export-data" else import_data(session, body)
@@ -657,6 +708,8 @@ class Handler(BaseHTTPRequestHandler):
         session = SESSIONS.get(first_query_value(url.query, "s"))
         if session is None:
             return self._send_response(404, "Relace vypršela, načti formulář znovu".encode(), PLAIN_TEXT_UTF8)
+        if "message" in session and url.path != "/revocation":
+            return self._send_not_found()
         if url.path == "/add-certificate":
             return self._add_certificate()
         body = self._read_body()
@@ -669,6 +722,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._save_zfo(session, url.query, body)
             if url.path in ("/pdf-save", "/pdf-print"):
                 return self._save_or_print_pdf(session, url, body)
+            if url.path == "/pdf-print-document":
+                return self._send_pdf_for_printing(session, body)
             if url.path in ("/export-data", "/import-data"):
                 return self._export_or_import_data(session, url.path, body)
             if url.path in ("/pdf-export-data", "/pdf-import-data"):

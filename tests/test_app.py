@@ -2,8 +2,10 @@
 
     python -I tests/test_app.py
 """
+import base64
 import copy
 import http.client
+import importlib.util
 import io
 import json
 import os
@@ -22,6 +24,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
+from asn1crypto import cms
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -47,6 +50,8 @@ import app  # noqa: E402
 import asic_samples  # noqa: E402
 import barcode  # noqa: E402
 import desktop  # noqa: E402
+import isds_message  # noqa: E402
+import linux_print  # noqa: E402
 import pdf_form_data  # noqa: E402
 import pdf_sign  # noqa: E402
 import zfo_verify  # noqa: E402
@@ -210,6 +215,168 @@ class PlainFoForms(unittest.TestCase):
         self.assertFalse(zipfile.is_zipfile(xml_named_zfo))
 
 
+
+ISDS_SAMPLES = ROOT / "samples-isds"
+
+
+def isds_sample_tool():
+    if not hasattr(isds_sample_tool, "module"):
+        spec = importlib.util.spec_from_file_location("make_isds_samples", ROOT / "tools/make-isds-samples.py")
+        isds_sample_tool.module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(isds_sample_tool.module)
+    return isds_sample_tool.module
+
+
+def isds_sample(name):
+    return (ISDS_SAMPLES / f"{name}.zfo").read_bytes()
+
+
+class IsdsMessages(unittest.TestCase):
+    def test_received_message_fields(self):
+        message = isds_message.read_message(isds_sample("prijata"))
+        info = message.info
+        self.assertEqual((message.kind, info["kind"]), ("received", "received"))
+        self.assertEqual(info["id"], "1234567")
+        self.assertEqual(info["subject"], "Rozhodnutí ve věci TEST")
+        self.assertEqual(info["sender"], {"name": "Úřad TEST", "address": "Testovací 1, 110 00 Praha 1", "box": "abc12de"})
+        self.assertEqual(info["recipient"], {"name": "Firma TEST s.r.o.", "address": "Zkušební 2, 602 00 Brno", "box": "xyz34fg"})
+        self.assertEqual((info["to_hands"], info["sender_ref"], info["sender_ident"], info["recipient_ref"], info["recipient_ident"]),
+                         ("Jan Testovací", "MV-TEST-456/2026", "SZ-TEST-1", "TEST-123/2026", "SZ-TEST-9"))
+        self.assertTrue(info["personal_delivery"])
+        self.assertFalse(info["suspicious"])
+        self.assertEqual((info["delivered"], info["accepted"], info["status"]),
+                         ("2026-03-02T10:30:05.123+01:00", "2026-03-03T08:12:40.456+01:00", 6))
+        self.assertEqual([(item["name"], item["mime"], item["main"]) for item in info["attachments"]],
+                         [("rozhodnuti.pdf", "application/pdf", True), ("data.xml", "text/xml", False),
+                          ("evil.txt", "text/plain", False)])
+        self.assertEqual(message.attachments[0], b"%PDF-1.4\n% TEST priloha\n")
+        self.assertEqual(etree.fromstring(message.attachments[1]).findtext("{urn:test}polozka"), "1")
+        self.assertEqual([item["size"] for item in info["attachments"]], [len(content) for content in message.attachments])
+        self.assertEqual(info["events"], [])
+
+    def test_sent_message_and_receipt_kinds(self):
+        self.assertEqual(isds_message.read_message(isds_sample("odeslana")).kind, "sent")
+        receipt = isds_message.read_message(isds_sample("dorucenka"))
+        self.assertEqual(receipt.kind, "receipt")
+        self.assertEqual(receipt.info["attachments"], [])
+        self.assertEqual(receipt.info["events"][1], {"time": "2026-03-02T10:30:05.000+01:00",
+                                                     "description": "EV5: Zpráva byla dodána do schránky příjemce."})
+        self.assertEqual(len(receipt.info["events"]), 3)
+
+    def test_ber_indefinite_length_opens(self):
+        self.assertEqual(isds_message.read_message(isds_sample("prijata-ber")).info,
+                         isds_message.read_message(isds_sample("prijata")).info)
+
+    def test_safe_file_names(self):
+        self.assertEqual(isds_message.safe_file_names(["../../evil.txt", "C:\\x\\a.pdf", "CON.txt", ".bashrc", "a\u202egpj.exe",
+                                                       "x\x00y", "", "A.pdf", "a.pdf"]),
+                         ["evil.txt", "a.pdf", "_CON.txt", "bashrc", "agpj.exe", "xy", "priloha-7", "A (2).pdf", "a (3).pdf"])
+        self.assertEqual(isds_message.safe_file_names(["C:x.txt", 'a<b>c"d|e?f*g.txt', "CON.tar.gz", "nul .txt", "a:b"]),
+                         ["C_x.txt", "a_b_c_d_e_f_g.txt", "_CON.tar.gz", "_nul .txt", "a_b"])
+        self.assertEqual(len(isds_message.safe_file_names(["a" * 300 + ".pdf"])[0]), 200)
+        self.assertTrue(isds_message.safe_file_names(["a" * 300 + ".pdf"])[0].endswith(".pdf"))
+
+    def test_not_a_message(self):
+        tool = isds_sample_tool()
+        doctype = b'<?xml version="1.0"?><!DOCTYPE q [<!ENTITY e "x">]><q:MessageDownloadResponse xmlns:q="http://isds.czechpoint.cz/v20/message"/>'
+        for data in (zfo_verify.read_form_fo(ROOT / "samples/cuzk/form.zfo"), tool.build_message(xml=b"<x/>"),
+                     tool.build_message(xml=doctype), b"\x30\x80"):
+            with self.subTest(data=data[:20]), self.assertRaises(ValueError):
+                isds_message.read_message(data)
+
+    def test_intact_seal_with_stamp(self):
+        seal = isds_message.describe_seal(isds_message.read_message(isds_sample("prijata")))
+        self.assertTrue(seal["intact"])
+        self.assertTrue(seal["isds_operator"])
+        self.assertEqual(seal["subject"], "ISDS TEST")
+        self.assertEqual(seal["issuer"], "Blanketa TEST CA")
+        self.assertEqual([(stamp["kind"], stamp["intact"], stamp["at"]) for stamp in seal["stamps"]],
+                         [("signature", True, "2026-03-02T09:30:00+00:00")])
+        self.assertEqual((seal["publisher"], seal["modified"], seal["changes_unchecked"], seal["covers_whole"]), (False, False, False, True))
+        self.assertEqual(x509.load_der_x509_certificate(seal["der"]).subject.rfc4514_string().count("ISDS TEST"), 1)
+
+    def test_tampered_content_breaks_the_seal(self):
+        self.assertFalse(isds_message.describe_seal(isds_message.read_message(isds_sample("pozmenena")))["intact"])
+
+    def test_foreign_signer_is_flagged(self):
+        seal = isds_message.describe_seal(isds_message.read_message(isds_sample("cizi-pecet")))
+        self.assertTrue(seal["intact"])
+        self.assertFalse(seal["isds_operator"])
+        self.assertEqual(seal["subject"], "Někdo jiný TEST")
+
+    def test_earlier_operator_counts_as_isds(self):
+        self.assertTrue(isds_message.describe_seal(isds_message.read_message(isds_sample("vyprsela")))["isds_operator"])
+
+    def test_only_the_operators_own_seal_counts(self):
+        tool = isds_sample_tool()
+
+        def operator(*names):
+            cert, _ = tool.issue([(x509.NameOID.COUNTRY_NAME, "CZ"), *names], tool.CA, tool.CA_KEY)
+            return isds_message.is_isds_operator(tool.asn1_certificate(cert))
+
+        organization = (x509.NameOID.ORGANIZATION_NAME, "Digitální a informační agentura")
+        self.assertTrue(operator(organization, (x509.NameOID.ORGANIZATION_IDENTIFIER, "NTRCZ-17651921"),
+                                 (x509.NameOID.COMMON_NAME, "ISDS")))
+        self.assertTrue(operator((x509.NameOID.ORGANIZATION_IDENTIFIER, "NTRCZ-00007064"), (x509.NameOID.COMMON_NAME, "ISDS")))
+        self.assertFalse(operator(organization, (x509.NameOID.ORGANIZATION_IDENTIFIER, "NTRCZ-17651921"),
+                                  (x509.NameOID.GIVEN_NAME, "Jan"), (x509.NameOID.SURNAME, "Úředník"), (x509.NameOID.COMMON_NAME, "Jan Úředník")))
+        self.assertFalse(operator((x509.NameOID.ORGANIZATION_IDENTIFIER, "NTRCZ-117651921"), (x509.NameOID.COMMON_NAME, "ISDS")))
+        self.assertFalse(operator((x509.NameOID.SERIAL_NUMBER, "P100007064"), (x509.NameOID.COMMON_NAME, "ISDS")))
+        self.assertFalse(operator((x509.NameOID.ORGANIZATION_NAME, "Firma IČO 00007064"), (x509.NameOID.COMMON_NAME, "ISDS")))
+
+    def test_message_text_cannot_fill_page_placeholders(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "zprava.zfo"
+            path.write_bytes(isds_sample_tool().build_message(subject="__SIGNATURES__ __SUBMITTED__ __SESSION__ __FILE__"))
+            with mock.patch.dict(app.FORMS, {"placeholders": path}):
+                page = app.render_message_page("placeholders")
+        message = json.loads(page.split("const MESSAGE = ")[1].split(";\n")[0])
+        self.assertEqual(message["subject"], "__SIGNATURES__ __SUBMITTED__ __SESSION__ __FILE__")
+        self.assertEqual(json.loads(page.split("let signatures = ")[1].split(";\n")[0])[0]["subject"], "ISDS TEST")
+
+    def test_receipt_has_no_stamp(self):
+        self.assertEqual(isds_message.describe_seal(isds_message.read_message(isds_sample("dorucenka")))["stamps"], [])
+
+    def test_submission_stamp_matches_hash(self):
+        message = isds_message.read_message(isds_sample("prijata"))
+        stamp = isds_message.submission_stamp(message)
+        self.assertEqual((stamp["at"], stamp["issuer"], stamp["matches"]), ("2026-03-02T09:30:00+00:00", "Blanketa TEST TSA", True))
+        message.xml_root.xpath("//*[local-name()='dmHash']")[0].text = base64.b64encode(b"x" * 32).decode()
+        self.assertFalse(isds_message.submission_stamp(message)["matches"])
+
+    def test_damaged_stamp_is_not_proof(self):
+        info = cms.ContentInfo.load(isds_sample("prijata"))
+        token = info["content"]["signer_infos"][0]["unsigned_attrs"][0]["values"][0]
+        stamp_signer = token["content"]["signer_infos"][0]
+        signature = bytearray(stamp_signer["signature"].native)
+        signature[10] ^= 0xFF
+        stamp_signer["signature"] = bytes(signature)
+        seal = isds_message.describe_seal(isds_message.read_message(info.dump(force=True)))
+        self.assertTrue(seal["intact"])
+        self.assertFalse(seal["stamps"][0]["intact"])
+
+    def test_unusual_status_is_left_out(self):
+        for status in ("²", "٣", "x"):
+            with self.subTest(status=status):
+                message = isds_message.read_message(isds_sample_tool().build_message(status=status))
+                self.assertIsNone(message.info["status"])
+
+    def test_message_page_answers_form_menu_commands(self):
+        with mock.patch.dict(app.FORMS, {"prijata": ISDS_SAMPLES / "prijata.zfo"}):
+            page = app.render_message_page("prijata")
+        fallback = re.search(r"window\.zfoAction = name => \(actions\[name\] \?\? (\w+)\)", page).group(1)
+        self.assertIn("Datová zpráva je jen ke čtení", page.split(f"const {fallback} = ")[1].split("\n")[0])
+
+    def test_message_page_keeps_czech_typography(self):
+        page = (ROOT / "ui/message.html").read_text(encoding="utf-8")
+        self.assertNotIn("razítka v pečetěném", page)
+        self.assertNotRegex(page, r"\} (B|kB|MB)`")
+
+    def test_message_files_are_recognised_by_their_first_byte(self):
+        self.assertTrue(isds_message.looks_like_message(isds_sample("prijata-ber")))
+        self.assertFalse(isds_message.looks_like_message(b"PK\x03\x04"))
+
+
 # Copied from webview.util.parse_file_type: pywebview raises ValueError on anything else, and the tests run without it.
 PYWEBVIEW_FILE_TYPE_PATTERN = r"^([\w ]+)\((\*(?:\.(?:\w+|\*))*(?:;\*(?:\.(?:\w+|\*))*)*)\)$"
 
@@ -365,6 +532,16 @@ class FileAssociations(unittest.TestCase):
             self.assertIn(self.FO_MIME_TYPE, (ROOT / "packaging/linux" / name).read_text(encoding="utf-8"), name)
         for name in ("blanketa-mime.xml", "install.sh"):
             self.assertIn('<glob pattern="*.fo" weight="60"/>', (ROOT / "packaging/linux" / name).read_text(encoding="utf-8"), name)
+
+    def test_zfo_type_names_data_messages_too(self):
+        description = "Formulář 602XML nebo datová zpráva (ZFO)"
+        for path in ("macapp/Info.plist", "packaging/windows/blanketa.iss", "packaging/linux/blanketa-mime.xml",
+                     "packaging/linux/install.sh"):
+            text = (ROOT / path).read_text(encoding="utf-8")
+            self.assertIn(description, text, path)
+            self.assertNotIn("Formulář 602XML (ZFO)", text, path)
+        for path in ("packaging/linux/blanketa.desktop", "packaging/linux/install.sh", "packaging/linux/control"):
+            self.assertIn("datových zpráv", (ROOT / path).read_text(encoding="utf-8"), path)
 
     def test_file_dialogs_offer_the_extension(self):
         self.assertTrue(any("*.fo" in file_type for file_type in desktop.OPEN_DIALOG_FILE_TYPES))
@@ -1328,6 +1505,129 @@ class DesktopDataFileDialog(unittest.TestCase):
 
     def test_name_without_a_known_extension_gets_the_default_one(self):
         self.assertEqual(self.saved_file("data"), {"data.xfdf": "XFDF"})
+
+
+class DesktopAttachmentSaving(unittest.TestCase):
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.folder = Path(folder.name)
+        self.server = app.ThreadingHTTPServer(("127.0.0.1", 0), app.Handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+        port = self.server.server_address[1]
+        self.session = app.new_session({"name": "zprava", "message": isds_message.read_message(isds_sample("prijata"))})
+        self.window = mock.Mock()
+        self.window.get_current_url.return_value = f"http://127.0.0.1:{port}/"
+        self.bridge = desktop.Bridge(mock.Mock(), mock.Mock(home=f"http://127.0.0.1:{port}/", window=self.window))
+
+    def files(self, *indexes):
+        names = isds_message.read_message(isds_sample("prijata")).info["attachments"]
+        return [{"url": f"/attachment?s={self.session}&i={index}", "name": names[index]["name"]} for index in indexes]
+
+    def test_attachment_url_rule(self):
+        self.assertTrue(desktop.attachment_url_is_allowed("/attachment?s=Ab_c-9&i=12"))
+        for url in ("http://evil.example/attachment?s=x&i=1", "/pdf?s=x", "/attachment?s=x&i=1&j=2", "/attachment?s=x&i=1#",
+                    "//evil.example/attachment?s=x&i=1", "/attachment?s=x&i=-1", 5, None):
+            with self.subTest(url=url):
+                self.assertFalse(desktop.attachment_url_is_allowed(url))
+
+    def test_free_target_never_overwrites(self):
+        (self.folder / "a.pdf").write_bytes(b"1")
+        (self.folder / "a (2).pdf").write_bytes(b"2")
+        self.assertEqual(desktop.free_target(self.folder, "a.pdf"), self.folder / "a (3).pdf")
+        self.assertEqual(desktop.free_target(self.folder, "b"), self.folder / "b")
+        for name in ("..", ".", "a/b", "a\\b", "a\x00b", "", "C:x.txt"):
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                desktop.free_target(self.folder, name)
+
+    def test_desktop_saves_one_attachment_where_the_user_chose(self):
+        self.window.create_file_dialog.return_value = str(self.folder / "jinak.pdf")
+        self.bridge.message({"action": "saveAttachment", "files": self.files(0), "folder": False})
+        self.assertEqual(self.window.create_file_dialog.call_args.kwargs["save_filename"], "rozhodnuti.pdf")
+        self.assertEqual((self.folder / "jinak.pdf").read_bytes(), b"%PDF-1.4\n% TEST priloha\n")
+        self.window.evaluate_js.assert_called_with(f"window.zfoAttachmentSaved && zfoAttachmentSaved({json.dumps(str(self.folder / 'jinak.pdf'))})")
+
+    def test_desktop_saves_all_into_the_folder(self):
+        (self.folder / "data.xml").write_bytes(b"older")
+        self.window.create_file_dialog.return_value = (str(self.folder),)
+        self.bridge.message({"action": "saveAttachment", "files": self.files(0, 1, 2), "folder": True})
+        self.assertEqual(self.window.create_file_dialog.call_args.args[0], self.bridge._app.webview.FileDialog.FOLDER)
+        self.assertEqual(sorted(path.name for path in self.folder.iterdir()), ["data (2).xml", "data.xml", "evil.txt", "rozhodnuti.pdf"])
+        self.assertEqual((self.folder / "data.xml").read_bytes(), b"older")
+        self.window.evaluate_js.assert_called_with(f"window.zfoAttachmentSaved && zfoAttachmentSaved({json.dumps(str(self.folder))})")
+
+    def test_desktop_reports_a_failed_save_on_the_page(self):
+        self.window.create_file_dialog.return_value = str(self.folder / "chybi" / "x.pdf")
+        self.bridge.message({"action": "saveAttachment", "files": self.files(0), "folder": False})
+        self.assertIn("zfoAttachmentFailed", self.window.evaluate_js.call_args.args[0])
+
+    def test_desktop_refuses_foreign_urls_and_names(self):
+        self.window.create_file_dialog.return_value = (str(self.folder),)
+        for files in ([{"url": "http://evil.example/x", "name": "x"}], [{"url": f"/attachment?s={self.session}&i=0", "name": "../x"}]):
+            with self.subTest(files=files):
+                self.bridge.message({"action": "saveAttachment", "files": files, "folder": True})
+        self.assertEqual(list(self.folder.iterdir()), [])
+
+
+class LinuxPdfPrinting(unittest.TestCase):
+    A4 = (595.28, 841.89)
+
+    def test_page_fills_paper_of_its_shape(self):
+        placed = linux_print.fit_page_on_paper(self.A4, (4800, 6800), 600)
+        self.assertEqual(placed.rotation, 0)
+        self.assertEqual((placed.x, placed.width), (0, 4800))
+        self.assertAlmostEqual(placed.y * 2 + placed.height, 6800)
+
+    def test_landscape_page_turns_onto_portrait_paper(self):
+        placed = linux_print.fit_page_on_paper((self.A4[1], self.A4[0]), (4800, 6800), 600)
+        self.assertEqual(placed.rotation, 90)
+        self.assertLessEqual(placed.width, 4800)
+        self.assertLessEqual(placed.height, 6800)
+        self.assertAlmostEqual(placed.width / placed.height, self.A4[0] / self.A4[1])
+
+    def test_image_resolution_stops_at_the_print_limit(self):
+        for printer_dpi, image_dpi in ((1200, linux_print.MAX_PRINT_DPI), (150, 150)):
+            with self.subTest(printer_dpi=printer_dpi):
+                placed = linux_print.fit_page_on_paper(self.A4, (self.A4[0] / 72 * printer_dpi, self.A4[1] / 72 * printer_dpi), printer_dpi)
+                self.assertAlmostEqual(placed.render_scale * linux_print.POINTS_PER_INCH, image_dpi)
+
+    def test_failed_preview_opens_the_file_in_the_system_viewer(self):
+        path = Path("/tmp/zfo-tisk-x.pdf")
+        with mock.patch.object(linux_print, "show_print_preview", side_effect=ImportError), \
+                mock.patch.object(desktop, "open_with_system") as open_with_system:
+            desktop.show_print_preview_or_open(path, mock.Mock())
+        open_with_system.assert_called_once_with(path)
+
+
+@unittest.skipUnless(importlib.util.find_spec("pypdfium2"), "pypdfium2 is installed only on Linux")
+class LinuxFontSubstitution(unittest.TestCase):
+    def setUp(self):
+        import pypdfium2.raw as pdfium
+        self.pdfium = pdfium
+        self.substitution = linux_print.FontSubstitution()
+        self.substitution._system = mock.Mock()
+        self.substitution._system.contents.MapFont.return_value = 0
+
+    def map_font(self, pitch_family, charset=None):
+        charset = self.pdfium.FXFONT_ANSI_CHARSET if charset is None else charset
+        return self.substitution._map_font(None, 400, 0, charset, pitch_family, b"Helvetica", None)
+
+    def test_missing_sans_serif_font_gets_liberation_sans(self):
+        font = self.map_font(0)
+        self.assertTrue(font)
+        self.assertGreater(self.substitution._get_font_data(None, font, linux_print.WHOLE_FONT_FILE, None, 0), 0)
+
+    def test_fixed_pitch_serif_and_symbol_fonts_stay_with_pdfium(self):
+        for pitch_family, charset in ((self.pdfium.FXFONT_FF_FIXEDPITCH, None), (self.pdfium.FXFONT_FF_ROMAN, None),
+                                      (0, self.pdfium.FXFONT_SYMBOL_CHARSET)):
+            with self.subTest(pitch_family=pitch_family, charset=charset):
+                self.assertEqual(self.map_font(pitch_family, charset), 0)
+
+    def test_installed_system_font_wins(self):
+        self.substitution._system.contents.MapFont.return_value = 1234
+        self.assertEqual(self.map_font(0), 1234)
 
 
 if __name__ == "__main__":

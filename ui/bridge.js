@@ -4,7 +4,11 @@ window.zfoNative = (() => {
   if (!window.ZFO_DESKTOP) return null;
   const ready = new Promise(resolve => window.pywebview?.api
     ? resolve() : window.addEventListener('pywebviewready', resolve, {once: true}));
-  return {platform: 'desktop', printsNatively: false, postMessage: message => ready.then(() => window.pywebview.api.message(message))};
+  return {
+    platform: 'desktop', printsNatively: false,
+    get printsPdfInPage() { return window.pywebview?.platform === 'edgechromium'; },
+    postMessage: message => ready.then(() => window.pywebview.api.message(message)),
+  };
 })();
 
 window.zfoIsMac = /Mac/.test(navigator.platform);

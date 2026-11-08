@@ -1,10 +1,12 @@
 import json
 import os
+import re
 import socket
 import subprocess
 import sys
 import tempfile
 import time
+import urllib.request
 import webbrowser
 from pathlib import Path
 
@@ -13,6 +15,8 @@ IS_WINDOWS = sys.platform == "win32"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 SERVER_START_ATTEMPTS = 300
 MAX_RECENT_FILES = 10
+ATTACHMENT_URL = re.compile(r"/attachment\?s=[A-Za-z0-9_-]+&i=\d+")
+ATTACHMENT_DOWNLOAD_SECONDS = 120
 OPEN_DIALOG_FILE_TYPES = ("Formuláře 602XML a PDF (*.zfo;*.fo;*.pdf)", "Všechny soubory (*.*)")
 
 
@@ -35,11 +39,57 @@ def open_with_system(path):
         subprocess.Popen(["xdg-open", str(path)])
 
 
+def print_pdf_file(path, window):
+    if IS_WINDOWS:
+        open_with_system(path)
+        return
+    import linux_print
+    linux_print.run_on_gui_thread(lambda: show_print_preview_or_open(path, window))
+
+
+def show_print_preview_or_open(path, window):
+    import linux_print
+    try:
+        linux_print.show_print_preview(path, window.title, window.native)
+    except Exception:  # whatever breaks the preview, the system viewer still prints the file
+        open_with_system(path)
+
+
 def reveal_in_file_manager(path):
     if IS_WINDOWS:
         subprocess.Popen(["explorer", "/select,", str(path)])
     else:
         open_with_system(path.parent)
+
+
+def attachment_url_is_allowed(url):
+    return isinstance(url, str) and ATTACHMENT_URL.fullmatch(url) is not None
+
+
+def is_plain_file_name(name):
+    return isinstance(name, str) and name not in ("", ".", "..") and not any(character in name for character in "/\\:\0")
+
+
+def free_target(folder, name):
+    if not is_plain_file_name(name):
+        raise ValueError(f"unsafe file name {name!r}")
+    stem, suffix = Path(name).stem, Path(name).suffix
+    candidate, copy_number = folder / name, 2
+    while candidate.exists():
+        candidate, copy_number = folder / f"{stem} ({copy_number}){suffix}", copy_number + 1
+    return candidate
+
+
+def write_downloaded(url, target):
+    with urllib.request.urlopen(url, timeout=ATTACHMENT_DOWNLOAD_SECONDS) as response:  # noqa: S310 - only our own server
+        partial = target.with_name(target.name + ".part")
+        try:
+            with open(partial, "wb") as file:
+                while chunk := response.read(1 << 20):
+                    file.write(chunk)
+            partial.replace(target)
+        finally:
+            partial.unlink(missing_ok=True)
 
 
 def free_local_port():
@@ -82,6 +132,35 @@ class Bridge:
         target.write_text(contents.get(target.suffix.lstrip(".").lower(), request["content"]), encoding="utf-8")
         window.evaluate_js(f"window.zfoDataSaved && zfoDataSaved({json.dumps(str(target))})")
 
+    def _save_attachments(self, window, request):
+        files = request.get("files")
+        if not isinstance(files, list) or not files or not all(
+                isinstance(file, dict) and attachment_url_is_allowed(file.get("url")) and is_plain_file_name(file.get("name"))
+                for file in files):
+            return
+        server = self._form.home.rstrip("/")
+        try:
+            saved = self._save_downloads(window, server, files, request.get("folder"))
+        except OSError as error:
+            window.evaluate_js(f"window.zfoAttachmentFailed && zfoAttachmentFailed({json.dumps(str(error))})")
+            return
+        if saved is not None:
+            window.evaluate_js(f"window.zfoAttachmentSaved && zfoAttachmentSaved({json.dumps(str(saved))})")
+
+    def _save_downloads(self, window, server, files, into_folder):
+        if into_folder:
+            chosen = window.create_file_dialog(self._app.webview.FileDialog.FOLDER)
+            if not chosen:
+                return None
+            folder = Path(chosen if isinstance(chosen, str) else chosen[0])
+            for file in files:
+                write_downloaded(server + file["url"], free_target(folder, file["name"]))
+            return folder
+        saved = self._ask_for_save_target(window, "", files[0]["name"], ())
+        if saved is not None:
+            write_downloaded(server + files[0]["url"], saved)
+        return saved
+
     def message(self, msg):
         action, window = msg.get("action"), self._form.window
         if not self._is_showing_form_server(window):
@@ -95,11 +174,13 @@ class Bridge:
         elif action == "reveal":
             reveal_in_file_manager(Path(msg["path"]))
         elif action == "printPdf" and is_print_file(msg["path"]):
-            open_with_system(msg["path"])
+            print_pdf_file(Path(msg["path"]), window)
         elif action == "openUrl" and str(msg.get("url", "")).startswith(("https://", "http://")):
             webbrowser.open(msg["url"])
         elif action == "saveFile":
             self._save_file_from_dialog(window, msg)
+        elif action == "saveAttachment":
+            self._save_attachments(window, msg)
 
 
 class FormWindow:
