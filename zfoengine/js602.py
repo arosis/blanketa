@@ -2675,6 +2675,7 @@ def run_form_action(interpreter, source, host):
     "CheckData": native(lambda *_: host.check_data()),
     "GetFormData": native(form_data),
     "LoadFormDataPart": native(load_form_data_part),
+    "XSLCheck": native(lambda name=UNDEFINED, mode=UNDEFINED, *_: host.xsl_check(text(name), "" if mode is UNDEFINED else text(mode))),
   })
   named_parameters = host.named_parameters
   globals_for_action = {
@@ -2693,3 +2694,31 @@ def run_form_action(interpreter, source, host):
     interpreter.run(source, globals_for_action)
   finally:
     is_finished.append(True)
+
+
+class StylesheetFunctions:
+  # The functions a stylesheet declares in its msxsl:script blocks, for the stylesheet to call. One transformation shares
+  # one budget across all its calls: a stylesheet calls them per node, and a fresh budget each time would never run out.
+
+  def __init__(self, sources):
+    self.interpreter = Interpreter(sources)
+    self.interpreter.budget.left = STEP_BUDGET
+    self.interpreter._load_library()
+    self.interpreter.budget.left = STEP_BUDGET
+
+  def names(self):
+    return [name for name, value in self.interpreter.globals.vars.items() if isinstance(value, Function)]
+
+  def call(self, name, args):
+    interpreter = self.interpreter
+    interpreter.depth = 0
+    try:
+      return interpreter.call(interpreter.globals.vars[name], UNDEFINED, list(args), name)
+    except RecursionError as error:
+      raise Exhausted("zanoření") from error
+    except MemoryError as error:
+      raise Exhausted("paměť") from error
+    except (Unsupported, Exhausted, Thrown):
+      raise
+    except Exception as error:  # a slip of this interpreter must not take the window down over a hostile file
+      raise Unsupported("skript šablony") from error
