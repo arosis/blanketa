@@ -261,6 +261,8 @@ class _Verification:
                 if target.tag == _ds("Manifest") and in_manifest:
                     raise _Refused(WRAPPED)
                 data = self.internal_data(target, transforms)
+                if [transform.get("Algorithm") for transform in transforms] == [BASE64]:
+                    entry.update(content=data, mime=target.get("MimeType") or "")
             is_properties = target is not None and etree.QName(target).localname == "SignedProperties"
             method = self.child(reference, "DigestMethod")
             digests = LEGACY_DIGESTS if (is_file and uri != "") or is_properties else STRONG_DIGESTS
@@ -378,9 +380,7 @@ class _Verification:
         _canonicalize(signed_info, method.get("Algorithm"), with_comments=False)
 
     def run(self):
-        result = {"subject": "", "issuer": "", "publisher": False, "intact": False, "broken_reason": "", "content_changed": False,
-                  "modified": False, "changes_unchecked": False, "not_after": None, "signed_at": None, "der": None,
-                  "stamps": [], "references": self.references}
+        result = {**unverified_result(""), "references": self.references}
         try:
             if any(len(elements) > 1 for elements in self.ids.values()):
                 self.fail(WRAPPED)
@@ -442,6 +442,11 @@ class _Verification:
     def finish(self, result):
         result.update(intact=not self.reason, broken_reason=self.reason, content_changed=self.content_changed)
         return result
+
+
+def unverified_result(broken_reason):
+    return {"subject": "", "issuer": "", "publisher": False, "intact": False, "broken_reason": broken_reason, "content_changed": False,
+            "modified": False, "changes_unchecked": False, "not_after": None, "signed_at": None, "der": None, "stamps": []}
 
 
 def verify(signature, resolve, *, allow_empty_uri=False, standalone=False):
