@@ -67,6 +67,46 @@
 				<string>application/vnd.software602.filler.form+xml</string>
 			</dict>
 		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>org.etsi.asic-e</string>
+			<key>UTTypeDescription</key>
+			<string>Kontejner ASiC s podpisy (ASiC-E)</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.zip-archive</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>asice</string>
+					<string>sce</string>
+				</array>
+				<key>public.mime-type</key>
+				<string>application/vnd.etsi.asic-e+zip</string>
+			</dict>
+		</dict>
+		<dict>
+			<key>UTTypeIdentifier</key>
+			<string>org.etsi.asic-s</string>
+			<key>UTTypeDescription</key>
+			<string>Kontejner ASiC s podpisy (ASiC-S)</string>
+			<key>UTTypeConformsTo</key>
+			<array>
+				<string>public.zip-archive</string>
+			</array>
+			<key>UTTypeTagSpecification</key>
+			<dict>
+				<key>public.filename-extension</key>
+				<array>
+					<string>asics</string>
+					<string>scs</string>
+				</array>
+				<key>public.mime-type</key>
+				<string>application/vnd.etsi.asic-s+zip</string>
+			</dict>
+		</dict>
 	</array>
 	<key>CFBundleDocumentTypes</key>
 	<array>
@@ -104,6 +144,30 @@
 			<key>LSItemContentTypes</key>
 			<array>
 				<string>com.adobe.pdf</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Kontejner ASiC s podpisy (ASiC-E)</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>org.etsi.asic-e</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Kontejner ASiC s podpisy (ASiC-S)</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>org.etsi.asic-s</string>
 			</array>
 		</dict>
 	</array>

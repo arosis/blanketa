@@ -10,4 +10,16 @@
     <sub-class-of type="application/xml"/>
     <glob pattern="*.fo" weight="60"/>
   </mime-type>
+  <mime-type type="application/vnd.etsi.asic-e+zip">
+    <comment>Kontejner ASiC s podpisy (ASiC-E)</comment>
+    <sub-class-of type="application/zip"/>
+    <glob pattern="*.asice"/>
+    <glob pattern="*.sce"/>
+  </mime-type>
+  <mime-type type="application/vnd.etsi.asic-s+zip">
+    <comment>Kontejner ASiC s podpisy (ASiC-S)</comment>
+    <sub-class-of type="application/zip"/>
+    <glob pattern="*.asics"/>
+    <glob pattern="*.scs"/>
+  </mime-type>
 </mime-info>

@@ -561,6 +561,35 @@ class FileAssociations(unittest.TestCase):
         for name in ("blanketa-mime.xml", "install.sh"):
             self.assertIn('<glob pattern="*.fo" weight="60"/>', (ROOT / "packaging/linux" / name).read_text(encoding="utf-8"), name)
 
+    ASIC_TYPES = {"application/vnd.etsi.asic-e+zip": ("asice", "sce"), "application/vnd.etsi.asic-s+zip": ("asics", "scs")}
+
+    def test_asic_containers_are_registered_on_every_platform(self):
+        with open(ROOT / "macapp/Info.plist", "rb") as info:
+            plist = plistlib.load(info)
+        document_types = [content_type for item in plist["CFBundleDocumentTypes"] for content_type in item["LSItemContentTypes"]]
+        for mime, extensions in self.ASIC_TYPES.items():
+            declared = next(item for item in plist["UTImportedTypeDeclarations"]
+                            if item["UTTypeTagSpecification"]["public.mime-type"] == mime)
+            self.assertEqual(declared["UTTypeTagSpecification"]["public.filename-extension"], list(extensions))
+            self.assertIn("public.zip-archive", declared["UTTypeConformsTo"])
+            self.assertIn(declared["UTTypeIdentifier"], document_types)
+        script = (ROOT / "packaging/windows/blanketa.iss").read_text(encoding="utf-8")
+        self.assertIn(r'Software\Classes\Blanketa.asic\shell\open\command', script)
+        for extension in ("asice", "sce", "asics", "scs"):
+            self.assertIn(rf'Software\Classes\.{extension}\OpenWithProgids"; ValueType: string; ValueName: "Blanketa.asic"', script)
+        for extension in ("asice", "asics"):
+            self.assertIn(rf'Software\Classes\.{extension}"; ValueType: string; ValueName: ""; ValueData: "Blanketa.asic"; Tasks: asicdefault', script)
+        for name in ("blanketa.desktop", "install.sh"):
+            text = (ROOT / "packaging/linux" / name).read_text(encoding="utf-8")
+            for mime in self.ASIC_TYPES:
+                self.assertIn(mime + ";", text, name)
+        for name in ("blanketa-mime.xml", "install.sh"):
+            text = (ROOT / "packaging/linux" / name).read_text(encoding="utf-8")
+            for mime, extensions in self.ASIC_TYPES.items():
+                self.assertIn(f'<mime-type type="{mime}">', text, name)
+                for extension in extensions:
+                    self.assertIn(f'<glob pattern="*.{extension}"/>', text, name)
+
     def test_zfo_type_names_data_messages_too(self):
         description = "Formulář 602XML nebo datová zpráva (ZFO)"
         for path in ("macapp/Info.plist", "packaging/windows/blanketa.iss", "packaging/linux/blanketa-mime.xml",
