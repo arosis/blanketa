@@ -353,7 +353,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func openDocument(_ sender: Any?) {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [UTType(filenameExtension: "zfo") ?? .data, UTType(filenameExtension: "fo") ?? .data, .pdf, .xml]
-            + ["asice", "sce", "asics", "scs"].map { UTType(filenameExtension: $0) ?? .data }
+            + ["asice", "sce", "asics", "scs"].compactMap { UTType(filenameExtension: $0) }
         panel.allowsMultipleSelection = true
         if panel.runModal() == .OK {
             panel.urls.forEach(open)

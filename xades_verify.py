@@ -7,7 +7,7 @@ from urllib.parse import unquote
 
 from asn1crypto import cms
 from cryptography import x509
-from cryptography.exceptions import InvalidSignature
+from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa, utils
 from lxml import etree
@@ -169,6 +169,9 @@ class _Verification:
             return target
         if etree.QName(target).localname == "SignedProperties" and etree.QName(target).namespace in XADES_NAMESPACES:
             return target
+        holder = next(target.iterancestors(_ds("Object")), None)
+        if holder is not None and holder.getparent() is self.signature and next(target.iterancestors(_ds("Signature"))) is self.signature:
+            return target
         raise _Refused(WRAPPED)
 
     def transforms(self, reference):
@@ -315,7 +318,9 @@ class _Verification:
 
     def signed_properties(self, signed_info):
         signature_id = self.signature.get("Id")
-        qualifying = [element for element in self.signature.iter(*(f"{{{ns}}}QualifyingProperties" for ns in XADES_NAMESPACES))]
+        # Only the signature's own properties: a countersignature nests its QualifyingProperties deeper.
+        qualifying = [element for holder in self.signature.findall(_ds("Object"))
+                      for element in holder.iterchildren(*(f"{{{ns}}}QualifyingProperties" for ns in XADES_NAMESPACES))]
         if not qualifying or not signature_id:
             raise _Refused(NO_SIGNED_PROPERTIES)
         if len(qualifying) > 1:
@@ -371,7 +376,10 @@ class _Verification:
     def check_value(self, signed_info, cert):
         method = signed_info.find(_ds("CanonicalizationMethod"))
         key_type, hash_type = SIGNATURE_METHODS[signed_info.find(_ds("SignatureMethod")).get("Algorithm")]
-        public_key = cert.public_key()
+        try:
+            public_key = cert.public_key()
+        except (ValueError, UnsupportedAlgorithm) as error:
+            raise _Refused(BAD_VALUE) from error
         if not isinstance(public_key, key_type):
             raise _Refused(BAD_VALUE)
         data = _canonicalize(signed_info, method.get("Algorithm"), with_comments=method.get("Algorithm").endswith("WithComments"),
@@ -401,7 +409,9 @@ class _Verification:
     def run(self):
         result = {**unverified_result(""), "references": self.references}
         try:
-            if any(len(elements) > 1 for elements in self.ids.values()):
+            # Another signature in the same file may reuse an Id (DSS does for references); within this one it is wrapping.
+            if any(sum(element is self.signature or self.is_inside_signature(element) for element in elements) > 1
+                   for elements in self.ids.values()):
                 self.fail(WRAPPED)
             signed_info = self.child(self.signature, "SignedInfo")
             if signed_info is None or self.child(self.signature, "SignatureValue") is None:
@@ -435,16 +445,27 @@ class _Verification:
     def signature_stamp(self, element):
         try:  # a damaged token only means the time is not confirmed, the signature is judged apart from it
             method = element.find(_ds("CanonicalizationMethod"))
-            algorithm = method.get("Algorithm") if method is not None else C14N
-            if algorithm not in CANONICALIZATIONS:
-                raise _Refused(UNSUPPORTED_C14N)
-            imprinted = _canonicalize(self.child(self.signature, "SignatureValue"), algorithm,
-                                      with_comments=algorithm.endswith("WithComments"), prefixes=_inclusive_prefixes(method)
-                                      if method is not None else None)
+            # Without a method the standard says C14N 1.0, but some signers stamp with the SignedInfo's method instead.
+            # Either way the token must hash exactly this SignatureValue, so trying both accepts nothing else.
+            methods = [method] if method is not None else [None, self.child(self.child(self.signature, "SignedInfo"),
+                                                                              "CanonicalizationMethod")]
+            value = self.child(self.signature, "SignatureValue")
+            candidates = []
+            for candidate in methods:
+                algorithm = candidate.get("Algorithm") if candidate is not None else C14N
+                if algorithm not in CANONICALIZATIONS:
+                    raise _Refused(UNSUPPORTED_C14N)
+                candidates.append(_canonicalize(value, algorithm, with_comments=algorithm.endswith("WithComments"),
+                                                prefixes=_inclusive_prefixes(candidate) if candidate is not None else None))
             token = element.find(f"{{{etree.QName(element).namespace}}}EncapsulatedTimeStamp")
             signed_data = cms.ContentInfo.load(_decode_base64(token.text))["content"]
+            imprint = signed_data["encap_content_info"]["content"].parsed["message_imprint"]["hashed_message"].native
+
+            def expected(name):
+                digests = [hashlib.new(name, imprinted).digest() for imprinted in candidates]
+                return next((digest for digest in digests if digest == imprint), digests[0])
             kwargs = asyncio.run(validate_tst_signed_data(
-                signed_data, ValidationContext(allow_fetching=False), lambda name: hashlib.new(name, imprinted).digest()))
+                signed_data, ValidationContext(trust_roots=[], allow_fetching=False), expected))
             return pdf_sign._stamp_details(TimestampSignatureStatus(**kwargs), "signature")
         except Exception:
             return pdf_sign._stamp_details(None, "signature")

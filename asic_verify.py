@@ -86,14 +86,25 @@ def _signature_kinds(names):
     return kinds
 
 
+def _is_signed_zip(source):
+    try:
+        with zipfile.ZipFile(source, metadata_encoding="utf-8") as archive:
+            names = archive.namelist()
+    except (zipfile.BadZipFile, zipfile.LargeZipFile, OSError, ValueError, EOFError, NotImplementedError):
+        return False
+    return "form.fo" not in names and bool(_signature_kinds(names))
+
+
+def is_signed_path(path):
+    with open(path, "rb") as file:
+        if file.read(len(ZIP_MAGIC)) == ZIP_MAGIC:
+            return _is_signed_zip(file)
+    return is_signed_file(path.read_bytes())
+
+
 def is_signed_file(data):
     if data.startswith(ZIP_MAGIC):
-        try:
-            with _open(data) as archive:
-                names = archive.namelist()
-        except ContainerError:
-            return False
-        return "form.fo" not in names and bool(_signature_kinds(names))
+        return _is_signed_zip(io.BytesIO(data))
     if b"QualifyingProperties" not in data:
         return False
     try:

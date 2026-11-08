@@ -598,7 +598,7 @@ class Handler(BaseHTTPRequestHandler):
             return render_pdf_page(name)
         if isds_message.looks_like_message(file_start(path)):
             return render_message_page(name)
-        if asic_verify.is_signed_file(path.read_bytes()):
+        if asic_verify.is_signed_path(path):
             return render_container_page(name)
         return render_zfo_page(name, first_query_value(query, "blank") == "1", data)
 

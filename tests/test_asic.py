@@ -8,10 +8,12 @@ import io
 import os
 import struct
 import sys
+import tempfile
 import unicodedata
 import unittest
 import zipfile
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -20,6 +22,7 @@ os.environ["ZFO_OFFLINE"] = "1"  # tests never download trusted lists
 
 import asic_samples  # noqa: E402
 from cryptography import x509  # noqa: E402
+from cryptography.exceptions import UnsupportedAlgorithm  # noqa: E402
 from cryptography.hazmat.primitives import hashes  # noqa: E402
 from cryptography.hazmat.primitives.asymmetric import ec  # noqa: E402
 from cryptography.x509.oid import NameOID  # noqa: E402
@@ -160,12 +163,76 @@ class XadesVerifyTest(unittest.TestCase):
         self.assertTrue(result["intact"], result["broken_reason"])
         self.assertEqual(result["references"], [{"name": "smlouva.pdf", "outcome": "ok"}])
 
-    def test_key_info_outside_signature_is_wrapping(self):
+    def test_countersignature_does_not_break_the_signature(self):
+        def add_countersignature(signature):
+            qualifying = signature.find(f"{{{DS}}}Object/{{{XADES}}}QualifyingProperties")
+            unsigned = etree.SubElement(etree.SubElement(qualifying, f"{{{XADES}}}UnsignedProperties"),
+                                        f"{{{XADES}}}UnsignedSignatureProperties")
+            counter = etree.SubElement(etree.SubElement(unsigned, f"{{{XADES}}}CounterSignature"), f"{{{DS}}}Signature", Id="CS1")
+            etree.SubElement(etree.SubElement(counter, f"{{{DS}}}Object"), f"{{{XADES}}}QualifyingProperties", Target="#CS1")
+        signature = asic_samples.xades_signature(FILES, mutate=add_countersignature)
+        result = xades_verify.verify(signature, resolver(FILES))
+        self.assertTrue(result["intact"], result["broken_reason"])
+
+    def test_signed_element_inside_an_object_verifies(self):
+        def sign_object_content(signature):
+            data = etree.SubElement(etree.SubElement(signature, f"{{{DS}}}Object"), "{urn:example}Data", Id="data-1")
+            data.text = "podepsaná data"
+            asic_samples._add_reference(signature.find(f"{{{DS}}}SignedInfo"), "#data-1", asic_samples.SHA256, [asic_samples.EXC_C14N])
+        result = xades_verify.verify(asic_samples.xades_signature(FILES, mutate=sign_object_content), resolver(FILES))
+        self.assertTrue(result["intact"], result["broken_reason"])
+        self.assertEqual(result["references"], [{"name": "smlouva.pdf", "outcome": "ok"}])
+
+    def test_signed_element_inside_a_countersignature_is_wrapping(self):
+        def sign_countersignature_content(signature):
+            qualifying = signature.find(f"{{{DS}}}Object/{{{XADES}}}QualifyingProperties")
+            unsigned = etree.SubElement(etree.SubElement(qualifying, f"{{{XADES}}}UnsignedProperties"),
+                                        f"{{{XADES}}}UnsignedSignatureProperties")
+            counter = etree.SubElement(etree.SubElement(unsigned, f"{{{XADES}}}CounterSignature"), f"{{{DS}}}Signature", Id="CS1")
+            etree.SubElement(etree.SubElement(counter, f"{{{DS}}}Object"), "{urn:example}Data", Id="inner")
+            asic_samples._add_reference(signature.find(f"{{{DS}}}SignedInfo"), "#inner", asic_samples.SHA256, [asic_samples.EXC_C14N])
+        result = xades_verify.verify(asic_samples.xades_signature(FILES, mutate=sign_countersignature_content), resolver(FILES))
+        self.assertBroken(result, xades_verify.WRAPPED)
+
+    def test_id_reused_by_another_signature_in_the_file_is_allowed(self):
+        def add_reference_id(signature):
+            signature.find(f"{{{DS}}}SignedInfo/{{{DS}}}Reference").set("Id", "r-id-1")
+        first = asic_samples.xades_signature(FILES, signature_id="S1", mutate=add_reference_id)
+        second = asic_samples.xades_signature(FILES, signature_id="S2", mutate=add_reference_id)
+        root = etree.fromstring(asic_samples.signatures_xml(first, second))
+        results = [xades_verify.verify(signature, resolver(FILES)) for signature in xades_verify.find_signatures(root)]
+        self.assertEqual([result["intact"] for result in results], [True, True], [result["broken_reason"] for result in results])
+
+    def test_id_repeated_inside_one_signature_is_wrapping(self):
+        def repeat_id(signature):
+            signature.find(f"{{{DS}}}SignedInfo/{{{DS}}}Reference").set("Id", "r-id-1")
+            etree.SubElement(signature, f"{{{DS}}}Object", Id="r-id-1")
+        result = xades_verify.verify(asic_samples.xades_signature(FILES, mutate=repeat_id), resolver(FILES))
+        self.assertBroken(result, xades_verify.WRAPPED)
+
+    def test_unloadable_public_key_is_a_bad_value(self):
+        load = x509.load_der_x509_certificate
+
+        class UnloadableKey:
+            def __init__(self, cert):
+                self.cert = cert
+
+            def __getattr__(self, name):
+                return getattr(self.cert, name)
+
+            def public_key(self):
+                raise UnsupportedAlgorithm("explicit curve")
+
+        with mock.patch.object(xades_verify.x509, "load_der_x509_certificate", lambda der: UnloadableKey(load(der))):
+            result = xades_verify.verify(asic_samples.xades_signature(FILES), resolver(FILES))
+        self.assertBroken(result, xades_verify.BAD_VALUE)
+
+    def test_key_info_moved_into_an_object_is_not_the_signers(self):
         def move_key_info_into_object(signature):
             key_info = signature.find(f"{{{DS}}}KeyInfo")
             etree.SubElement(signature, f"{{{DS}}}Object").append(key_info)
         signature = asic_samples.xades_signature(FILES, sign_key_info=True, mutate=move_key_info_into_object)
-        self.assertBroken(xades_verify.verify(signature, resolver(FILES)), xades_verify.WRAPPED)
+        self.assertBroken(xades_verify.verify(signature, resolver(FILES)), xades_verify.CERTIFICATE_MISMATCH)
 
     def test_duplicate_key_info_id_is_wrapping(self):
         def duplicate_key_info(signature):
@@ -245,6 +312,12 @@ class XadesVerifyTest(unittest.TestCase):
         stamp, = result["stamps"]
         self.assertFalse(stamp["intact"])
         self.assertTrue(result["intact"])
+
+    def test_time_stamp_made_with_the_signed_info_method_is_reported(self):
+        signature = asic_samples.xades_signature(FILES, c14n=asic_samples.EXC_C14N, stamp="signed-info-c14n")
+        self.assertIsNone(signature.find(f".//{{{XADES}}}SignatureTimeStamp/{{{DS}}}CanonicalizationMethod"))
+        stamp, = xades_verify.verify(signature, resolver(FILES))["stamps"]
+        self.assertTrue(stamp["intact"])
 
     def test_damaged_time_stamp_token_is_not_intact(self):
         def damage(signature):
@@ -439,6 +512,15 @@ class ContainerTest(unittest.TestCase):
         self.assertFalse(asic_verify.is_signed_file(zip_bytes([("form.fo", form), ("META-INF/signatures.xml", signatures_file(FILES))])))
         self.assertFalse(asic_verify.is_signed_file(b"%PDF-1.7"))
         self.assertFalse(asic_verify.is_signed_file(zip_bytes([("smlouva.pdf", PDF)])))
+
+    def test_signed_path_reads_only_the_zip_directory(self):
+        with tempfile.TemporaryDirectory() as folder:
+            zfo, container = Path(folder) / "form.zfo", Path(folder) / "smlouva.asice"
+            zfo.write_bytes((ROOT / "samples/mac-vyplneny/form.zfo").read_bytes())
+            container.write_bytes(asic_samples.asic_e(FILES, {"META-INF/signatures001.xml": signatures_file(FILES)}))
+            with mock.patch.object(Path, "read_bytes", side_effect=AssertionError("read whole file")):
+                self.assertFalse(asic_verify.is_signed_path(zfo))
+                self.assertTrue(asic_verify.is_signed_path(container))
 
     def test_signature_with_empty_qualifying_properties_is_xades(self):
         data = f'<ds:Signature xmlns:ds="{DS}" xmlns:xades="{XADES}"><ds:Object><xades:QualifyingProperties/></ds:Object></ds:Signature>'.encode()

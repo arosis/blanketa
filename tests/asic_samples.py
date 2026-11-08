@@ -67,7 +67,11 @@ def _tsa_stamper():
 
 
 def _add_stamp(signature, stamp, c14n=C14N10):
-    data = b"other bytes" if stamp == "wrong" else _canonical(signature.find(_ds("SignatureValue")), c14n)
+    if stamp == "signed-info-c14n":
+        c14n_used = signature.find(f"{_ds('SignedInfo')}/{_ds('CanonicalizationMethod')}").get("Algorithm")
+        data = _canonical(signature.find(_ds("SignatureValue")), c14n_used)
+    else:
+        data = b"other bytes" if stamp == "wrong" else _canonical(signature.find(_ds("SignatureValue")), c14n)
     token = asyncio.run(_tsa_stamper().async_timestamp(hashlib.sha256(data).digest(), "sha256")).dump()
     qualifying = signature.find(f".//{_xades('QualifyingProperties')}")
     stamp_element = etree.SubElement(etree.SubElement(etree.SubElement(qualifying, _xades("UnsignedProperties")),
