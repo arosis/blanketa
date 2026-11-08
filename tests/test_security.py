@@ -4,6 +4,7 @@
 """
 import base64
 import copy
+import hashlib
 import http.client
 import io
 import json
@@ -681,23 +682,28 @@ class HostileFormDataFiles(unittest.TestCase):
 
 class ContainerAttacks(unittest.TestCase):
     FILES = {"smlouva.pdf": b"%PDF-1.7 smlouva"}
+    SIGNATURE = f"{{{asic_samples.DS}}}"
+    XADES = f"{{{asic_samples.XADES}}}"
 
     def container(self, mutate=None, files=None, **options):
         files = files or self.FILES
         signature = asic_samples.xades_signature(files, mutate=mutate, **options)
         return asic_samples.asic_e(files, {"signatures.xml": asic_samples.signatures_xml(signature)})
 
-    def assertNothingIntact(self, data):
+    def only_signature(self, data):
         description, _ = asic_verify.describe(data)
-        self.assertTrue(description["signatures"])
-        for signature in description["signatures"]:
-            self.assertFalse(signature["intact"], signature)
-        return description
+        [signature] = description["signatures"]
+        return signature, description
 
-    def attacked_signature(self, attack):
-        signature = asic_samples.xades_signature(self.FILES)
-        attack(signature)
-        return asic_samples.asic_e(self.FILES, {"signatures.xml": asic_samples.signatures_xml(signature)})
+    def assertRefused(self, mutate=None, reason=None, **options):
+        # Every sample is signed over what it contains, so only the attacked property can break it; the control
+        # sample without the attack proves that.
+        control, _ = self.only_signature(self.container(**options))
+        self.assertTrue(control["intact"], control["broken_reason"])
+        signature, description = self.only_signature(self.container(mutate, **options))
+        self.assertFalse(signature["intact"])
+        self.assertEqual(signature["broken_reason"], reason)
+        return signature, description
 
     def zip_of(self, entries, *, method=zipfile.ZIP_DEFLATED):
         buffer = io.BytesIO()
@@ -708,52 +714,65 @@ class ContainerAttacks(unittest.TestCase):
         return buffer.getvalue()
 
     def test_wrapped_signed_properties_are_refused(self):
-        def attack(signature):
-            qualifying = signature.find(f".//{{{asic_samples.XADES}}}QualifyingProperties")
-            original = qualifying.find(f"{{{asic_samples.XADES}}}SignedProperties")
+        def mutate(signature):
+            qualifying = signature.find(f".//{self.XADES}QualifyingProperties")
+            original = qualifying.find(f"{self.XADES}SignedProperties")
             decoy = copy.deepcopy(original)
-            etree.SubElement(etree.SubElement(signature, asic_samples._ds("Object")), "{urn:decoy}holder").append(decoy)
-            original.find(f".//{{{asic_samples.XADES}}}SigningTime").text = "2020-01-01T00:00:00Z"
-        self.assertNothingIntact(self.attacked_signature(attack))
+            decoy.set("Id", "decoy")
+            original.find(f".//{self.XADES}SigningTime").text = "2020-01-01T00:00:00Z"
+            etree.SubElement(signature, asic_samples._ds("Object")).append(decoy)
+            signature.find(f"{self.SIGNATURE}SignedInfo/{self.SIGNATURE}Reference[@Type='{asic_samples.SIGNED_PROPERTIES_TYPE}']").set(
+                "URI", "#decoy")
+        self.assertRefused(mutate, xades_verify.WRAPPED)
 
     def test_second_object_with_qualifying_properties_is_refused(self):
-        def attack(signature):
-            signature.append(copy.deepcopy(signature.find(f"{{{asic_samples.DS}}}Object")))
-        self.assertNothingIntact(self.attacked_signature(attack))
+        def mutate(signature):
+            second = copy.deepcopy(signature.find(f"{self.SIGNATURE}Object"))
+            second.find(f".//{self.XADES}SignedProperties").set("Id", "S1-other-signed-properties")
+            second.find(f".//{self.XADES}SigningTime").text = "2020-01-01T00:00:00Z"
+            signature.append(second)
+        self.assertRefused(mutate, xades_verify.WRAPPED)
 
     def test_duplicate_id_is_refused(self):
         def mutate(signature):
-            signature.find(f"{{{asic_samples.DS}}}SignatureValue").set("Id", "S1-signed-properties")
-        self.assertNothingIntact(self.container(mutate))
+            etree.SubElement(signature, asic_samples._ds("Object"), Id="S1-signed-properties")
+        self.assertRefused(mutate, xades_verify.WRAPPED)
 
     def test_changed_file_in_container_is_refused(self):
         signature = asic_samples.xades_signature(self.FILES)
         data = asic_samples.asic_e({"smlouva.pdf": b"%PDF-1.7 podvrh"}, {"signatures.xml": asic_samples.signatures_xml(signature)})
-        description = self.assertNothingIntact(data)
+        result, description = self.only_signature(data)
+        self.assertFalse(result["intact"])
+        self.assertEqual((result["broken_reason"], result["content_changed"]), (xades_verify.CONTENT_CHANGED, True))
         self.assertEqual(description["files"][0]["state"], "changed")
 
     def test_unknown_transform_is_refused(self):
         for uri in ("http://www.w3.org/TR/1999/REC-xpath-19991116", "http://www.w3.org/TR/1999/REC-xslt-19991116"):
             with self.subTest(uri=uri):
                 def mutate(signature, uri=uri):
-                    reference = signature.find(f"{{{asic_samples.DS}}}SignedInfo/{{{asic_samples.DS}}}Reference")
+                    reference = signature.find(f"{self.SIGNATURE}SignedInfo/{self.SIGNATURE}Reference")
                     transforms = etree.Element(asic_samples._ds("Transforms"))
                     etree.SubElement(transforms, asic_samples._ds("Transform"), Algorithm=uri)
                     reference.insert(0, transforms)
-                self.assertNothingIntact(self.container(mutate))
+                self.assertRefused(mutate, xades_verify.UNKNOWN_TRANSFORM)
 
     def test_unknown_signature_algorithm_is_refused(self):
-        def attack(signature):
-            signature.find(f"{{{asic_samples.DS}}}SignedInfo/{{{asic_samples.DS}}}SignatureMethod").set(
-                "Algorithm", "http://www.w3.org/2001/04/xmldsig-more#rsa-md5")
-        self.assertNothingIntact(self.attacked_signature(attack))
+        signature, _ = self.only_signature(self.container(signature_method=asic_samples.RSA_SHA1))
+        self.assertFalse(signature["intact"])
+        self.assertEqual(signature["broken_reason"], xades_verify.UNKNOWN_SIGNATURE_ALGORITHM)
 
     def test_forged_signing_certificate_digest_is_refused(self):
-        def attack(signature):
-            forged = x509.load_pem_x509_certificate((ROOT / "pki/ca.crt").read_bytes())
-            signature.find(f".//{{{asic_samples.DS}}}X509Certificate").text = base64.b64encode(
-                forged.public_bytes(serialization.Encoding.DER)).decode()
-        self.assertNothingIntact(self.attacked_signature(attack))
+        key, user = asic_samples.test_identity()
+        ca = x509.load_pem_x509_certificate((ROOT / "pki/ca.crt").read_bytes())
+
+        def mutate(signature):
+            digest = signature.find(f".//{self.XADES}SigningCertificateV2//{self.SIGNATURE}DigestValue")
+            digest.text = base64.b64encode(hashlib.sha256(user.public_bytes(serialization.Encoding.DER)).digest()).decode()
+        signature, _ = self.only_signature(self.container(mutate, key=key, cert=ca))
+        self.assertFalse(signature["intact"])
+        self.assertEqual(signature["broken_reason"], xades_verify.CERTIFICATE_MISMATCH)
+        control, _ = self.only_signature(self.container(key=key, cert=user))
+        self.assertTrue(control["intact"], control["broken_reason"])
 
     def test_external_entity_is_not_read(self):
         outside = Path(tempfile.mkdtemp()) / "outside.txt"
@@ -779,8 +798,8 @@ class ContainerAttacks(unittest.TestCase):
         for uri in ("../x", "file:///etc/passwd", "http://example.com/x", "/META-INF/signatures.xml"):
             with self.subTest(uri=uri):
                 def mutate(signature, uri=uri):
-                    signature.find(f"{{{asic_samples.DS}}}SignedInfo/{{{asic_samples.DS}}}Reference").set("URI", uri)
-                description = self.assertNothingIntact(self.container(mutate))
+                    signature.find(f"{self.SIGNATURE}SignedInfo/{self.SIGNATURE}Reference").set("URI", uri)
+                _, description = self.assertRefused(mutate, xades_verify.BAD_REFERENCE)
                 self.assertEqual(description["files"][0]["state"], "unsigned")
 
     def test_zip_bomb_is_refused(self):
