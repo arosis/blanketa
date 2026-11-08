@@ -1,39 +1,26 @@
 """End-to-end check of zfoengine on the CUZK form, driven like zfo_script.js drives it.
 
-Plain script (no pytest needed):  .venv/bin/python -I tests/test_engine.py
-
 The page HTML is rendered with the editor's fo2html.xsl (as app.py does) and the
 browser side is simulated: ids are assigned like identify_inputs()/identify_date_inputs(),
 payloads are built like set_inputs_init_values(), get_parent_repe(), server_add_section().
 """
 import json
 import logging
-import sys
 import time
-from pathlib import Path
+import unittest
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
-
-from lxml import etree  # noqa: E402
+from lxml import etree
 from lxml import html as lhtml
+from support import ROOT
 
-from zfoengine import api  # noqa: E402
-
-logging.basicConfig(level=logging.ERROR, format="%(levelname)s %(name)s: %(message)s")
-# calculate binds written in 602's JavaScript ({ var doc=GetDocument(); ...}) cannot be
-# evaluated as XPath - the original logs and skips them too; keep the output readable
-logging.getLogger("zfo.evaluate").setLevel(logging.CRITICAL)
+from zfoengine import api
 
 EDITOR = ROOT / "vendor/zfo-editor-src/zfo-editor-0.3.2"
 DS = "http://www.w3.org/2000/09/xmldsig#"
 D = {"d": "http://software602.cz/sample"}
-CHECKS = []
 
 
 def check(cond, what):
-    CHECKS.append(what)
-    print(("ok   " if cond else "FAIL ") + what)
     assert cond, what
 
 
@@ -160,12 +147,10 @@ def text(doc, xpath):
     return [e.text for e in api.data_element(doc).xpath(xpath, namespaces=D)]
 
 
-def main():
-    t = time.time()
+def drive_cuzk_form():
     fo = load_fo("samples/cuzk/form.zfo")
     doc = api.open_document(fo)
     page = render_html(fo)
-    print("opened + rendered samples/cuzk/form.zfo in %.2fs" % (time.time() - t))
     check(api.data_element(doc).tag == "{http://software602.cz/sample}root", "data_element is d:root")
 
     startup(doc, page)
@@ -180,7 +165,6 @@ def main():
     before = text(doc, "//d:pomocne/d:s2a_kontrola_stavy_pozemky")
     resp, err = store(doc, page, "prepinac2a", "1")
     calc = js_call(resp, "field_changed_ok_callback")["calculated"]
-    print("     calculated binds:", calc)
     after = text(doc, "//d:pomocne/d:s2a_kontrola_stavy_pozemky")
     check(before in ([None], ["0"]) and after == ["1"] and str(calc.get("s2a_kontrola_stavy_pozemky")) == "1",
           "calculate bind s2a_kontrola_stavy_pozemky: %s -> %s" % (before, after))
@@ -230,7 +214,6 @@ def main():
                         ("no_such_message", {}), ("_construct_web_response", "x"), ("json", "")]:
         resp, err = valid(api.handle(doc, mt, payload), "GUI/unknown message %s" % mt)
         check(not err, "%s: no error response" % mt)
-        print("     ->", [(r["type"], r["data"] if r["type"] == "javascript" else r["data"]["to_display"]) for r in resp][:4])
     check(text(doc, "//d:tisk") == ["0"], "print button chain restored tisk=0")
 
     # --- pre-filled form from the real FormFiller
@@ -246,8 +229,12 @@ def main():
     js_call(resp, "field_changed_ok_callback")
     check(text(doc, "//d:pomocne/d:s2a_kontrola_stavy_pozemky") == ["0"], "calculation still bound to first document")
 
-    print("\nALL %d CHECKS PASSED" % len(CHECKS))
 
-
-if __name__ == "__main__":
-    main()
+class CuzkForm(unittest.TestCase):
+    def test_page_messages_on_a_published_form(self):
+        # calculate binds written in 602's JavaScript ({ var doc=GetDocument(); ...}) cannot be
+        # evaluated as XPath - the original logs and skips them too
+        evaluate = logging.getLogger("zfo.evaluate")
+        self.addCleanup(evaluate.setLevel, evaluate.level)
+        evaluate.setLevel(logging.CRITICAL)
+        drive_cuzk_form()

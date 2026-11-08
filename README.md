@@ -170,10 +170,11 @@ Pozor: náhled v Chromu se liší od aplikace (WebKit). Rozvržení proto ověř
 swiftc -O tools/webkit-probe.swift -o tools/webkit-probe
 ```
 
-Testy enginu:
+Testy (jednou předtím `tools/make-test-pki.sh`, viz níže):
 
 ```bash
-.venv/bin/python -I tests/test_engine.py
+.venv/bin/python -I -m unittest discover -s tests
+.venv/bin/python -I -m unittest discover -s tests -p test_pdf.py   # jen jeden soubor
 ```
 
 ## Testovací certifikát

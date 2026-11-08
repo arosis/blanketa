@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Writes samples-isds/: data messages and delivery receipts as ISDS hands them out, sealed by a throwaway test
-authority, for tests/test_app.py, tests/test_security.py and tools/fuzz.py.
+authority, for tests/test_isds.py, tests/test_security.py and tools/fuzz.py.
 
     .venv/bin/python tools/make-isds-samples.py
 

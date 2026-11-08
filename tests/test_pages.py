@@ -1,0 +1,178 @@
+"""Code of the pages in ui/ run in Node.js on the answers the engine and the hosts give."""
+import json
+import re
+import unittest
+
+from support import ROOT, needs_node, run_in_node
+
+import app
+import desktop
+
+
+@needs_node
+class SignatureReplacementNotice(unittest.TestCase):
+    """Runs the button answers of ui/shell.html: a change of the data shows that the data signature will be replaced."""
+    SCRIPT = """
+    const window = globalThis;
+    let changed = false, ready = true, notices = 0;
+    const renderSignatures = () => notices++;
+    const queue = Promise.resolve(), document = {getElementsByName: () => []}, calls = [];
+    for (const name of ['gtk_handler_start', 'gtk_handler_finished', 'send', 'set_inputs_init_values', 'redrawSections',
+                        'calc_repeatable_sections', 'set_readonly_inputs', 'set_multiswitch_controls', 'setStatus', 'alert',
+                        'showCheck', 'focusField']) window[name] = () => calls.push(name);
+    const plainTextOf = text => text;
+    %s
+    eval(process.argv[1]);
+    console.log(JSON.stringify({notices, calls}));
+    """
+    ANSWER = {"values": {}, "changed": False, "messages": [], "notices": [], "focus": None, "problems": []}
+
+    def page_after(self, call):
+        page = app.SHELL
+        parts = [re.search(pattern, page, re.S).group(0) for pattern in (
+            r"const noteChange = .*?\n  \};", r"window\.perform_click_action_callback = .*?\n  \};",
+            r"window\.form_script_callback = .*?\n  \};", r"window\.data_changed_callback = .*?;\n")]
+        script = self.SCRIPT % "\n".join(parts)
+        return json.loads(run_in_node(script, call))
+
+    def notices_after(self, call):
+        return self.page_after(call)["notices"]
+
+    def test_xpath_button_that_changed_the_data(self):
+        self.assertEqual(self.notices_after('perform_click_action_callback({changed: true})'), 1)
+        self.assertEqual(self.notices_after('perform_click_action_callback({changed: false})'), 0)
+
+    def test_script_button_that_changed_the_data(self):
+        changed = {**self.ANSWER, "changed": True}
+        self.assertEqual(self.notices_after(f"form_script_callback({json.dumps(changed)})"), 1)
+        self.assertEqual(self.notices_after(f"form_script_callback({json.dumps(self.ANSWER)})"), 0)
+
+    def test_notice_is_drawn_once(self):
+        self.assertEqual(self.notices_after('perform_click_action_callback({changed: true}); perform_click_action_callback({changed: true})'), 1)
+
+    def test_engine_answer_that_the_data_changed(self):
+        self.assertEqual(self.notices_after('data_changed_callback()'), 1)
+
+    def test_script_answer_refreshes_every_copy_of_the_sections(self):
+        # result.values names a field only by its bind; the values of the second and further copies come with the refresh.
+        self.assertIn("calc_repeatable_sections", self.page_after(f"form_script_callback({json.dumps(self.ANSWER)})")["calls"])
+
+
+@needs_node
+class RadioButtonsInSectionCopies(unittest.TestCase):
+    """Runs the radio button handling of ui/shell.html on a page with a group outside sections and two copies of a section."""
+    SCRIPT = """
+    const window = globalThis, sent = [];
+    const formsById = new Map();
+    const document = {body: {append() {}}, createElement: tag => tag === 'div'
+      ? {children: [], append(form) { this.children.push(form); formsById.set(form.id, form); }, get childElementCount() { return this.children.length; }}
+      : {id: ''}};
+    const copies = [{name: 'sekce-rep-0'}, {name: 'sekce-rep-1'}];
+    const radio = (name, value, copy) => ({type: 'radio', name, value, checked: false, copy, id: `${name}-${value}`, attributes: {},
+      closest: () => copy, getAttribute(key) { return this.attributes[key] ?? null; }, setAttribute(key, text) { this.attributes[key] = text; },
+      get form() { return formsById.get(this.attributes.form) ?? null; }});
+    const radios = [radio('mimo', 'x', null), radio('mimo', 'y', null), ...copies.flatMap(copy => ['a', 'b'].map(value => radio('r', value, copy)))];
+    const page = {querySelectorAll: () => radios};
+    const elementsNamed = name => radios.filter(candidate => candidate.name === name);
+    const $ = element => element?.wrapped ? element : {wrapped: element, hasClass: () => false};
+    const is_array = Array.isArray;
+    const get_html_elem = (parent, name) => copies.find(copy => copy.name === name)
+      ?? radios.find(candidate => candidate.name === name && candidate.copy === (parent?.wrapped ?? null));
+    const set_input_value = () => { throw new Error('a radio button reached set_input_value'); };
+    const gtk_handler_start = () => {}, send = message => sent.push(JSON.parse(message)), setStatus = () => {};
+    const shortOneLine = text => text, labelFor = () => '', get_parent_repe = field => field.copy ? `block---${field.copy.name}` : '';
+    let lastField = null;
+    %s
+    eval(process.argv[1]);
+    console.log(JSON.stringify({checked: radios.filter(candidate => candidate.checked).map(candidate => (candidate.copy?.name ?? 'mimo') + ':' + candidate.value),
+                                forms: radios.map(candidate => candidate.getAttribute('form')), sent}));
+    """
+
+    def page_after(self, call):
+        page = app.SHELL
+        parts = [re.search(pattern, page, re.S).group(0) for pattern in (
+            r"  const SECTION_COPY = .*?window\.fill_inputs = .*?\n  \};", r"  function applyDefault\(.*?\n  \}")]
+        script = self.SCRIPT % "\n".join(parts)
+        return json.loads(run_in_node(script, call))
+
+    def test_each_copy_shows_its_own_value(self):
+        page = self.page_after("fill_inputs(null, {mimo: 'y', sekce: [{r: 'b'}, {r: 'a'}]})")
+        self.assertEqual(page["checked"], ["mimo:y", "sekce-rep-0:b", "sekce-rep-1:a"])
+
+    def test_empty_value_leaves_no_button_of_the_copy_chosen(self):
+        page = self.page_after("fill_inputs(null, {sekce: [{r: 'a'}, {r: 'a'}]}); fill_inputs(null, {sekce: [{r: 'a'}, {r: ''}]})")
+        self.assertEqual(page["checked"], ["sekce-rep-0:a"])
+
+    def test_each_copy_is_a_group_of_its_own(self):
+        forms = self.page_after("fill_inputs(null, {})")["forms"]
+        self.assertEqual(forms[:2], [None, None])
+        self.assertEqual(forms[2], forms[3])
+        self.assertEqual(forms[4], forms[5])
+        self.assertNotEqual(forms[2], forms[4])
+
+    def test_copy_cloned_with_the_group_of_its_original_gets_its_own(self):
+        clone = ("fill_inputs(null, {}); copies[1] = {name: 'sekce-rep-1'}; radios.slice(4).forEach(button => { button.copy = copies[1]; button.setAttribute('form', radios[2].getAttribute('form')); }); "
+                 "fill_inputs(null, {})")
+        forms = self.page_after(clone)["forms"]
+        self.assertNotEqual(forms[2], forms[4])
+
+    def test_value_by_name_alone_goes_to_the_first_group_and_clears_its_choice(self):
+        page = self.page_after("fill_inputs(null, {mimo: 'x', sekce: [{r: 'a'}, {r: 'a'}]}); set_radio_value('r', 'b'); set_radio_value('mimo', '')")
+        self.assertEqual(page["checked"], ["sekce-rep-0:b", "sekce-rep-1:a"])
+
+    def test_default_value_is_stored_for_the_copy_of_the_field(self):
+        page = self.page_after("fill_inputs(null, {sekce: [{r: 'b'}, {r: 'b'}]}); lastField = radios[5]; applyDefault({field: 'r', value: 'a'})")
+        self.assertEqual(page["checked"], ["sekce-rep-0:b", "sekce-rep-1:a"])
+        self.assertEqual(page["sent"], [{"type": "store_val", "data": {"field": "r", "value": "a", "repe": "block---sekce-rep-1", "input_id": "r-b"}}])
+
+
+@needs_node
+class SavedFileNames(unittest.TestCase):
+    """Runs plainName from ui/files.js: a name the hosts refuse would drop the whole save request silently."""
+
+    def test_every_name_becomes_one_the_hosts_accept(self):
+        names = ["smlouva: v2.pdf", "složka/příloha.pdf", "a:b.pdf", "C:\\dokumenty\\x.pdf", "slozka/", ".", "..", "a/..",
+                 "", "x\x00y.txt", "tab\tname.txt", "obyčejný název.pdf"]
+        source = (ROOT / "ui/files.js").read_text(encoding="utf-8")
+        block = re.search(r"  const plainName = .*?\n  \};", source, re.S).group(0)
+        script = f"{block}\nconsole.log(JSON.stringify(JSON.parse(process.argv[1]).map(plainName)));"
+        out = run_in_node(script, json.dumps(names))
+        plain = json.loads(out)
+        self.assertTrue(all(desktop.is_plain_file_name(name) for name in plain), plain)
+        self.assertEqual(plain[:6], ["smlouva_ v2.pdf", "příloha.pdf", "a_b.pdf", "x.pdf", "soubor", "soubor"])
+        self.assertEqual(plain[-1], "obyčejný název.pdf")
+
+
+@needs_node
+class RevocationVerdict(unittest.TestCase):
+    """Runs the decision in ui/bridge.js: the certificate below was revoked on 1 June."""
+    BEFORE, AFTER = "2026-01-01T00:00:00+00:00", "2026-09-01T00:00:00+00:00"
+    SCRIPT = """
+    const window = {}, fetch = async () => ({ok: true, json: async () => ({c: {status: 'revoked', revoked_at: '2026-06-01T00:00:00+00:00'}})});
+    %s
+    const sigs = JSON.parse(process.argv[1]), r = window.zfoRevocation;
+    r.ask('s', sigs, () => {});
+    setTimeout(() => console.log(JSON.stringify(sigs.map(sig => [r.provenBeforeRevocation(sig), r.revoked(sig), r.revokedBeforeSigning(sig)]))), 50);
+    """
+
+    def verdict(self, kind, proof_at, signed_at):
+        source = (ROOT / "ui/bridge.js").read_text(encoding="utf-8")
+        block = re.search(r"window\.zfoRevocation = .*?\n\}\)\(\);", source, re.S).group(0)
+        sig = {"certificate": "c", "signed_at": signed_at, "proof": {"kind": kind, "at": proof_at} if kind else None}
+        out = run_in_node(self.SCRIPT % block, json.dumps([sig]))
+        return tuple(json.loads(out)[0])
+
+    def test_stamp_before_revocation_keeps_the_signature_valid(self):
+        for kind in ("signature", "document"):
+            self.assertEqual(self.verdict(kind, self.BEFORE, self.AFTER), (True, False, False))
+
+    def test_signature_stamp_after_revocation_is_invalid(self):
+        self.assertEqual(self.verdict("signature", self.AFTER, self.BEFORE), (False, True, True))
+
+    def test_later_document_stamp_leaves_the_signers_claim(self):
+        self.assertEqual(self.verdict("document", self.AFTER, self.BEFORE), (False, True, False))
+        self.assertEqual(self.verdict("document", self.AFTER, self.AFTER), (False, True, True))
+
+    def test_without_a_stamp_the_signers_claim_decides(self):
+        self.assertEqual(self.verdict(None, None, self.BEFORE), (False, True, False))
+        self.assertEqual(self.verdict(None, None, self.AFTER), (False, True, True))
