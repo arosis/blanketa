@@ -2,6 +2,7 @@
 
     python -I tests/test_app.py
 """
+import base64
 import copy
 import importlib.util
 import io
@@ -20,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest import mock
 
+from asn1crypto import cms
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import rsa
@@ -273,6 +275,50 @@ class IsdsMessages(unittest.TestCase):
                      tool.build_message(xml=doctype), b"\x30\x80"):
             with self.subTest(data=data[:20]), self.assertRaises(ValueError):
                 isds_message.read_message(data)
+
+    def test_intact_seal_with_stamp(self):
+        seal = isds_message.describe_seal(isds_message.read_message(isds_sample("prijata")))
+        self.assertTrue(seal["intact"])
+        self.assertTrue(seal["isds_operator"])
+        self.assertEqual(seal["subject"], "ISDS TEST")
+        self.assertEqual(seal["issuer"], "Blanketa TEST CA")
+        self.assertEqual([(stamp["kind"], stamp["intact"], stamp["at"]) for stamp in seal["stamps"]],
+                         [("signature", True, "2026-03-02T09:30:00+00:00")])
+        self.assertEqual((seal["publisher"], seal["modified"], seal["changes_unchecked"], seal["covers_whole"]), (False, False, False, True))
+        self.assertEqual(x509.load_der_x509_certificate(seal["der"]).subject.rfc4514_string().count("ISDS TEST"), 1)
+
+    def test_tampered_content_breaks_the_seal(self):
+        self.assertFalse(isds_message.describe_seal(isds_message.read_message(isds_sample("pozmenena")))["intact"])
+
+    def test_foreign_signer_is_flagged(self):
+        seal = isds_message.describe_seal(isds_message.read_message(isds_sample("cizi-pecet")))
+        self.assertTrue(seal["intact"])
+        self.assertFalse(seal["isds_operator"])
+        self.assertEqual(seal["subject"], "Někdo jiný TEST")
+
+    def test_earlier_operator_counts_as_isds(self):
+        self.assertTrue(isds_message.describe_seal(isds_message.read_message(isds_sample("vyprsela")))["isds_operator"])
+
+    def test_receipt_has_no_stamp(self):
+        self.assertEqual(isds_message.describe_seal(isds_message.read_message(isds_sample("dorucenka")))["stamps"], [])
+
+    def test_submission_stamp_matches_hash(self):
+        message = isds_message.read_message(isds_sample("prijata"))
+        stamp = isds_message.submission_stamp(message)
+        self.assertEqual((stamp["at"], stamp["issuer"], stamp["matches"]), ("2026-03-02T09:30:00+00:00", "Blanketa TEST TSA", True))
+        message.xml_root.xpath("//*[local-name()='dmHash']")[0].text = base64.b64encode(b"x" * 32).decode()
+        self.assertFalse(isds_message.submission_stamp(message)["matches"])
+
+    def test_damaged_stamp_is_not_proof(self):
+        info = cms.ContentInfo.load(isds_sample("prijata"))
+        token = info["content"]["signer_infos"][0]["unsigned_attrs"][0]["values"][0]
+        stamp_signer = token["content"]["signer_infos"][0]
+        signature = bytearray(stamp_signer["signature"].native)
+        signature[10] ^= 0xFF
+        stamp_signer["signature"] = bytes(signature)
+        seal = isds_message.describe_seal(isds_message.read_message(info.dump(force=True)))
+        self.assertTrue(seal["intact"])
+        self.assertFalse(seal["stamps"][0]["intact"])
 
     def test_message_files_are_recognised_by_their_first_byte(self):
         self.assertTrue(isds_message.looks_like_message(isds_sample("prijata-ber")))

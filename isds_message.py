@@ -1,11 +1,16 @@
+import asyncio
 import base64
 import binascii
+import hashlib
 import re
 import unicodedata
 from dataclasses import dataclass, field
+from datetime import timezone
 
 from asn1crypto import cms
 from lxml import etree
+from pyhanko.sign.validation import generic_cms
+from pyhanko_certvalidator import ValidationContext
 
 CMS_SEQUENCE = b"\x30"
 # The WS documentation writes the host as isds.czebox.cz in places; the schemas and real messages use isds.czechpoint.cz.
@@ -14,6 +19,9 @@ KINDS = {"message": "received", "SentMessage": "sent", "delivery": "receipt"}
 BODIES = {"received": "dmReturnedMessage", "sent": "dmReturnedMessage", "receipt": "dmDelivery"}
 WINDOWS_RESERVED_STEMS = {"CON", "PRN", "AUX", "NUL", *(f"COM{n}" for n in range(1, 10)), *(f"LPT{n}" for n in range(1, 10))}
 MAX_FILE_NAME = 200
+SIGNATURE_TIME_STAMP_TOKEN_OID = "1.2.840.113549.1.9.16.2.14"
+# IČO of the ISDS operator: Digitální a informační agentura, before it Ministerstvo vnitra.
+ISDS_OPERATOR_IDS = ("17651921", "00007064")
 XML_PARSER = etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False, huge_tree=True)
 
 
@@ -152,3 +160,83 @@ def safe_file_names(names):
         taken.add(candidate.lower())
         result.append(candidate)
     return result
+
+
+def _display_name(name):
+    return name.native.get("common_name") or name.human_friendly
+
+
+def is_isds_operator(certificate):
+    subject = certificate.subject.native
+    identifiers = [str(subject.get(key) or "") for key in ("organization_identifier", "serial_number", "organization_name")]
+    return any(identifier.endswith(operator_id) or f"IČ {operator_id}" in identifier or f"IČO {operator_id}" in identifier
+               for identifier in identifiers for operator_id in ISDS_OPERATOR_IDS)
+
+
+def _content_digest(message):
+    return lambda algorithm: hashlib.new(algorithm, message.content).digest()
+
+
+def _stamp_details(status):
+    if status is None or status.signing_cert is None or not status.intact or not status.valid:
+        return {"kind": "signature", "intact": False, "at": None, "issuer": "", "der": None}
+    return {"kind": "signature", "intact": True, "at": status.timestamp.astimezone(timezone.utc).isoformat(),
+            "issuer": _display_name(status.signing_cert.subject), "der": status.signing_cert.dump()}
+
+
+def _signature_stamps(signer_info, digest):
+    attributes = signer_info["unsigned_attrs"]
+    if not attributes.native or not any(attribute["type"].dotted == SIGNATURE_TIME_STAMP_TOKEN_OID for attribute in attributes):
+        return [], None
+    try:  # no fetching: the page must not wait for the network, and trust comes from the trusted lists
+        timing = asyncio.run(generic_cms.collect_timing_info(signer_info, ValidationContext(allow_fetching=False), digest))
+        return [_stamp_details(timing.get("timestamp_validity"))], timing.get("signer_reported_dt")
+    except Exception:  # noqa: BLE001 - a damaged token only means the time is not confirmed
+        return [_stamp_details(None)], None
+
+
+def _seal_is_intact(message):
+    try:
+        status = asyncio.run(generic_cms.async_validate_cms_signature(
+            message.signed_data, validation_context=ValidationContext(allow_fetching=False)))
+        return bool(status.intact and status.valid)
+    except Exception:  # noqa: BLE001 - whatever breaks in a hostile envelope, the seal is not shown as intact
+        return False
+
+
+def describe_seal(message):
+    try:
+        signer_info = message.signed_data["signer_infos"][0]
+        certificate = generic_cms.extract_certs_for_validation(message.signed_data).signer_cert
+    except Exception as error:  # noqa: BLE001 - pyHanko reports a missing signer certificate in its own errors
+        # Nothing can be said about who sealed it; the message is refused rather than shown with an anonymous seal.
+        raise ValueError("message without a readable seal certificate") from error
+    stamps, reported = _signature_stamps(signer_info, _content_digest(message))
+    if reported is None:
+        reported = generic_cms.extract_self_reported_ts(signer_info)
+    return {
+        "subject": _display_name(certificate.subject), "issuer": _display_name(certificate.issuer),
+        "intact": _seal_is_intact(message), "isds_operator": is_isds_operator(certificate),
+        "not_after": certificate["tbs_certificate"]["validity"]["not_after"].native.isoformat(),
+        "signed_at": reported.astimezone(timezone.utc).isoformat() if reported else None,
+        "der": certificate.dump(), "stamps": stamps,
+        "publisher": False, "modified": False, "changes_unchecked": False, "covers_whole": True,
+    }
+
+
+def submission_stamp(message):
+    body = _child(message.xml_root, BODIES[message.kind])
+    encoded = _text(body, "dmQTimestamp")
+    if not encoded:
+        return None
+    try:
+        token = cms.ContentInfo.load(base64.b64decode("".join(encoded.split()), validate=True))
+        signed = token["content"]
+        tst_info = signed["encap_content_info"]["content"].parsed
+        stamped_hash = tst_info["message_imprint"]["hashed_message"].native
+        authority = generic_cms.extract_certs_for_validation(signed).signer_cert
+        message_hash = base64.b64decode("".join(_text(body, "dmHash").split()), validate=True)
+        return {"at": tst_info["gen_time"].native.astimezone(timezone.utc).isoformat(),
+                "issuer": _display_name(authority.subject), "matches": stamped_hash == message_hash}
+    except Exception:  # noqa: BLE001 - a damaged stamp only means the submission time is not shown
+        return None
