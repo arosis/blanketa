@@ -531,7 +531,7 @@ class Handler(BaseHTTPRequestHandler):
     def _serve_attachment(self, query):
         session = SESSIONS.get(first_query_value(query, "s"))
         index = first_query_value(query, "i")
-        if session is None or "message" not in session or not index.isdigit():
+        if session is None or "message" not in session or not (index.isascii() and index.isdecimal()):
             return self._send_not_found()
         message = session["message"]
         if int(index) >= len(message.attachments):

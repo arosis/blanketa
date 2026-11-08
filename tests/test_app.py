@@ -351,6 +351,23 @@ class IsdsMessages(unittest.TestCase):
         self.assertTrue(seal["intact"])
         self.assertFalse(seal["stamps"][0]["intact"])
 
+    def test_unusual_status_is_left_out(self):
+        for status in ("²", "٣", "x"):
+            with self.subTest(status=status):
+                message = isds_message.read_message(isds_sample_tool().build_message(status=status))
+                self.assertIsNone(message.info["status"])
+
+    def test_message_page_answers_form_menu_commands(self):
+        with mock.patch.dict(app.FORMS, {"prijata": ISDS_SAMPLES / "prijata.zfo"}):
+            page = app.render_message_page("prijata")
+        fallback = re.search(r"window\.zfoAction = name => \(actions\[name\] \?\? (\w+)\)", page).group(1)
+        self.assertIn("Datová zpráva je jen ke čtení", page.split(f"const {fallback} = ")[1].split("\n")[0])
+
+    def test_message_page_keeps_czech_typography(self):
+        page = (ROOT / "ui/message.html").read_text(encoding="utf-8")
+        self.assertNotIn("razítka v pečetěném", page)
+        self.assertNotRegex(page, r"\} (B|kB|MB)`")
+
     def test_message_files_are_recognised_by_their_first_byte(self):
         self.assertTrue(isds_message.looks_like_message(isds_sample("prijata-ber")))
         self.assertFalse(isds_message.looks_like_message(b"PK\x03\x04"))

@@ -57,7 +57,7 @@ def _text(element, name):
 
 
 def _number(text):
-    return int(text) if text.isdigit() else None
+    return int(text) if text.isascii() and text.isdecimal() else None
 
 
 def _party(dm, role, box_element):

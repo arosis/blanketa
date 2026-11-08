@@ -540,6 +540,7 @@ class LocalServer(unittest.TestCase):
         form = self.session_of("cuzk-test")
         for path in ("/attachment?i=0", f"/attachment?s={other}&i=0", f"/attachment?s={form}&i=0",
                      f"/attachment?s={session}&i=99", f"/attachment?s={session}&i=-1", f"/attachment?s={session}&i=x",
+                     f"/attachment?s={session}&i=%C2%B2", f"/attachment?s={session}&i=%D9%A3",
                      f"/attachment?s={session}"):
             with self.subTest(path=path):
                 self.assertEqual(self.request("GET", path)[0], 404)

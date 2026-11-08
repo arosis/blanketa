@@ -94,9 +94,9 @@ __SHELL_STYLE__
   const queryOne = selector => document.querySelector(selector);
   const escapeHtml = text => String(text).replace(/[&<>"]/g, character => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[character]));
   const formatDateTime = iso => iso ? new Date(iso).toLocaleString('cs-CZ', {dateStyle: 'medium', timeStyle: 'short'}) : '–';
-  const formatSize = bytes => bytes < 1024 ? `${bytes} B`
-    : bytes < 1024 * 1024 ? `${(bytes / 1024).toLocaleString('cs-CZ', {maximumFractionDigits: 1})} kB`
-    : `${(bytes / 1024 / 1024).toLocaleString('cs-CZ', {maximumFractionDigits: 1})} MB`;
+  const formatSize = bytes => bytes < 1024 ? `${bytes}\u00a0B`
+    : bytes < 1024 * 1024 ? `${(bytes / 1024).toLocaleString('cs-CZ', {maximumFractionDigits: 1})}\u00a0kB`
+    : `${(bytes / 1024 / 1024).toLocaleString('cs-CZ', {maximumFractionDigits: 1})}\u00a0MB`;
   const status = queryOne('[data-status]');
   const element = (tag, text, className) => {
     const created = document.createElement(tag);
@@ -153,7 +153,7 @@ __SHELL_STYLE__
   if (MESSAGE.kind !== 'receipt') {
     queryOne('[data-attachments]').hidden = false;
     queryOne('[data-attachments-title]').textContent = `Přílohy (${MESSAGE.attachments.length})`;
-    queryOne('[data-save-all]').hidden = MESSAGE.attachments.length < 2;
+    queryOne('[data-save-all]').hidden = MESSAGE.attachments.length < 2 || !native;
     queryOne('[data-save-all]').addEventListener('click', () => saveAttachments(MESSAGE.attachments.map((_, index) => index), true));
     MESSAGE.attachments.forEach((attachment, index) => {
       const row = document.createElement('tr');
@@ -179,7 +179,7 @@ __SHELL_STYLE__
 
   const submitted = queryOne('[data-submitted]');
   submitted.textContent = SUBMITTED?.matches
-    ? `Podáno ${formatDateTime(SUBMITTED.at)} podle časového razítka v pečetěném obsahu zprávy, vydal ${SUBMITTED.issuer}.`
+    ? `Podáno ${formatDateTime(SUBMITTED.at)} podle časového razítka v\u00a0pečetěném obsahu zprávy, vydal ${SUBMITTED.issuer}.`
     : 'Zpráva neobsahuje časové razítko podání, které by k ní patřilo.';
 
   const revocation = window.zfoRevocation;
@@ -237,7 +237,8 @@ __SHELL_STYLE__
   for (const button of document.querySelectorAll('.zfo-bar [data-action], .zfo-close[data-action]')) {
     button.addEventListener('click', () => actions[button.dataset.action]());
   }
-  window.zfoAction = name => actions[name]?.();
+  const explainReadOnly = () => { status.textContent = 'Datová zpráva je jen ke čtení – nejde ji uložit, podepsat ani upravit.'; };
+  window.zfoAction = name => (actions[name] ?? explainReadOnly)();
 </script>
 </body>
 </html>
