@@ -187,7 +187,7 @@ def _identity(key, cert):
 
 
 def xades_signature(files, *, signature_id="S1", digest=SHA256, signature_method=RSA_SHA256, c14n=C14N10,
-                    signing_certificate="v2", key=None, cert=None, stamp=False, manifest=False, mutate=None):
+                    signing_certificate="v2", key=None, cert=None, stamp=False, manifest=False, sign_key_info=False, mutate=None):
     if stamp:
         raise NotImplementedError("time stamps come with RFC 3161 support")
     key, cert = _identity(key, cert)
@@ -201,6 +201,9 @@ def xades_signature(files, *, signature_id="S1", digest=SHA256, signature_method
     else:
         for name in files:
             _add_reference(signed_info, quote(name), digest)
+    if sign_key_info:
+        signature.find(_ds("KeyInfo")).set("Id", f"{signature_id}-key-info")
+        _add_reference(signed_info, f"#{signature_id}-key-info", SHA256, [C14N10])
     _signed_properties_reference(signature, signed_info, digest)
     return _finish(signature, signed_info, key, files, mutate)
 

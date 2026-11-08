@@ -146,6 +146,25 @@ class XadesVerifyTest(unittest.TestCase):
         self.assertBroken(result, xades_verify.BAD_REFERENCE)
         self.assertEqual(result["references"], [{"name": "smlouva.pdf", "outcome": "refused"}])
 
+    def test_signed_key_info_verifies(self):
+        result = xades_verify.verify(asic_samples.xades_signature(FILES, sign_key_info=True), resolver(FILES))
+        self.assertTrue(result["intact"], result["broken_reason"])
+        self.assertEqual(result["references"], [{"name": "smlouva.pdf", "outcome": "ok"}])
+
+    def test_key_info_outside_signature_is_wrapping(self):
+        def move_key_info_into_object(signature):
+            key_info = signature.find(f"{{{DS}}}KeyInfo")
+            etree.SubElement(signature, f"{{{DS}}}Object").append(key_info)
+        signature = asic_samples.xades_signature(FILES, sign_key_info=True, mutate=move_key_info_into_object)
+        self.assertBroken(xades_verify.verify(signature, resolver(FILES)), xades_verify.WRAPPED)
+
+    def test_duplicate_key_info_id_is_wrapping(self):
+        def duplicate_key_info(signature):
+            copy = etree.fromstring(etree.tostring(signature.find(f"{{{DS}}}KeyInfo")))
+            etree.SubElement(signature, f"{{{DS}}}Object").append(copy)
+        signature = asic_samples.xades_signature(FILES, sign_key_info=True, mutate=duplicate_key_info)
+        self.assertBroken(xades_verify.verify(signature, resolver(FILES)), xades_verify.WRAPPED)
+
     def test_duplicate_id_is_wrapping(self):
         def duplicate_signed_properties(signature):
             key_info = signature.find(f"{{{DS}}}KeyInfo")

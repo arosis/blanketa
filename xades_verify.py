@@ -154,7 +154,7 @@ class _Verification:
         target = found[0]
         parent = target.getparent()
         grandparent = parent.getparent()
-        if target.tag == _ds("Object") and parent is self.signature:
+        if target.tag in (_ds("Object"), _ds("KeyInfo")) and parent is self.signature:
             return target
         if target.tag == _ds("Manifest") and parent.tag == _ds("Object") and grandparent is self.signature:
             return target
