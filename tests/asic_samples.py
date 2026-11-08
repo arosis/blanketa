@@ -198,12 +198,12 @@ def _sign(signature, signed_info, key):
     c14n = signed_info.find(_ds("CanonicalizationMethod")).get("Algorithm")
     data = _canonical(signed_info, c14n, with_comments=c14n.endswith("WithComments"))
     hash_algorithm = SIGNATURE_HASHES[method]()
-    if isinstance(key, rsa.RSAPrivateKey):
-        value = key.sign(data, padding.PKCS1v15(), hash_algorithm)
-    else:
+    if isinstance(key, ec.EllipticCurvePrivateKey):
         r, s = utils.decode_dss_signature(key.sign(data, ec.ECDSA(hash_algorithm)))
         size = (key.curve.key_size + 7) // 8
         value = r.to_bytes(size, "big") + s.to_bytes(size, "big")
+    else:
+        value = key.sign(data, padding.PKCS1v15(), hash_algorithm)
     signature.find(_ds("SignatureValue")).text = base64.b64encode(value).decode()
 
 
