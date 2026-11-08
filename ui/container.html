@@ -4,13 +4,312 @@
 <meta charset="utf-8">
 <title></title>
 __SHELL_STYLE__
+<link rel="stylesheet" href="/pdfjs/web/pdf_viewer.css">
+<style>
+  .zfo-stage { overflow: hidden; }
+  #viewerContainer { position: absolute; inset: 0; overflow: auto; }
+  .pdfViewer { --page-margin: 24px auto; --page-border: 0; padding-bottom: 24px; }
+  .pdfViewer .page { box-shadow: 0 1px 3px rgba(0, 0, 0, .12), 0 8px 28px rgba(0, 0, 0, .10); }
+  .zfo-file-card { margin: 14vh auto 0; width: min(420px, calc(100% - 48px)); box-sizing: border-box; padding: 28px 24px;
+    background: #fff; border: 1px solid var(--line); border-radius: 14px; text-align: center; }
+  .zfo-file-card > svg { width: 48px; height: 48px; color: var(--accent); }
+  .zfo-file-card h1 { font-size: 16px; font-weight: 600; margin: 12px 0 6px; overflow-wrap: anywhere; }
+  .zfo-file-card p { margin: 0 0 6px; color: var(--muted); }
+  .zfo-file-card .zfo-btn { margin: 16px auto 0; display: inline-flex; }
+  .zfo-files { margin: 0 12px 8px; background: #fff; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .zfo-files button { display: flex; align-items: center; gap: 8px; width: 100%; padding: 8px 10px; border: 0;
+    border-top: 1px solid var(--line); background: none; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+  .zfo-files button:first-child { border-top: 0; }
+  .zfo-files button:hover { background: #f2f4f8; }
+  .zfo-files button[aria-current="true"] { background: #e8f0fc; }
+  .zfo-files .name { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .zfo-files .name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .zfo-files small { color: var(--muted); font-size: 11px; }
+  .zfo-chip { flex: none; padding: 1px 8px; border-radius: 999px; font-size: 11px; white-space: nowrap; }
+  .zfo-chip.signed { background: #e7f5ea; color: var(--ok); }
+  .zfo-chip.changed, .zfo-chip.invalid { background: #fde8e7; color: var(--bad); }
+  .zfo-chip.unsigned { background: #fff4e0; color: #7a4a00; }
+  .zfo-chip.unverified { background: #eef0f3; color: var(--muted); }
+</style>
 </head>
-<body class="zfo-app">
-<script>
+<body class="zfo-app help-hidden">
+
+<header class="zfo-bar">
+  <div class="zfo-group">
+    <button class="zfo-btn primary" data-action="save" title="Uložit vybraný soubor z kontejneru">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 3h11l3 3v15H5z"/><path d="M8 3v5h7V3M8 21v-7h8v7"/></svg>Uložit soubor…
+    </button>
+    <button class="zfo-btn" data-action="open-copy" data-native hidden title="Uložit kopii souboru a otevřít ji v novém okně">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v1H3z"/><path d="M3 10h18l-2 9H5z"/></svg>Otevřít v Blanketě
+    </button>
+  </div>
+  <div class="zfo-group">
+    <button class="zfo-btn icon" data-action="zoom-out" data-pdf-only title="Zmenšit (⌘−)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M8 11h6M16.5 16.5 21 21"/></svg></button>
+    <span class="zfo-zoom">100 %</span>
+    <button class="zfo-btn icon" data-action="zoom-in" data-pdf-only title="Zvětšit (⌘+)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="M8 11h6M11 8v6M16.5 16.5 21 21"/></svg></button>
+    <button class="zfo-btn icon" data-action="zoom-fit" data-pdf-only title="Přizpůsobit šířce okna">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="5" y="3" width="14" height="18" rx="1.5"/><path d="M2 12h4M18 12h4M4 10l-2 2 2 2M20 10l2 2-2 2"/></svg>
+    </button>
+  </div>
+  <div class="zfo-spacer"></div>
+  <div class="zfo-group">
+    <button class="zfo-btn icon active" data-action="panel" title="Informace o kontejneru a podpisech (⌥⌘2)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 3h9l4 4v14H6z"/><circle cx="12" cy="13" r="3"/><path d="M10.5 15.5 10 20l2-1 2 1-.5-4.5"/></svg>
+    </button>
+  </div>
+</header>
+
+<main class="zfo-stage">
+  <div id="viewerContainer" hidden><div id="viewer" class="pdfViewer"></div></div>
+  <div class="zfo-file-card" data-file-card hidden>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4"/></svg>
+    <h1 data-card-name></h1>
+    <p data-card-size></p>
+    <p data-card-note hidden>Náhled souboru se nepodařilo zobrazit.</p>
+    <span class="zfo-chip" data-card-state></span><br>
+    <button class="zfo-btn primary" data-action="save">Uložit soubor…</button>
+  </div>
+  <div class="zfo-empty-state" data-no-files hidden>Kontejner neobsahuje žádné soubory.</div>
+</main>
+
+<aside class="zfo-panel">
+  <h2>Informace <button class="zfo-close" data-action="panel" title="Skrýt panel">✕</button></h2>
+  <h2>Kontejner</h2>
+  <div class="zfo-info" data-info></div>
+  <div data-warnings></div>
+  <h2>Soubory v kontejneru</h2>
+  <div class="zfo-files" data-files></div>
+  <h2>Elektronické podpisy</h2>
+  <div data-signatures></div>
+</aside>
+
+<footer class="zfo-status">
+  <span class="file">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 3h9l4 4v14H6z"/><path d="M15 3v4h4"/></svg>
+    <span data-file></span>
+  </span>
+  <span>·</span>
+  <span class="msg" data-status>Otevírám kontejner…</span>
+</footer>
+
+<script src="/bridge.js"></script>
+<script type="module">
   const SESSION = '__SESSION__';
   const FILE = __FILE__;
   const CONTAINER = __CONTAINER__;
   const FOLDER = __FOLDER__;
+  const native = window.zfoNative;
+  const queryOne = selector => document.querySelector(selector);
+  const escapeHtml = text => String(text).replace(/[&<>"]/g, character => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[character]));
+  const STATE_LABELS = {changed: 'změněno po podpisu', signed: 'podepsáno', invalid: 'podpis neplatný', unverified: 'neověřeno', unsigned: 'nepodepsáno'};
+  const files = CONTAINER.files;
+  const entryUrl = index => '/container-file?s=' + SESSION + '&i=' + index;
+  const baseName = name => name.split('/').pop();
+  const opensInBlanketa = name => /\.(pdf|zfo)$/i.test(name);
+  const formatSize = bytes => bytes < 1024 ? `${bytes} B`
+    : `${(bytes / (bytes < 1024 * 1024 ? 1024 : 1024 * 1024)).toLocaleString('cs-CZ', {maximumFractionDigits: 1})} ${bytes < 1024 * 1024 ? 'kB' : 'MB'}`;
+  const plural = (count, one, few, many) => count === 1 ? one : count >= 2 && count <= 4 ? few : many;
+  document.title = FILE;
+  queryOne('[data-file]').textContent = FILE;
+  if (native) queryOne('[data-native]').hidden = false;
+
+  const unsigned = files.filter(file => file.state === 'unsigned').length;
+  const info = queryOne('[data-info]');
+  info.append(Object.assign(document.createElement('b'), {textContent: CONTAINER.label}), document.createElement('br'),
+              `Soubory: ${files.length}` + (unsigned ? `, z toho ${unsigned} ${plural(unsigned, 'nepodepsaný', 'nepodepsané', 'nepodepsaných')}` : ''));
+  queryOne('[data-warnings]').append(...[...CONTAINER.warnings, CONTAINER.unsupported].filter(Boolean)
+    .map(text => Object.assign(document.createElement('div'), {className: 'zfo-note', textContent: text})));
+
+  const stateChip = (element, state) => {
+    element.className = 'zfo-chip ' + state;
+    element.textContent = STATE_LABELS[state] ?? state;
+    return element;
+  };
+  const fileButtons = files.map((file, index) => {
+    const button = document.createElement('button');
+    const name = document.createElement('span');
+    name.className = 'name';
+    name.title = file.name;
+    name.append(Object.assign(document.createElement('span'), {textContent: file.name}),
+                Object.assign(document.createElement('small'), {textContent: formatSize(file.size)}));
+    button.append(name, stateChip(document.createElement('span'), file.state));
+    button.addEventListener('click', () => select(index));
+    return button;
+  });
+  queryOne('[data-files]').append(...fileButtons);
+  queryOne('[data-files]').hidden = !files.length;
+
+  // pdf_viewer.mjs picks up the library from the global it expects.
+  const pdfjsLib = await import('/pdfjs/build/pdf.min.mjs');
+  globalThis.pdfjsLib = pdfjsLib;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdfjs/build/pdf.worker.min.mjs';
+  const {PDFViewer, EventBus, PDFLinkService} = await import('/pdfjs/web/pdf_viewer.mjs');
+
+  const eventBus = new EventBus();
+  const linkService = new PDFLinkService({eventBus});
+  const viewerContainer = queryOne('#viewerContainer');
+  const viewer = new PDFViewer({
+    container: viewerContainer, viewer: queryOne('#viewer'), eventBus, linkService,
+    annotationMode: pdfjsLib.AnnotationMode.ENABLE, textLayerMode: 1,
+  });
+  linkService.setViewer(viewer);
+  let selected = -1, loadingTask = null, autoFit = true;
+  eventBus.on('pagesinit', () => { if (autoFit) viewer.currentScaleValue = 'page-width'; });
+  eventBus.on('scalechanging', event => { queryOne('.zfo-zoom').textContent = Math.round(event.scale * 100) + ' %'; });
+  new ResizeObserver(() => { if (autoFit && viewer.pdfDocument) viewer.currentScaleValue = 'page-width'; }).observe(viewerContainer);
+
+  const closePdf = () => {
+    const task = loadingTask;
+    loadingTask = null;
+    if (!task) return;
+    viewer.setDocument(null);
+    linkService.setDocument(null);
+    task.destroy();
+  };
+  const showCard = (index, previewFailed = false) => {
+    const file = files[index];
+    viewerContainer.hidden = true;
+    queryOne('[data-card-name]').textContent = file.name;
+    queryOne('[data-card-size]').textContent = formatSize(file.size);
+    queryOne('[data-card-note]').hidden = !previewFailed;
+    stateChip(queryOne('[data-card-state]'), file.state);
+    queryOne('[data-file-card]').hidden = false;
+  };
+  const showPdf = async index => {
+    queryOne('[data-file-card]').hidden = true;
+    viewerContainer.hidden = false;
+    const task = pdfjsLib.getDocument({
+      url: entryUrl(index), standardFontDataUrl: '/pdfjs/standard_fonts/', cMapUrl: '/pdfjs/cmaps/', cMapPacked: true,
+    });
+    loadingTask = task;
+    try {
+      const pdf = await task.promise;
+      if (loadingTask !== task) return;
+      viewer.setDocument(pdf);
+      linkService.setDocument(pdf);
+    } catch {
+      if (loadingTask === task) showCard(index, true);
+    }
+  };
+  const select = index => {
+    if (index === selected) return;
+    closePdf();
+    selected = index;
+    fileButtons.forEach((button, position) => button.setAttribute('aria-current', String(position === index)));
+    const file = files[index];
+    for (const button of document.querySelectorAll('[data-pdf-only]')) button.disabled = !file.pdf;
+    queryOne('[data-action="open-copy"]').disabled = !opensInBlanketa(file.name);
+    if (file.pdf) showPdf(index);
+    else showCard(index);
+  };
+
+  const icons = {
+    ok: '<svg viewBox="0 0 24 24" fill="none" stroke="#1e8e3e" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>',
+    warn: '<svg viewBox="0 0 24 24" fill="none" stroke="#b26a00" stroke-width="2"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17v.5"/></svg>',
+    bad: '<svg viewBox="0 0 24 24" fill="none" stroke="#c5221f" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/></svg>',
+  };
+  const formatDateTime = iso => iso ? new Date(iso).toLocaleString('cs-CZ', {dateStyle: 'medium', timeStyle: 'short'}) : '–';
+  const stampLine = signature => signature.proof
+    ? `<div class="meta">Čas potvrzuje ${signature.proof.kind === 'signature' ? 'kvalifikované časové razítko' : 'kvalifikované časové razítko dokumentu'}: ${formatDateTime(signature.proof.at)}, vydal ${escapeHtml(signature.proof.issuer)}.</div>`
+    : signature.stamp_problem ? `<div class="meta">Časové razítko čas nepotvrzuje. ${escapeHtml(signature.stamp_problem)}</div>` : '';
+  const signedFilesLine = signature => {
+    const names = signature.files.length ? signature.files.join(', ')
+      : CONTAINER.kind === 'xades' ? 'celý dokument' : 'žádný soubor v kontejneru';
+    return `<div class="meta">Podepisuje: ${escapeHtml(names)}</div>`;
+  };
+  const levelOf = signature => {
+    const expired = signature.not_after && new Date(signature.not_after) < new Date(signature.proof?.at ?? Date.now());
+    const revocation = window.zfoRevocation;
+    return !signature.intact || revocation.revokedBeforeSigning(signature) ? 'bad'
+      : (signature.trusted && !expired && !signature.modified && !signature.changes_unchecked && !revocation.revoked(signature)) ? 'ok' : 'warn';
+  };
+  // A time stamp can be intact while the signature it stamps is broken; it then proves nothing, so the card must not
+  // show it as a confirmed time.
+  const shownSignature = signature => signature.intact ? signature : {...signature, proof: null};
+  const signatureCard = original => {
+    const signature = shownSignature(original);
+    const revocation = window.zfoRevocation;
+    const level = levelOf(signature);
+    const state = !signature.intact ? (signature.content_changed ? 'Podpis je porušen – podepsaný obsah byl změněn'
+                                       : 'Podpis je neplatný – ' + escapeHtml(signature.broken_reason))
+      : revocation.state(signature) ? revocation.state(signature)
+      : signature.modified ? 'Podepsaná verze je neporušená, ale po podpisu se změnilo víc než vyplněná pole'
+      : signature.changes_unchecked ? 'Podepsaná verze je neporušená, ale změny po podpisu se nepodařilo zkontrolovat'
+      : signature.trusted ? 'Podpis je platný, certifikát je důvěryhodný'
+      : signature.unverifiable ? 'Obsah je neporušený, důvěryhodnost certifikátu se nepodařilo ověřit'
+      : 'Obsah je neporušený, certifikát není hodnocen jako důvěryhodný';
+    return `<div class="zfo-card ${level}" title="${escapeHtml(signature.reason || '')}">
+      <div class="who">${icons[level]}${escapeHtml(signature.subject || 'Neznámý podepisující')}</div>
+      <div class="state">${state}</div>
+      ${signedFilesLine(signature)}
+      ${signature.trust_source === 'eu' ? '<div class="meta">Vydavatel je v důvěryhodném seznamu EU.</div>' : ''}
+      ${signature.unverifiable ? `<div class="meta">${escapeHtml(signature.reason)}</div>` : ''}
+      ${revocation.line(signature)}
+      ${stampLine(signature)}
+      ${!signature.intact && original.proof ? '<div class="meta">Podpis obsahuje časové razítko, u neplatného podpisu ale nic nepotvrzuje.</div>' : ''}
+      <div class="meta">Podepsáno: ${formatDateTime(signature.signed_at)}${signature.proof ? ' (uvádí podepisující)' : ''}${signature.issuer ? `<br>Vystavil: ${escapeHtml(signature.issuer)}` : ''}
+        ${signature.not_after ? `<br>${new Date(signature.not_after) < new Date() ? 'Platnost certifikátu skončila' : 'Certifikát platí do'} ${new Date(signature.not_after).toLocaleDateString('cs-CZ')}` : ''}</div>
+    </div>`;
+  };
+  const summary = signatures => {
+    const broken = signatures.filter(signature => !signature.intact).length;
+    if (!signatures.length) return CONTAINER.unsupported || 'Kontejner neobsahuje žádný podpis.';
+    if (broken === 1) return 'Jeden podpis je porušený.';
+    if (broken) return `Podpisy: ${broken} ${plural(broken, 'porušený', 'porušené', 'porušených')}.`;
+    if (signatures.every(signature => levelOf(shownSignature(signature)) === 'ok')) return 'Všechny podpisy jsou platné.';
+    return 'Podpisy jsou neporušené, ale ne všechny jsou plně ověřené.';
+  };
+  const signatures = CONTAINER.signatures;
+  const renderSignatures = () => {
+    queryOne('[data-signatures]').innerHTML = signatures.length ? signatures.map(signatureCard).join('')
+      : '<div class="zfo-empty">Kontejner neobsahuje žádný ověřitelný podpis.</div>';
+    queryOne('[data-status]').textContent = summary(signatures);
+    window.zfoRevocation.ask(SESSION, signatures, renderSignatures);
+  };
+
+  const saveFile = open => {
+    const file = files[selected];
+    if (!file) return;
+    if (native) {
+      native.postMessage({action: 'saveContainerFile', url: entryUrl(selected), name: baseName(file.name), folder: FOLDER, open});
+      return;
+    }
+    // A detached link: bridge.js stops clicks on links inside the page from navigating.
+    const link = document.createElement('a');
+    link.href = entryUrl(selected);
+    link.download = baseName(file.name);
+    link.click();
+  };
+  const zoomTo = scale => { autoFit = false; viewer.currentScale = Math.min(4, Math.max(.25, scale)); };
+  const actions = {
+    save: () => saveFile(false),
+    'open-copy': () => { if (native && opensInBlanketa(files[selected]?.name ?? '')) saveFile(true); },
+    'zoom-in': () => { if (viewer.pdfDocument) zoomTo(viewer.currentScale + .1); },
+    'zoom-out': () => { if (viewer.pdfDocument) zoomTo(viewer.currentScale - .1); },
+    'zoom-fit': () => { autoFit = true; if (viewer.pdfDocument) viewer.currentScaleValue = 'page-width'; },
+    panel: () => {
+      const hidden = document.body.classList.toggle('panel-hidden');
+      queryOne('.zfo-bar [data-action="panel"]').classList.toggle('active', !hidden);
+    },
+  };
+  for (const button of document.querySelectorAll('[data-action]')) {
+    button.addEventListener('click', () => actions[button.dataset.action]());
+  }
+  window.zfoAction = name => actions[name]?.();
+  document.addEventListener('keydown', event => {
+    if (!window.zfoShortcut(event)) return;
+    const shortcut = event.key === '+' || event.key === '=' ? 'zoom-in' : event.key === '-' ? 'zoom-out' : null;
+    if (!shortcut || native?.platform === 'mac') return;
+    event.preventDefault();
+    actions[shortcut]();
+  });
+
+  renderSignatures();
+  if (files.length) select(Math.max(0, files.findIndex(file => file.pdf)));
+  else {
+    queryOne('[data-no-files]').hidden = false;
+    for (const button of document.querySelectorAll('[data-action="save"], [data-action="open-copy"], [data-pdf-only]')) button.disabled = true;
+  }
 </script>
 </body>
 </html>
