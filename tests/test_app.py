@@ -300,6 +300,19 @@ class ContainerPages(unittest.TestCase):
         self.assertNotIn("<img src=x", page)
         self.assertEqual(self.page_json(page, "CONTAINER")["files"][0]["name"], self.HOSTILE)
 
+    def test_markers_in_file_data_are_not_substituted(self):
+        page, _ = self.render(self.signed({"__FOLDER__.txt": b"x", "__SESSION__.txt": b"y"}))
+        self.assertEqual([file["name"] for file in self.page_json(page, "CONTAINER")["files"]], ["__FOLDER__.txt", "__SESSION__.txt"])
+        self.open_container(self.signed(), "__CONTAINER__.asice")
+        page = app.render_container_page("container-test")
+        self.assertEqual(self.page_json(page, "FILE"), "__CONTAINER__.asice")
+        self.assertEqual(self.page_json(page, "CONTAINER")["files"][0]["name"], "smlouva.pdf")
+        self.assertEqual(self.page_json(page, "FOLDER"), str(self.folder))
+
+    def test_huge_index_is_not_found(self):
+        _, session = self.render(self.signed())
+        self.assertEqual(self.request(f"/container-file?s={session}&i={'9' * 5000}")[0], 404)
+
     def test_container_without_pdf_renders(self):
         page, _ = self.render(self.signed({"a.txt": b"a", "b.txt": b"b"}))
         self.assertEqual(len(self.page_json(page, "CONTAINER")["files"]), 2)

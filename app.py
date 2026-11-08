@@ -199,11 +199,10 @@ def render_container_page(name):
     path = form_path(name)
     description, entries = asic_verify.describe(path.read_bytes())
     description["signatures"] = container_signatures(description["signatures"])
-    session = new_session({"name": name, "entries": entries, "names": [file["name"] for file in description["files"]]})
-    return (CONTAINER_PAGE.replace("__SESSION__", session)
-            .replace("__FILE__", json_for_script(path.name))
-            .replace("__CONTAINER__", json_for_script(description))
-            .replace("__FOLDER__", json_for_script(data_file_folder(SESSIONS[session]))))
+    content = {"name": name, "entries": entries, "names": [file["name"] for file in description["files"]]}
+    values = {"SESSION": new_session(content), "FILE": json_for_script(path.name),
+              "CONTAINER": json_for_script(description), "FOLDER": json_for_script(data_file_folder(content))}
+    return re.sub(r"__(SESSION|FILE|CONTAINER|FOLDER)__", lambda marker: values[marker.group(1)], CONTAINER_PAGE)
 
 
 def save_pdf(session, values, identity_id=None, placement=None, password=None):
@@ -536,12 +535,15 @@ class Handler(BaseHTTPRequestHandler):
     def _serve_container_file(self, query):
         session = SESSIONS.get(first_query_value(query, "s"))
         index = first_query_value(query, "i")
-        if session is None or "entries" not in session or not index.isascii() or not index.isdigit() or int(index) >= len(session["entries"]):
+        if session is None or "entries" not in session or not index.isascii() or not index.isdigit() or len(index) > 6:
             return self._send_not_found()
-        content = session["entries"][int(index)]
+        index = int(index)
+        if index >= len(session["entries"]):
+            return self._send_not_found()
+        content = session["entries"][index]
         if content.startswith(b"%PDF-"):
             return self._send_response(200, content, "application/pdf")
-        entry_name = session["names"][int(index)]
+        entry_name = session["names"][index]
         return self._send_response(200, content, "application/octet-stream",
                                    {"Content-Disposition": f"attachment; filename*=UTF-8''{quote(entry_name.rsplit('/', 1)[-1])}"})
 
