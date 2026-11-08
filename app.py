@@ -201,7 +201,7 @@ def render_message_page(name):
 
 def save_pdf(session, values, identity_id=None, placement=None, password=None):
     name = session["name"]
-    pdf = pdf_sign.fill_form_fields(session["pdf"], values) if values else session["pdf"]
+    pdf = filled_pdf(session, values)
     if identity_id:
         pdf = pdf_sign.sign_pdf(pdf, *certstore.load_identity(identity_id, password), placement=placement)
         target = output_path(name)
@@ -214,8 +214,12 @@ def save_pdf(session, values, identity_id=None, placement=None, password=None):
     return {"saved": str(target), "signatures": pdf_signatures(pdf), "signature_field": pdf_sign.empty_signature_field(pdf)}
 
 
+def filled_pdf(session, values):
+    return pdf_sign.fill_form_fields(session["pdf"], values) if values else session["pdf"]
+
+
 def write_pdf_for_printing(session, values):
-    pdf = pdf_sign.fill_form_fields(session["pdf"], values) if values else session["pdf"]
+    pdf = filled_pdf(session, values)
     target = Path(tempfile.gettempdir()) / f"zfo-tisk-{secrets.token_hex(4)}-{form_path(session['name']).name}"
     target.write_bytes(pdf)
     return {"path": str(target)}
@@ -230,7 +234,7 @@ def data_file_stem(session):
 
 
 def export_pdf_data(session, values):
-    pdf = pdf_sign.fill_form_fields(session["pdf"], values) if values else session["pdf"]
+    pdf = filled_pdf(session, values)
     current = pdf_form_data.form_data_values(pdf)
     pdf_name = form_path(session["name"]).name
     return {"name": f"{data_file_stem(session)}-data.xfdf", "folder": data_file_folder(session),
@@ -628,6 +632,13 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_error_message(error)
         return self._send_json(result)
 
+    def _send_pdf_for_printing(self, session, body):
+        try:
+            pdf = filled_pdf(session, json.loads(body or b"{}").get("values") or {})
+        except (LookupError, ValueError) as error:
+            return self._send_error_message(error)
+        return self._send_response(200, pdf, "application/pdf")
+
     def _export_or_import_data(self, session, path, body):
         try:
             result = export_data(session) if path == "/export-data" else import_data(session, body)
@@ -664,6 +675,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._save_zfo(session, url.query, body)
             if url.path in ("/pdf-save", "/pdf-print"):
                 return self._save_or_print_pdf(session, url, body)
+            if url.path == "/pdf-print-document":
+                return self._send_pdf_for_printing(session, body)
             if url.path in ("/export-data", "/import-data"):
                 return self._export_or_import_data(session, url.path, body)
             if url.path in ("/pdf-export-data", "/pdf-import-data"):

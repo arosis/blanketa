@@ -20,6 +20,8 @@ __SHELL_STYLE__
   .zfo-import-report ul { max-height: 160px; overflow: auto; margin: 4px 0 12px; padding-left: 20px; user-select: text; -webkit-user-select: text; }
   .zfo-place-box { position: absolute; z-index: 10; border: 2px dashed var(--accent); background: rgba(10, 100, 214, .1);
     border-radius: 3px; pointer-events: none; }
+  /* Hidden without display: none, which would keep the PDF viewer from loading and leave nothing to print. */
+  .zfo-print-frame { position: fixed; width: 0; height: 0; border: 0; visibility: hidden; }
 </style>
 </head>
 <body class="zfo-app help-hidden">
@@ -308,6 +310,22 @@ __SHELL_STYLE__
     savedStatus(verb, result.saved);
   };
 
+  let printFrame;
+  const printPdfInFrame = async () => {
+    document.activeElement?.blur();
+    const response = await fetch(`/pdf-print-document?s=${SESSION}`, {method: 'POST', body: JSON.stringify({values: changedFieldValues()})});
+    if (!response.ok) throw new Error(await response.text());
+    if (printFrame) {
+      URL.revokeObjectURL(printFrame.src);
+      printFrame.remove();
+    }
+    printFrame = document.createElement('iframe');
+    printFrame.className = 'zfo-print-frame';
+    printFrame.addEventListener('load', event => event.target.contentWindow.print(), {once: true});
+    printFrame.src = URL.createObjectURL(await response.blob());
+    document.body.append(printFrame);
+  };
+
   window.zfoDataSaved = path => savedStatus('Data uložena do', path);
   const exportData = async () => {
     try {
@@ -466,6 +484,10 @@ __SHELL_STYLE__
     },
     print: async () => {
       try {
+        if (native?.printsPdfInPage) {
+          await printPdfInFrame();
+          return;
+        }
         const {path} = await postChangedValues('/pdf-print');
         if (native) native.postMessage({action: 'printPdf', path});
         else window.print();

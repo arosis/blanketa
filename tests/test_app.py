@@ -47,6 +47,7 @@ import app  # noqa: E402
 import barcode  # noqa: E402
 import desktop  # noqa: E402
 import isds_message  # noqa: E402
+import linux_print  # noqa: E402
 import pdf_form_data  # noqa: E402
 import pdf_sign  # noqa: E402
 import zfo_verify  # noqa: E402
@@ -1417,6 +1418,65 @@ class DesktopAttachmentSaving(unittest.TestCase):
             with self.subTest(files=files):
                 self.bridge.message({"action": "saveAttachment", "files": files, "folder": True})
         self.assertEqual(list(self.folder.iterdir()), [])
+
+
+class LinuxPdfPrinting(unittest.TestCase):
+    A4 = (595.28, 841.89)
+
+    def test_page_fills_paper_of_its_shape(self):
+        placed = linux_print.fit_page_on_paper(self.A4, (4800, 6800), 600)
+        self.assertEqual(placed.rotation, 0)
+        self.assertEqual((placed.x, placed.width), (0, 4800))
+        self.assertAlmostEqual(placed.y * 2 + placed.height, 6800)
+
+    def test_landscape_page_turns_onto_portrait_paper(self):
+        placed = linux_print.fit_page_on_paper((self.A4[1], self.A4[0]), (4800, 6800), 600)
+        self.assertEqual(placed.rotation, 90)
+        self.assertLessEqual(placed.width, 4800)
+        self.assertLessEqual(placed.height, 6800)
+        self.assertAlmostEqual(placed.width / placed.height, self.A4[0] / self.A4[1])
+
+    def test_image_resolution_stops_at_the_print_limit(self):
+        for printer_dpi, image_dpi in ((1200, linux_print.MAX_PRINT_DPI), (150, 150)):
+            with self.subTest(printer_dpi=printer_dpi):
+                placed = linux_print.fit_page_on_paper(self.A4, (self.A4[0] / 72 * printer_dpi, self.A4[1] / 72 * printer_dpi), printer_dpi)
+                self.assertAlmostEqual(placed.render_scale * linux_print.POINTS_PER_INCH, image_dpi)
+
+    def test_failed_preview_opens_the_file_in_the_system_viewer(self):
+        path = Path("/tmp/zfo-tisk-x.pdf")
+        with mock.patch.object(linux_print, "show_print_preview", side_effect=ImportError), \
+                mock.patch.object(desktop, "open_with_system") as open_with_system:
+            desktop.show_print_preview_or_open(path, mock.Mock())
+        open_with_system.assert_called_once_with(path)
+
+
+@unittest.skipUnless(importlib.util.find_spec("pypdfium2"), "pypdfium2 is installed only on Linux")
+class LinuxFontSubstitution(unittest.TestCase):
+    def setUp(self):
+        import pypdfium2.raw as pdfium
+        self.pdfium = pdfium
+        self.substitution = linux_print.FontSubstitution()
+        self.substitution._system = mock.Mock()
+        self.substitution._system.contents.MapFont.return_value = 0
+
+    def map_font(self, pitch_family, charset=None):
+        charset = self.pdfium.FXFONT_ANSI_CHARSET if charset is None else charset
+        return self.substitution._map_font(None, 400, 0, charset, pitch_family, b"Helvetica", None)
+
+    def test_missing_sans_serif_font_gets_liberation_sans(self):
+        font = self.map_font(0)
+        self.assertTrue(font)
+        self.assertGreater(self.substitution._get_font_data(None, font, linux_print.WHOLE_FONT_FILE, None, 0), 0)
+
+    def test_fixed_pitch_serif_and_symbol_fonts_stay_with_pdfium(self):
+        for pitch_family, charset in ((self.pdfium.FXFONT_FF_FIXEDPITCH, None), (self.pdfium.FXFONT_FF_ROMAN, None),
+                                      (0, self.pdfium.FXFONT_SYMBOL_CHARSET)):
+            with self.subTest(pitch_family=pitch_family, charset=charset):
+                self.assertEqual(self.map_font(pitch_family, charset), 0)
+
+    def test_installed_system_font_wins(self):
+        self.substitution._system.contents.MapFont.return_value = 1234
+        self.assertEqual(self.map_font(0), 1234)
 
 
 if __name__ == "__main__":
