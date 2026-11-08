@@ -43,7 +43,7 @@ Name: "{autoprograms}\Blanketa"; Filename: "{app}\Blanketa.exe"
 Name: "{autodesktop}\Blanketa"; Filename: "{app}\Blanketa.exe"; Tasks: desktopicon
 
 [Registry]
-Root: HKA; Subkey: "Software\Classes\Blanketa.zfo"; ValueType: string; ValueName: ""; ValueData: "Formulář 602XML (ZFO)"; Flags: uninsdeletekey
+Root: HKA; Subkey: "Software\Classes\Blanketa.zfo"; ValueType: string; ValueName: ""; ValueData: "Formulář 602XML nebo datová zpráva (ZFO)"; Flags: uninsdeletekey
 Root: HKA; Subkey: "Software\Classes\Blanketa.zfo\DefaultIcon"; ValueType: string; ValueName: ""; ValueData: "{app}\Blanketa.exe,0"
 Root: HKA; Subkey: "Software\Classes\Blanketa.zfo\shell\open\command"; ValueType: string; ValueName: ""; ValueData: """{app}\Blanketa.exe"" ""%1"""
 Root: HKA; Subkey: "Software\Classes\.zfo\OpenWithProgids"; ValueType: string; ValueName: "Blanketa.zfo"; ValueData: ""; Flags: uninsdeletevalue

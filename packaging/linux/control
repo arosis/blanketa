@@ -10,4 +10,5 @@ Homepage: https://github.com/arosis/blanketa
 Description: Vyplňování a podepisování formulářů ZFO (602XML) a PDF
  Blanketa otevírá formuláře 602XML (.zfo, .fo), které jinak otevře jen Software602
  Form Filler pro Windows, a formuláře PDF. Vyplněný formulář podepíše
- certifikátem ze souboru .pfx/.p12.
+ certifikátem ze souboru .pfx/.p12. Zobrazí i obsah datových zpráv a doručenek
+ z datových schránek a ověří jejich pečeť.

@@ -30,6 +30,7 @@ from cryptography import x509  # noqa: E402
 from lxml import etree  # noqa: E402
 
 import app  # noqa: E402
+import isds_message  # noqa: E402
 import pdf_form_data  # noqa: E402
 import pdf_sign  # noqa: E402
 import revocation  # noqa: E402
@@ -154,6 +155,19 @@ def form_data_seeds():
     return [pdf_form_data.write_xfdf(values, "x.pdf").encode(), pdf_form_data.write_fdf(values, "x.pdf").encode()]
 
 
+def fuzz_isds_message(data):
+    try:
+        message = isds_message.read_message(data)
+        isds_message.describe_seal(message)
+        isds_message.submission_stamp(message)
+    except ValueError:  # the one way a message is refused
+        return
+
+
+def isds_message_seeds():
+    return [path.read_bytes() for path in sorted((ROOT / "samples-isds").glob("*.zfo"))]
+
+
 def fuzz_certificate(data):
     trustlist.check_certificate(data, FOLDER)
     revocation.check_certificate_revocation(data, FOLDER, FOLDER)
@@ -196,6 +210,7 @@ TARGETS = {
     "zfo-description": (fuzz_zfo_description, fo_seeds),
     "pdf": (fuzz_pdf, pdf_seeds),
     "form-data": (fuzz_form_data, form_data_seeds),
+    "isds-message": (fuzz_isds_message, isds_message_seeds),
     "script": (fuzz_script, script_seeds),
     "form-action": (fuzz_form_action, action_seeds),
     "certificate": (fuzz_certificate, certificate_seeds),
