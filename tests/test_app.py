@@ -3,6 +3,7 @@
     python -I tests/test_app.py
 """
 import copy
+import importlib.util
 import io
 import json
 import os
@@ -1224,6 +1225,35 @@ class LinuxPdfPrinting(unittest.TestCase):
                 mock.patch.object(desktop, "open_with_system") as open_with_system:
             desktop.show_print_preview_or_open(path, mock.Mock())
         open_with_system.assert_called_once_with(path)
+
+
+@unittest.skipUnless(importlib.util.find_spec("pypdfium2"), "pypdfium2 is installed only on Linux")
+class LinuxFontSubstitution(unittest.TestCase):
+    def setUp(self):
+        import pypdfium2.raw as pdfium
+        self.pdfium = pdfium
+        self.substitution = linux_print.FontSubstitution()
+        self.substitution._system = mock.Mock()
+        self.substitution._system.contents.MapFont.return_value = 0
+
+    def map_font(self, pitch_family, charset=None):
+        charset = self.pdfium.FXFONT_ANSI_CHARSET if charset is None else charset
+        return self.substitution._map_font(None, 400, 0, charset, pitch_family, b"Helvetica", None)
+
+    def test_missing_sans_serif_font_gets_liberation_sans(self):
+        font = self.map_font(0)
+        self.assertTrue(font)
+        self.assertGreater(self.substitution._get_font_data(None, font, linux_print.WHOLE_FONT_FILE, None, 0), 0)
+
+    def test_fixed_pitch_serif_and_symbol_fonts_stay_with_pdfium(self):
+        for pitch_family, charset in ((self.pdfium.FXFONT_FF_FIXEDPITCH, None), (self.pdfium.FXFONT_FF_ROMAN, None),
+                                      (0, self.pdfium.FXFONT_SYMBOL_CHARSET)):
+            with self.subTest(pitch_family=pitch_family, charset=charset):
+                self.assertEqual(self.map_font(pitch_family, charset), 0)
+
+    def test_installed_system_font_wins(self):
+        self.substitution._system.contents.MapFont.return_value = 1234
+        self.assertEqual(self.map_font(0), 1234)
 
 
 if __name__ == "__main__":
