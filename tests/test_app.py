@@ -3,6 +3,7 @@
     python -I tests/test_app.py
 """
 import copy
+import importlib.util
 import io
 import json
 import os
@@ -42,6 +43,7 @@ os.environ["ZFO_OFFLINE"] = "1"  # tests never download trusted lists
 import app  # noqa: E402
 import barcode  # noqa: E402
 import desktop  # noqa: E402
+import isds_message  # noqa: E402
 import pdf_form_data  # noqa: E402
 import pdf_sign  # noqa: E402
 import zfo_verify  # noqa: E402
@@ -203,6 +205,78 @@ class PlainFoForms(unittest.TestCase):
             app.save_zfo(self.open_session("xml-named-zfo"))
         self.assertTrue(zipfile.is_zipfile(zip_named_fo))
         self.assertFalse(zipfile.is_zipfile(xml_named_zfo))
+
+
+
+ISDS_SAMPLES = ROOT / "samples-isds"
+
+
+def isds_sample_tool():
+    if not hasattr(isds_sample_tool, "module"):
+        spec = importlib.util.spec_from_file_location("make_isds_samples", ROOT / "tools/make-isds-samples.py")
+        isds_sample_tool.module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(isds_sample_tool.module)
+    return isds_sample_tool.module
+
+
+def isds_sample(name):
+    return (ISDS_SAMPLES / f"{name}.zfo").read_bytes()
+
+
+class IsdsMessages(unittest.TestCase):
+    def test_received_message_fields(self):
+        message = isds_message.read_message(isds_sample("prijata"))
+        info = message.info
+        self.assertEqual((message.kind, info["kind"]), ("received", "received"))
+        self.assertEqual(info["id"], "1234567")
+        self.assertEqual(info["subject"], "Rozhodnutí ve věci TEST")
+        self.assertEqual(info["sender"], {"name": "Úřad TEST", "address": "Testovací 1, 110 00 Praha 1", "box": "abc12de"})
+        self.assertEqual(info["recipient"], {"name": "Firma TEST s.r.o.", "address": "Zkušební 2, 602 00 Brno", "box": "xyz34fg"})
+        self.assertEqual((info["to_hands"], info["sender_ref"], info["sender_ident"], info["recipient_ref"], info["recipient_ident"]),
+                         ("Jan Testovací", "MV-TEST-456/2026", "SZ-TEST-1", "TEST-123/2026", "SZ-TEST-9"))
+        self.assertTrue(info["personal_delivery"])
+        self.assertFalse(info["suspicious"])
+        self.assertEqual((info["delivered"], info["accepted"], info["status"]),
+                         ("2026-03-02T10:30:05.123+01:00", "2026-03-03T08:12:40.456+01:00", 6))
+        self.assertEqual([(item["name"], item["mime"], item["main"]) for item in info["attachments"]],
+                         [("rozhodnuti.pdf", "application/pdf", True), ("data.xml", "text/xml", False),
+                          ("evil.txt", "text/plain", False)])
+        self.assertEqual(message.attachments[0], b"%PDF-1.4\n% TEST priloha\n")
+        self.assertEqual(etree.fromstring(message.attachments[1]).findtext("{urn:test}polozka"), "1")
+        self.assertEqual([item["size"] for item in info["attachments"]], [len(content) for content in message.attachments])
+        self.assertEqual(info["events"], [])
+
+    def test_sent_message_and_receipt_kinds(self):
+        self.assertEqual(isds_message.read_message(isds_sample("odeslana")).kind, "sent")
+        receipt = isds_message.read_message(isds_sample("dorucenka"))
+        self.assertEqual(receipt.kind, "receipt")
+        self.assertEqual(receipt.info["attachments"], [])
+        self.assertEqual(receipt.info["events"][1], {"time": "2026-03-02T10:30:05.000+01:00",
+                                                     "description": "EV5: Zpráva byla dodána do schránky příjemce."})
+        self.assertEqual(len(receipt.info["events"]), 3)
+
+    def test_ber_indefinite_length_opens(self):
+        self.assertEqual(isds_message.read_message(isds_sample("prijata-ber")).info,
+                         isds_message.read_message(isds_sample("prijata")).info)
+
+    def test_safe_file_names(self):
+        self.assertEqual(isds_message.safe_file_names(["../../evil.txt", "C:\\x\\a.pdf", "CON.txt", ".bashrc", "a\u202egpj.exe",
+                                                       "x\x00y", "", "A.pdf", "a.pdf"]),
+                         ["evil.txt", "a.pdf", "_CON.txt", "bashrc", "agpj.exe", "xy", "priloha-7", "A (2).pdf", "a (3).pdf"])
+        self.assertEqual(len(isds_message.safe_file_names(["a" * 300 + ".pdf"])[0]), 200)
+        self.assertTrue(isds_message.safe_file_names(["a" * 300 + ".pdf"])[0].endswith(".pdf"))
+
+    def test_not_a_message(self):
+        tool = isds_sample_tool()
+        doctype = b'<?xml version="1.0"?><!DOCTYPE q [<!ENTITY e "x">]><q:MessageDownloadResponse xmlns:q="http://isds.czechpoint.cz/v20/message"/>'
+        for data in (zfo_verify.read_form_fo(ROOT / "samples/cuzk/form.zfo"), tool.build_message(xml=b"<x/>"),
+                     tool.build_message(xml=doctype), b"\x30\x80"):
+            with self.subTest(data=data[:20]), self.assertRaises(ValueError):
+                isds_message.read_message(data)
+
+    def test_message_files_are_recognised_by_their_first_byte(self):
+        self.assertTrue(isds_message.looks_like_message(isds_sample("prijata-ber")))
+        self.assertFalse(isds_message.looks_like_message(b"PK\x03\x04"))
 
 
 # Copied from webview.util.parse_file_type: pywebview raises ValueError on anything else, and the tests run without it.
