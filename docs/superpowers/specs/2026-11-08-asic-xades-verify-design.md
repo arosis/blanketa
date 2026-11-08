@@ -105,11 +105,21 @@ Všechno, co pochází ze souboru (jména souborů, jména podepisujících, dů
 
 ## Server a hostitelé
 
-- Nová trasa GET `/container-file?s=<session>&i=<index>` vrátí obsah položky kontejneru podle indexu v seznamu, nikdy podle jména z požadavku. Pro PDF vrací `application/pdf`, jinak `application/octet-stream` s `Content-Disposition: attachment`. Data se čtou z kontejneru načteného v sezení v paměti.
-- **Uložit soubor…** neposílá obsah přes most stránky (u souboru o desítkách MB by to bylo pomalé a křehké). Stránka pošle novou zprávu `zfoNative` `saveContainerFile` s adresou `/container-file?s=…&i=…` a navrženým jménem. Hostitel ukáže dialog uložení se složkou kontejneru, sám si obsah stáhne z lokálního serveru (127.0.0.1, stejný port) a zapíše ho binárně. Doplní se do všech tří hostitelů: `ui/bridge.js` (web: obyčejné stažení odkazem), `macapp/main.swift` (URLSession) a `desktop.py` (urllib). Navržené jméno je jen poslední část cesty uvnitř kontejneru, očištěná od oddělovačů.
-- **Otevřít v Blanketě** (rozhodnutí uživatele: nejdřív uložit kopii) ukáže stejný dialog uložení jako „Uložit soubor…“ (navržené očištěné jméno, složka kontejneru), zapíše soubor a uloženou kopii otevře v novém okně existující cestou `openFile`. Kopie je obyčejný soubor na místě, které uživatel zvolil, takže vyplněné a podepsané verze vzniknou vedle ní a do nedávných souborů se dostane skutečná cesta. Dočasná složka se nepoužívá. Když uživatel dialog zruší, nic se neotevře. Nic se nespouští a nic se neotevírá výchozí aplikací systému.
+- Nová trasa GET `/container-file?s=<session>&i=<index>` vrátí obsah položky kontejneru podle indexu v seznamu, nikdy podle jména z požadavku. Stejně jako `/attachment` z #60 vrací vždy `application/octet-stream` s `X-Content-Type-Options: nosniff` a `Content-Disposition: attachment`, takže se žádná položka nevykreslí jako stránka lokálního serveru. PDF.js si data načte sám. Data se čtou z kontejneru načteného v sezení v paměti.
+- **Uložit soubor…** používá zprávu `zfoNative` `saveAttachment`, kterou do všech tří hostitelů přidalo #60 pro přílohy datových zpráv (hostitel si soubor stáhne z lokálního serveru sám a zapíše ho binárně, „Uložit všechny…“ ukládá do zvolené složky). Hostitelé ji rozšíří o adresy `/container-file?s=…&i=…` a o příznak `open`.
+- **Otevřít v Blanketě** (rozhodnutí uživatele: nejdřív uložit kopii) pošle `saveAttachment` s jedním souborem a `open: true`. Hostitel ukáže dialog uložení, zapíše soubor a uloženou kopii otevře v novém okně stejnou cestou jako `openFile`. Kopie je obyčejný soubor na místě, které uživatel zvolil, takže vyplněné a podepsané verze vzniknou vedle ní a do nedávných souborů se dostane skutečná cesta. Dočasná složka se nepoužívá. Když uživatel dialog zruší, nic se neotevře. Nic se nespouští a nic se neotevírá výchozí aplikací systému.
 - Server dál poslouchá jen na 127.0.0.1 a POST trasy vyžadují token sezení.
 - `_serve_form_page` pozná kontejner nebo XAdES podle obsahu a zavolá nové `render_container_page`. Chyba čtení vede na DAMAGED_PAGE jako dnes.
+
+## Sjednocení s oknem datové zprávy (rozhodnutí uživatele, v tomto PR)
+
+Okno datové zprávy z #60 a okno kontejneru mají stejné rozložení:
+
+- **Vpravo** nahoře údaje o dokumentu: u kontejneru panel „Kontejner“, u datové zprávy údaje o zprávě (věc, druh, odesílatel, příjemce, čísla jednací, dodáno, doručeno, stav). Pod nimi seznam souborů („Soubory v kontejneru“ / „Přílohy (N)“) se stejnými řádky (název, velikost, u kontejneru stav podpisu, u zprávy označení hlavního dokumentu). Pak karty podpisů / pečeť ISDS a čas podání.
+- **Uprostřed** náhled vybraného souboru: PDF přes PDF.js jen pro čtení, jinak karta s názvem, velikostí a tlačítkem „Uložit soubor…“. Při otevření se vybere hlavní dokument zprávy, jinak první PDF, jinak první soubor. Doručenka (bez příloh) má uprostřed dnešní kartu s událostmi.
+- **Lišta** v obou oknech: „Uložit soubor…“, „Uložit všechny…“ (jen s nativním hostitelem a od dvou souborů), „Otevřít v Blanketě“ (jen PDF a ZFO a jen s nativním hostitelem), přiblížení náhledu.
+
+Seznam souborů, náhled a ukládání jsou napsané jednou ve sdíleném skriptu `ui/files.js` (servírovaný trasou `/files.js` jako `/bridge.js`) a obě stránky ho používají. Texty karet pečeti a podpisů se nemění.
 
 ## Registrace typů souborů a dialog Otevřít
 

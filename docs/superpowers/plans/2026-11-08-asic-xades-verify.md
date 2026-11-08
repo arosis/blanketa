@@ -237,24 +237,38 @@ def test_damaged_container_shows_the_damaged_page(self)     # truncated ZIP → 
 - [ ] **Step 2: Verify in the browser pane.** Write two sample containers with `tests/asic_samples.py` into the scratchpad (one ASiC-E with a PDF, a changed xlsx and an unsigned txt; one CAdES ASiC-S), start the server (`app.py --file <path> <port>` via a `.claude/launch.json` entry), open it with `preview_start`, check with `read_page`: the file list states, the card texts, the PDF preview pages render, selecting the xlsx shows the save card, no console errors (`read_console_messages`). Take a screenshot as proof.
 - [ ] **Step 3: Commit** `git commit -m "Show ASiC containers with a PDF preview and signature cards (#63)"`
 
-### Task 7: Hosts: save a file from the container, open a saved copy
+### Task 7: Hosts: extend saveAttachment to container files and "open the saved copy"
 
 **Files:**
 - Modify: `desktop.py`, `macapp/main.swift`, `tests/test_security.py`
 
 **Interfaces:**
-- Consumes: the `saveContainerFile` message from Task 6.
-- Produces: in each host, `saveContainerFile` → refuse unless `url` starts with `/container-file?` (relative; the host prefixes its own `http://127.0.0.1:<port>`); save dialog with `name` reduced to its last path segment with `/`, `\` and leading dots removed, starting in `folder`; download the bytes from the own server; write them binary; then `zfoDataSaved(path)`; when `open` is true and the dialog was not cancelled, open the saved file in a new window (`desktop`: `self._app.open_window(target)`; mac: `onOpen?(url)`).
+- Consumes: the `saveAttachment` message from #60: `{action: 'saveAttachment', files: [{url, name}], folder: bool}`; `desktop.ATTACHMENT_URL`, `attachment_url_is_allowed`, `is_plain_file_name`, `Bridge._save_attachments`/`_save_downloads`; `AttachmentRequest` and `saveAttachments` in main.swift.
+- Produces: `saveAttachment` also accepts URLs matching `/container-file\?s=[A-Za-z0-9_-]+&i=\d+` (exact, fullmatch, both hosts), and an optional `open: true` (only with `folder: false` and exactly one file) that opens the saved file in a new window after a successful save (`desktop`: `self._app.open_window(saved)`; mac: `onOpen?(saved)` on the main queue). A cancelled dialog opens nothing.
+- Also: `OPEN_DIALOG_FILE_TYPES` first entry „Formuláře, PDF a kontejnery ASiC (*.zfo;*.fo;*.pdf;*.asice;*.sce;*.asics;*.scs)“ (keep any #60 types already in it); the mac open panel adds `asice`, `sce`, `asics`, `scs` and `.xml`.
 
-- [ ] **Step 1: Write failing tests** in `tests/test_security.py` for `desktop.Bridge` (mock window and `urllib.request.urlopen`):
-  - `test_save_container_file_refuses_foreign_urls` — `http://example.com/x`, `//evil/x`, `/pdf?s=…` → no dialog, no download
-  - `test_save_container_file_name_cannot_escape_the_folder` — name `../../etc/passwd` → dialog proposes `passwd`
-  - `test_save_container_file_writes_bytes_and_opens_copy` — bytes written unchanged; `open: true` → `open_window(target)` called once; cancelled dialog → no write, no open
+- [ ] **Step 1: Failing tests** in `tests/test_security.py` next to the #60 attachment tests: container URL accepted; `/container-file?s=x&i=1&j=2`, `//evil/container-file?…`, `http://…` refused; `open: true` → `open_window` called once with the saved path; `open: true` with cancelled dialog → not called; `open: true` with `folder: true` or two files → refused (no dialog).
 - [ ] **Step 2: Run** `.venv/bin/python -I tests/test_security.py` — FAIL.
-- [ ] **Step 3: Implement `Bridge._save_container_file(window, msg)`** in `desktop.py` (download with `urllib.request.urlopen(self._form.home.rstrip('/') + url, timeout=60)`), and add `*.asice;*.sce;*.asics;*.scs` to the first entry of `OPEN_DIALOG_FILE_TYPES` with the label „Formuláře, PDF a kontejnery ASiC (…)“.
-- [ ] **Step 4: Implement the same in `macapp/main.swift`**: `case "saveContainerFile"` → `saveContainerFile(path:name:folder:open:)` using `NSSavePanel` (any type) and `URLSession.shared.dataTask` on `http://127.0.0.1:\(formServerPort)\(path)`, writing on the main queue; extend the open panel at line ~270 with `asice`, `sce`, `asics`, `scs` and `.xml`.
-- [ ] **Step 5: Run** `.venv/bin/python -I tests/test_security.py` — PASS. Build the mac app (`./build.sh`) and check it compiles.
-- [ ] **Step 6: Commit** `git commit -m "Save files from a container and open a saved copy in all hosts (#63)"`
+- [ ] **Step 3: Implement** in `desktop.py` and `macapp/main.swift`.
+- [ ] **Step 4: Run** tests — PASS; `swiftc -typecheck` main.swift with build.sh's frameworks.
+- [ ] **Step 5: Commit** `git commit -m "Save container files and open a saved copy through saveAttachment (#63)"`
+
+### Task 7b: One layout for containers and ISDS messages
+
+**Files:**
+- Create: `ui/files.js`
+- Modify: `ui/container.html`, `ui/message.html`, `app.py` (route `/files.js`; `/container-file` → always octet-stream + nosniff + attachment), `tests/test_app.py`
+
+**Interfaces:**
+- Consumes: Task 7 `saveAttachment` with `open`; `/attachment` and `/container-file` routes.
+- Produces: `ui/files.js` exposing one function, e.g. `window.zfoFiles({session, files: [{name, size, url, pdf, main?, state?, stateLabel?}], folder, list: Element, stage: Element, toolbar: {save, saveAll, open, zoomIn, zoomOut, zoom}, initial: index})` that renders the file rows into `list`, the read-only PDF.js preview or the file card into `stage`, wires the toolbar and posts `saveAttachment` (`{files, folder: false|true, open}`); web fallback `<a download>`; handles `zfoAttachmentSaved`/`zfoAttachmentFailed`.
+
+- [ ] **Step 1: Failing tests** in `tests/test_app.py`: `/files.js` served as text/javascript without a session; `/container-file` for a PDF entry now returns `application/octet-stream` with `nosniff`; the message page still keeps file-derived text as JSON.
+- [ ] **Step 2: Move** list/preview/save code from `ui/container.html` into `ui/files.js`; container page uses it (behaviour unchanged, save via `saveAttachment`).
+- [ ] **Step 3: Rebuild `ui/message.html`** to the spec § „Sjednocení s oknem datové zprávy“ layout using `ui/files.js`; seal card, submission line, notice and receipt events keep their texts.
+- [ ] **Step 4: Verify in the browser pane** with a container sample and with `samples-isds/odeslana.zfo` and `samples-isds/dorucenka.zfo`: list in the right panel, PDF preview in the centre (main document first), receipt shows events, no console errors; screenshot.
+- [ ] **Step 5: Run** `tests/test_app.py`, `tests/test_security.py` — PASS.
+- [ ] **Step 6: Commit** `git commit -m "Show ISDS messages and ASiC containers in one layout with a file preview (#63)"`
 
 ### Task 8: Packaging and file associations
 
