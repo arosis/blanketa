@@ -1571,6 +1571,55 @@ class DesktopAttachmentSaving(unittest.TestCase):
         self.assertEqual(list(self.folder.iterdir()), [])
 
 
+class DesktopContainerFileSaving(DesktopAttachmentSaving):
+    def setUp(self):
+        super().setUp()
+        self.container = app.new_session({"entries": [b"%PDF-1.7 smlouva", b"data"], "names": ["smlouva.pdf", "data.txt"]})
+        self.bridge._app.open_window = mock.Mock()
+
+    def one(self, index=0, name="smlouva.pdf"):
+        return [{"url": f"/container-file?s={self.container}&i={index}", "name": name}]
+
+    def test_container_file_url_rule(self):
+        self.assertTrue(desktop.attachment_url_is_allowed("/container-file?s=Ab_c-9&i=12"))
+        for url in ("/container-file?s=x&i=1&j=2", "//evil.example/container-file?s=x&i=1", "http://127.0.0.1/container-file?s=x&i=1",
+                    "/container-file?s=x&i=1#", "/container-file?s=x&i=-1", "/container-files?s=x&i=1"):
+            with self.subTest(url=url):
+                self.assertFalse(desktop.attachment_url_is_allowed(url))
+
+    def test_saves_a_container_file(self):
+        self.window.create_file_dialog.return_value = str(self.folder / "kopie.pdf")
+        self.bridge.message({"action": "saveAttachment", "files": self.one(), "folder": False})
+        self.assertEqual((self.folder / "kopie.pdf").read_bytes(), b"%PDF-1.7 smlouva")
+        self.bridge._app.open_window.assert_not_called()
+
+    def test_open_opens_the_saved_copy_in_a_new_window(self):
+        self.window.create_file_dialog.return_value = str(self.folder / "kopie.pdf")
+        self.bridge.message({"action": "saveAttachment", "files": self.one(), "folder": False, "open": True})
+        self.bridge._app.open_window.assert_called_once_with(self.folder / "kopie.pdf")
+
+    def test_open_with_a_cancelled_dialog_opens_nothing(self):
+        self.window.create_file_dialog.return_value = None
+        self.bridge.message({"action": "saveAttachment", "files": self.one(), "folder": False, "open": True})
+        self.bridge._app.open_window.assert_not_called()
+
+    def test_open_is_refused_for_a_folder_or_several_files(self):
+        files = self.one() + self.one(1, "data.txt")
+        for request in ({"files": self.one(), "folder": True}, {"files": files, "folder": False}, {"files": files, "folder": True}):
+            with self.subTest(request=request):
+                self.bridge.message({"action": "saveAttachment", "open": True, **request})
+        self.window.create_file_dialog.assert_not_called()
+        self.bridge._app.open_window.assert_not_called()
+
+    def test_open_dialog_offers_containers(self):
+        first = desktop.OPEN_DIALOG_FILE_TYPES[0]
+        for extension in ("zfo", "fo", "pdf", "asice", "sce", "asics", "scs"):
+            self.assertIn(f"*.{extension}", first)
+        main = (ROOT / "macapp/main.swift").read_text(encoding="utf-8")
+        for extension in ("asice", "sce", "asics", "scs"):
+            self.assertIn(f'"{extension}"', main)
+
+
 class LinuxPdfPrinting(unittest.TestCase):
     A4 = (595.28, 841.89)
 

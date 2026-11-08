@@ -15,9 +15,9 @@ IS_WINDOWS = sys.platform == "win32"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 SERVER_START_ATTEMPTS = 300
 MAX_RECENT_FILES = 10
-ATTACHMENT_URL = re.compile(r"/attachment\?s=[A-Za-z0-9_-]+&i=\d+")
+ATTACHMENT_URL = re.compile(r"/(?:attachment|container-file)\?s=[A-Za-z0-9_-]+&i=\d+")
 ATTACHMENT_DOWNLOAD_SECONDS = 120
-OPEN_DIALOG_FILE_TYPES = ("Formuláře 602XML a PDF (*.zfo;*.fo;*.pdf)", "Všechny soubory (*.*)")
+OPEN_DIALOG_FILE_TYPES = ("Formuláře PDF a kontejnery ASiC (*.zfo;*.fo;*.pdf;*.asice;*.sce;*.asics;*.scs)", "Všechny soubory (*.*)")
 
 
 def server_command(args):
@@ -138,6 +138,9 @@ class Bridge:
                 isinstance(file, dict) and attachment_url_is_allowed(file.get("url")) and is_plain_file_name(file.get("name"))
                 for file in files):
             return
+        open_saved = request.get("open") is True
+        if open_saved and (request.get("folder") or len(files) != 1):
+            return
         server = self._form.home.rstrip("/")
         try:
             saved = self._save_downloads(window, server, files, request.get("folder"))
@@ -146,6 +149,8 @@ class Bridge:
             return
         if saved is not None:
             window.evaluate_js(f"window.zfoAttachmentSaved && zfoAttachmentSaved({json.dumps(str(saved))})")
+            if open_saved:
+                self._app.open_window(saved)
 
     def _save_downloads(self, window, server, files, into_folder):
         if into_folder:

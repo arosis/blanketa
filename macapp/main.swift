@@ -9,7 +9,7 @@ enum AttachmentRequest {
         guard let list = value as? [[String: Any]], !list.isEmpty else { return nil }
         let files = list.compactMap { item -> (url: String, name: String)? in
             guard let url = item["url"] as? String, let name = item["name"] as? String,
-                  url.range(of: #"^/attachment\?s=[A-Za-z0-9_-]+&i=[0-9]+$"#, options: .regularExpression) != nil,
+                  url.range(of: #"^/(?:attachment|container-file)\?s=[A-Za-z0-9_-]+&i=[0-9]+$"#, options: .regularExpression) != nil,
                   isPlainFileName(name) else { return nil }
             return (url, name)
         }
@@ -138,7 +138,10 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
             }
         case "saveAttachment":
             if let files = AttachmentRequest.files(body["files"]) {
-                saveAttachments(files, intoFolder: body["folder"] as? Bool ?? false)
+                let intoFolder = body["folder"] as? Bool ?? false
+                let openSaved = body["open"] as? Bool == true
+                if openSaved && (intoFolder || files.count != 1) { break }
+                saveAttachments(files, intoFolder: intoFolder, thenOpen: openSaved)
             }
         default: break
         }
@@ -169,7 +172,7 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
         }
     }
 
-    private func saveAttachments(_ files: [(url: String, name: String)], intoFolder: Bool) {
+    private func saveAttachments(_ files: [(url: String, name: String)], intoFolder: Bool, thenOpen: Bool) {
         guard let port = formServerPort else { return }
         let download = { (file: (url: String, name: String), target: URL) throws in
             let source = URL(string: "http://127.0.0.1:\(port)\(file.url)")!
@@ -187,7 +190,10 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
                 do {
                     try work()
                     let path = String(data: try JSONEncoder().encode(saved.path), encoding: .utf8)!
-                    DispatchQueue.main.async { self?.webView.evaluateJavaScript("window.zfoAttachmentSaved && zfoAttachmentSaved(\(path))") }
+                    DispatchQueue.main.async {
+                        self?.webView.evaluateJavaScript("window.zfoAttachmentSaved && zfoAttachmentSaved(\(path))")
+                        if thenOpen { self?.onOpen?(saved) }
+                    }
                 } catch {
                     DispatchQueue.main.async {
                         guard let self else { return }
@@ -346,7 +352,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func openDocument(_ sender: Any?) {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [UTType(filenameExtension: "zfo") ?? .data, UTType(filenameExtension: "fo") ?? .data, .pdf]
+        panel.allowedContentTypes = [UTType(filenameExtension: "zfo") ?? .data, UTType(filenameExtension: "fo") ?? .data, .pdf, .xml]
+            + ["asice", "sce", "asics", "scs"].map { UTType(filenameExtension: $0) ?? .data }
         panel.allowsMultipleSelection = true
         if panel.runModal() == .OK {
             panel.urls.forEach(open)
