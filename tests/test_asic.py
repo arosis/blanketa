@@ -342,7 +342,10 @@ def zip_bytes(entries):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
         for name, data in entries:
-            archive.writestr(zipfile.ZipInfo(name), data, compress_type=zipfile.ZIP_STORED if name == "mimetype" else zipfile.ZIP_DEFLATED)
+            info = zipfile.ZipInfo(name)
+            # ZipInfo on Windows turns "\" into "/"; hostile containers keep it, and so must these.
+            info.filename = name
+            archive.writestr(info, data, compress_type=zipfile.ZIP_STORED if name == "mimetype" else zipfile.ZIP_DEFLATED)
     return buffer.getvalue()
 
 
