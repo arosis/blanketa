@@ -28,13 +28,13 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 os.environ["ZFO_OFFLINE"] = "1"  # tests never download trusted lists
 
+import asic_samples  # noqa: E402
 from cryptography import x509  # noqa: E402
 from cryptography.hazmat.primitives import serialization  # noqa: E402
 from lxml import etree  # noqa: E402
 from pypdf import PdfReader  # noqa: E402
 
 import app  # noqa: E402
-import asic_samples  # noqa: E402
 import asic_verify  # noqa: E402
 import certstore  # noqa: E402
 import desktop  # noqa: E402
@@ -867,6 +867,50 @@ class ContainerAttacks(unittest.TestCase):
             second.find(f".//{self.XADES}SigningTime").text = "2020-01-01T00:00:00Z"
             signature.append(second)
         self.assertRefused(mutate, xades_verify.WRAPPED)
+
+    def test_qualifying_properties_for_another_signature_are_refused(self):
+        def mutate(signature):
+            signature.find(f".//{self.XADES}QualifyingProperties").set("Target", "#S2")
+        self.assertRefused(mutate, xades_verify.WRAPPED)
+
+    def test_second_signed_properties_reference_is_refused(self):
+        def mutate(signature):
+            asic_samples._signed_properties_reference(signature, signature.find(f"{self.SIGNATURE}SignedInfo"), asic_samples.SHA256)
+        self.assertRefused(mutate, xades_verify.WRAPPED)
+
+    def test_signature_borrowing_signed_properties_of_another_is_refused(self):
+        first = asic_samples.xades_signature(self.FILES)
+
+        def borrow(signature):
+            # The first signature sits next to it while the digests are computed, so the borrowed reference is genuine.
+            signature.getparent().append(copy.deepcopy(first))
+            signature.find(f"{self.SIGNATURE}SignedInfo/{self.SIGNATURE}Reference[@Type='{asic_samples.SIGNED_PROPERTIES_TYPE}']").set(
+                "URI", "#S1-signed-properties")
+
+        def signatures(mutate):
+            second = asic_samples.xades_signature(self.FILES, signature_id="S2", mutate=mutate)
+            data = asic_samples.asic_e(self.FILES, {"signatures.xml": asic_samples.signatures_xml(copy.deepcopy(first), second)})
+            return asic_verify.describe(data)[0]["signatures"]
+        self.assertEqual([signature["intact"] for signature in signatures(None)], [True, True])
+        own, borrowing = signatures(borrow)
+        self.assertTrue(own["intact"], own["broken_reason"])
+        self.assertEqual((borrowing["intact"], borrowing["broken_reason"]), (False, xades_verify.WRAPPED))
+
+    def test_internal_reference_does_not_sign_a_file_named_like_its_id(self):
+        files = {"a.pdf": b"%PDF-1.7 a"}
+        for manifest in (False, True):
+            with self.subTest(manifest=manifest):
+                def mutate(signature, manifest=manifest):
+                    etree.SubElement(signature, asic_samples._ds("Object"), Id="obj").text = "podepsaný objekt"
+                    parent = signature.find(f"{self.SIGNATURE}Object/{self.SIGNATURE}Manifest") if manifest else \
+                        signature.find(f"{self.SIGNATURE}SignedInfo")
+                    asic_samples._add_reference(parent, "#obj", asic_samples.SHA256, [asic_samples.C14N10])
+                signature = asic_samples.xades_signature(files, manifest=manifest, mutate=mutate)
+                data = asic_samples.asic_e({**files, "#obj": b"%PDF-1.7 podvrh"}, {"signatures.xml": asic_samples.signatures_xml(signature)})
+                result, description = self.only_signature(data)
+                self.assertTrue(result["intact"], result["broken_reason"])
+                self.assertEqual({file["name"]: file["state"] for file in description["files"]}, {"a.pdf": "signed", "#obj": "unsigned"})
+                self.assertEqual(result["files"], ["a.pdf"])
 
     def test_duplicate_id_is_refused(self):
         def mutate(signature):

@@ -28,7 +28,7 @@ ENVELOPED_CONTENT = "podepsaný obsah"
 CONTENT_EXTENSIONS = {"application/pdf": ".pdf", "application/xml": ".xml", "text/xml": ".xml", "text/plain": ".txt",
                       "image/png": ".png", "image/jpeg": ".jpg"}
 LABELS = {"asic-s": "ASiC-S", "asic-e": "ASiC-E"}
-SIGNATURE_LABELS = {"XAdES": "s podpisy XAdES", "CAdES": "s podpisy CAdES", "timestamp": "s časovým razítkem",
+SIGNATURE_LABELS = {"XAdES": "s podpisy XAdES", "CAdES": "s podpisy CAdES", "timestamp": "s časovým razítkem",
                     "evidence": "se záznamem důkazů"}
 STANDALONE_LABEL = "Samostatný podpis XAdES"
 UNSUPPORTED = "Tento typ podpisu zatím neumíme ověřit."
@@ -36,7 +36,7 @@ UNREADABLE = "soubor s podpisem nejde přečíst"
 NO_SIGNATURE = "soubor s podpisem neobsahuje žádný podpis"
 MIMETYPE_MISPLACED = "Soubor mimetype není na prvním místě nebo je komprimovaný."
 MIMETYPE_UNKNOWN = "Soubor mimetype neuvádí typ kontejneru ASiC."
-MANIFEST_MISSING = "V kontejneru chybí seznam souborů META-INF/manifest.xml."
+MANIFEST_MISSING = "V kontejneru chybí seznam souborů META-INF/manifest.xml."
 ASIC_S_FILES = "Kontejner ASiC-S obsahuje víc než jeden datový soubor."
 
 
@@ -259,6 +259,7 @@ def _finish(kind, label, files, signatures, warnings, unsupported):
                   "pdf": content.startswith(b"%PDF-")} for name, content in files]
     for signature in signatures:
         references = signature.pop("references")
+        signature["covers_document"] = any(reference.get("whole") and reference["outcome"] == "ok" for reference in references)
         signature["files"] = list(dict.fromkeys(reference["name"] for reference in references if reference["name"] in names))
     return ({"kind": kind, "label": label, "files": described, "signatures": signatures, "warnings": warnings,
              "unsupported": unsupported}, [content for _, content in files])

@@ -297,7 +297,7 @@ class ContainerTest(unittest.TestCase):
         data = asic_samples.asic_e({**signed, "poznamka.txt": b"y"}, {"META-INF/signatures001.xml": signatures_file(signed)})
         self.assertTrue(asic_verify.is_signed_file(data))
         description, contents = asic_verify.describe(data)
-        self.assertEqual((description["kind"], description["label"]), ("asic-e", "ASiC-E s podpisy XAdES"))
+        self.assertEqual((description["kind"], description["label"]), ("asic-e", "ASiC-E s\u00a0podpisy XAdES"))
         self.assertEqual(states(description), [("smlouva.pdf", "signed"), ("cenik.xlsx", "signed"), ("poznamka.txt", "unsigned")])
         self.assertEqual([(file["size"], file["pdf"]) for file in description["files"]], [(len(PDF), True), (1, False), (1, False)])
         self.assertEqual(contents, [PDF, b"x", b"y"])
@@ -330,7 +330,7 @@ class ContainerTest(unittest.TestCase):
             del signature.find(f"{{{DS}}}SignedInfo/{{{DS}}}Reference").attrib["URI"]
         signatures = signatures_file(FILES, mutate=drop_uri)
         description, _ = asic_verify.describe(asic_samples.asic_s("smlouva.pdf", PDF, signatures))
-        self.assertEqual((description["kind"], description["label"]), ("asic-s", "ASiC-S s podpisy XAdES"))
+        self.assertEqual((description["kind"], description["label"]), ("asic-s", "ASiC-S s\u00a0podpisy XAdES"))
         self.assertEqual(states(description), [("smlouva.pdf", "signed")])
         self.assertEqual(description["signatures"][0]["files"], ["smlouva.pdf"])
         in_asic_e, _ = asic_verify.describe(asic_samples.asic_e(FILES, {"META-INF/signatures001.xml": signatures}))
@@ -416,7 +416,19 @@ class ContainerTest(unittest.TestCase):
         self.assertEqual((description["kind"], description["files"], contents), ("xades", [], []))
         [signature] = description["signatures"]
         self.assertTrue(signature["intact"], signature["broken_reason"])
-        self.assertEqual(signature["files"], [])
+        self.assertEqual((signature["files"], signature["covers_document"]), ([], True))
+
+    def test_only_a_verified_enveloped_reference_covers_the_document(self):
+        def change_document(signature):
+            signature.getparent().find("castka").text = "999"
+        root = etree.fromstring(asic_samples.enveloped(etree.fromstring(b"<faktura><castka>100</castka></faktura>")))
+        change_document(root.find(f"{{{DS}}}Signature"))
+        [changed] = asic_verify.describe(etree.tostring(root))[0]["signatures"]
+        self.assertEqual((changed["intact"], changed["covers_document"]), (False, False))
+        [enveloping] = asic_verify.describe(asic_samples.enveloping(PDF, "application/pdf", base64_transform=True))[0]["signatures"]
+        self.assertFalse(enveloping["covers_document"])
+        [container] = asic_verify.describe(asic_samples.asic_e(FILES, {"signatures.xml": signatures_file(FILES)}))[0]["signatures"]
+        self.assertFalse(container["covers_document"])
 
     def test_plain_zfo_is_not_a_signed_file(self):
         zfo = (ROOT / "samples/mac-vyplneny/form.zfo").read_bytes()

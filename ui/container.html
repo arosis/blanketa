@@ -12,7 +12,7 @@ __SHELL_STYLE__
   <div data-file-tools></div>
   <div class="zfo-spacer"></div>
   <div class="zfo-group">
-    <button class="zfo-btn icon active" data-action="panel" title="Informace o kontejneru a podpisech (⌥⌘2)">
+    <button class="zfo-btn icon active" data-action="panel" title="Informace o&nbsp;kontejneru a&nbsp;podpisech (⌥⌘2)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 3h9l4 4v14H6z"/><circle cx="12" cy="13" r="3"/><path d="M10.5 15.5 10 20l2-1 2 1-.5-4.5"/></svg>
     </button>
   </div>
@@ -25,7 +25,7 @@ __SHELL_STYLE__
   <h2>Kontejner</h2>
   <div class="zfo-info" data-info></div>
   <div data-warnings></div>
-  <h2>Soubory v kontejneru</h2>
+  <h2>Soubory v&nbsp;kontejneru</h2>
   <div class="zfo-files" data-files></div>
   <h2>Elektronické podpisy</h2>
   <div data-signatures></div>
@@ -79,8 +79,8 @@ __SHELL_STYLE__
     : signature.stamp_problem ? `<div class="meta">Časové razítko čas nepotvrzuje. ${escapeHtml(signature.stamp_problem)}</div>` : '';
   const signedFilesLine = signature => {
     const names = signature.files.length ? signature.files.join(', ')
-      : CONTAINER.kind === 'xades' ? 'celý dokument' : 'žádný soubor v kontejneru';
-    return `<div class="meta">Podepisuje: ${escapeHtml(names)}</div>`;
+      : signature.covers_document ? 'celý dokument' : CONTAINER.kind === 'xades' ? '' : 'žádný soubor v\u00a0kontejneru';
+    return names ? `<div class="meta">Podepisuje: ${escapeHtml(names)}</div>` : '';
   };
   const levelOf = signature => {
     const expired = signature.not_after && new Date(signature.not_after) < new Date(signature.proof?.at ?? Date.now());
@@ -107,11 +107,11 @@ __SHELL_STYLE__
       <div class="who">${icons[level]}${escapeHtml(signature.subject || 'Neznámý podepisující')}</div>
       <div class="state">${state}</div>
       ${signedFilesLine(signature)}
-      ${signature.trust_source === 'eu' ? '<div class="meta">Vydavatel je v důvěryhodném seznamu EU.</div>' : ''}
+      ${signature.trust_source === 'eu' ? '<div class="meta">Vydavatel je v\u00a0důvěryhodném seznamu EU.</div>' : ''}
       ${signature.unverifiable ? `<div class="meta">${escapeHtml(signature.reason)}</div>` : ''}
       ${revocation.line(signature)}
       ${stampLine(signature)}
-      ${!signature.intact && original.proof ? '<div class="meta">Podpis obsahuje časové razítko, u neplatného podpisu ale nic nepotvrzuje.</div>' : ''}
+      ${!signature.intact && original.proof ? '<div class="meta">Podpis obsahuje časové razítko, u\u00a0neplatného podpisu ale nic nepotvrzuje.</div>' : ''}
       <div class="meta">Podepsáno: ${formatDateTime(signature.signed_at)}${signature.proof ? ' (uvádí podepisující)' : ''}${signature.issuer ? `<br>Vystavil: ${escapeHtml(signature.issuer)}` : ''}
         ${signature.not_after ? `<br>${new Date(signature.not_after) < new Date() ? 'Platnost certifikátu skončila' : 'Certifikát platí do'} ${new Date(signature.not_after).toLocaleDateString('cs-CZ')}` : ''}</div>
     </div>`;

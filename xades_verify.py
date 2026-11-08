@@ -5,11 +5,11 @@ import hashlib
 from datetime import datetime, timezone
 from urllib.parse import unquote
 
+from asn1crypto import cms
 from cryptography import x509
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec, padding, rsa, utils
-from asn1crypto import cms
 from lxml import etree
 from pyhanko.sign.validation.generic_cms import validate_tst_signed_data
 from pyhanko.sign.validation.status import TimestampSignatureStatus
@@ -252,7 +252,11 @@ class _Verification:
         is_file = uri is None or not uri.startswith("#")
         # Resolved before any other check, so a refused reference still names the listed file it points at.
         resolved = self.resolved_file(uri) if is_file and uri != "" else None
-        entry = {"name": resolved[0] if resolved else unquote(uri) if uri else "", "outcome": "refused"}
+        # In a container an internal reference names no file, so a ZIP entry called like its #id cannot borrow it.
+        named = uri and (is_file or self.standalone)
+        entry = {"name": resolved[0] if resolved else unquote(uri) if named else "", "outcome": "refused"}
+        if uri == "":
+            entry["whole"] = True
         target = None
         try:
             transforms = self.transforms(reference)
