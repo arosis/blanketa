@@ -463,6 +463,7 @@
     if (result.notices.length) setStatus(result.notices.join(' '));
     queue.then(() => {
       if (result.problems?.length) showCheck(result.problems);
+      else if (result.problems) clearCheck({keepStatus: result.notices.length > 0});
       if (result.focus) focusField(result.focus, Boolean(result.sections));
       if (result.addresses?.length) checkAddresses(result.addresses);
     });
@@ -572,8 +573,17 @@
   };
   const shortOneLine = text => text.replace(/\s+/g, ' ').trim().slice(0, 90);
   let checkWaiter = null;
-  function showCheck(problems, scripts = []) {
+  function clearCheckMarks() {
     page.querySelectorAll('.zfo-invalid').forEach(field => field.classList.remove('zfo-invalid'));
+  }
+  function clearCheck({keepStatus}) {
+    clearCheckMarks();
+    queryOne('[data-check-list]').replaceChildren();
+    queryOne('[data-check]').hidden = true;
+    if (!keepStatus) setStatus('');
+  }
+  function showCheck(problems, scripts = []) {
+    clearCheckMarks();
     const fieldOf = problem => problem.field ? document.getElementsByName(problem.field)[problem.index] ?? document.getElementsByName(problem.field)[0] : null;
     // The form's own check names its faults in words, they matter even where the field is not on the page.
     const found = problems

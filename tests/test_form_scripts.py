@@ -201,6 +201,17 @@ class FormStylesheetChecks(unittest.TestCase):
         result = self.click("if (GetDocument().XSLCheck('Bez')) MessageBox('v poradku');", value="vyplneno")
         self.assertEqual((result["problems"], result["messages"]), ([], [{"text": "v poradku", "title": ""}]))
 
+    def test_warnings_are_shown_only_when_nothing_is_wrong_and_do_not_fail_the_check(self):
+        warned = stylesheet("Varuje", """<control><warning><text>Příjem je
+ neobvykle vysoký.</text></warning><warning><text>Zkontrolujte datum.</text></warning><warning><text/></warning></control>""")
+        result = self.click("if (GetDocument().XSLCheck('Varuje')) MessageBox('v poradku');", stylesheets=(warned,))
+        self.assertEqual(result["problems"], [])
+        self.assertEqual(result["messages"], [{"text": "Příjem je neobvykle vysoký.\nZkontrolujte datum.", "title": "Varování"},
+                                              {"text": "v poradku", "title": ""}])
+        faulty = stylesheet("Chyba", "<control><item><text>F001</text></item><warning><text>Zkontrolujte datum.</text></warning></control>")
+        result = self.click("GetDocument().XSLCheck('Chyba');", stylesheets=(faulty,))
+        self.assertEqual((len(result["problems"]), result["messages"]), (1, []))
+
     def test_noclean_adds_to_the_earlier_check_and_a_plain_check_starts_anew(self):
         twice = self.click("var d = GetDocument(); d.XSLCheck('Kontrola'); d.XSLCheck('Kontrola', 'noclean');")
         self.assertEqual(len(twice["problems"]), 4)

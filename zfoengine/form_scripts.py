@@ -45,6 +45,7 @@ ADDRESSES_IN_DATA = ("//*[*[local-name() = 'Ruian' or local-name() = '__PomValid
 MAX_ADDRESSES_CHECKED = 10
 KEEP_EARLIER_CHECK_RESULTS = "noclean"
 CHECK_RESULT_TAG = "control"
+CHECK_WARNING_TITLE = "Varování"
 WHISPERER_FIELD_TYPE = "acm"
 WHISPERER_LIST_ATTRIBUTE = "blanketa-list"
 DATA_ROOT_PATH = "/*"
@@ -354,7 +355,9 @@ class FormActionHost:
     return {"field": field, "index": index, "kind": "form", "message": _plain_text(item.find("text"))}
 
   def xsl_check(self, stylesheet_name, mode):
-    # The stylesheet answers with <control><item><text/><focus/></item>…</control>, one item for each fault it found.
+    # The stylesheet answers with <control><item><text/><focus/></item>…<warning><text/></warning>…</control>: an item
+    # for each fault it found, a warning for what the user should only know. Form Filler shows the warnings only when
+    # there is no fault, and they do not fail the check.
     output = self._run_stylesheet(stylesheet_name).getroot()
     if output is None or output.tag != CHECK_RESULT_TAG:
       raise js602.Unsupported("XSLCheck")
@@ -363,6 +366,9 @@ class FormActionHost:
       self.problems = []
     fields = self._fields_by_data_node() if items else {}
     self.problems.extend(self._check_problem(item, fields) for item in items)
+    warnings = [text for text in (_plain_text(warning.find("text")) for warning in output.findall("warning")) if text]
+    if warnings and not items:
+      self._add_message("\n".join(warnings), CHECK_WARNING_TITLE)
     return not items
 
   def send_data(self, method, url):
@@ -394,10 +400,13 @@ class FormActionHost:
       if not self.answers:
         raise _AnswerNeeded(text, title)
       return js602.IDYES if self.answers.pop(0) is True else js602.IDNO
+    self._add_message(text, title)
+    return js602.IDOK
+
+  def _add_message(self, text, title):
     if len(self.messages) >= MAX_MESSAGES_PER_RUN:
       raise js602.Exhausted("zprávy")
     self.messages.append({"text": text, "title": title})
-    return js602.IDOK
 
 
 def _page_values(document):

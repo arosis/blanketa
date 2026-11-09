@@ -18,7 +18,7 @@ class SignatureReplacementNotice(unittest.TestCase):
     const queue = Promise.resolve(), document = {getElementsByName: () => []}, calls = [];
     for (const name of ['gtk_handler_start', 'gtk_handler_finished', 'send', 'set_inputs_init_values', 'redrawSections',
                         'calc_repeatable_sections', 'set_readonly_inputs', 'set_multiswitch_controls', 'setStatus', 'alert',
-                        'showCheck', 'focusField']) window[name] = () => calls.push(name);
+                        'showCheck', 'clearCheck', 'focusField']) window[name] = () => calls.push(name);
     const plainTextOf = text => text;
     %s
     eval(process.argv[1]);
