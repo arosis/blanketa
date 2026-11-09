@@ -2,6 +2,7 @@
 # this program's. Nothing the user filled in is sent, and a list is kept in the settings for use without the internet.
 import os
 import re
+import secrets
 import tempfile
 import threading
 import time
@@ -26,16 +27,40 @@ WHISPERER_CALL = re.compile(r"""Naseptavac\(\s*['"]([^'"]+)['"]\s*\)""")
 WHISPERER_ENUM_PREFIX = "blanketa-naseptavac-"
 FRESH_SECONDS = 7 * 24 * 3600
 TIMEOUT_SECONDS = 6
-OPENING_WAIT_SECONDS = 6  # for all missing lists together: the window stays empty meanwhile
+OPENING_WAIT_SECONDS = 6  # for all missing lists together, when no page shows the progress: the window stays empty meanwhile
 MAX_LIST_BYTES = 8 * 1024 * 1024
 XML_CONTENT_TYPES = {"application/xml", "text/xml"}
+MAX_DOWNLOADS_FOLLOWED = 20
+_downloads = {}
+_downloads_lock = threading.Lock()
 _refreshing = set()
 _refreshing_lock = threading.Lock()
 
 
 def _enum_list_name(enum):
     match = NAMED_IN_UPDATE_ADDRESS.fullmatch((enum.get("updateurl") or "").strip())
-    return match.group(1) if match and not len(enum.findall(f"{{{FM}}}list/{{{FM}}}listitem")) else None
+    return match.group(1) if match else None
+
+
+def _is_downloaded(enum):
+    return bool(enum.get("updateurl")) and not len(enum.findall(f"{{{FM}}}list/{{{FM}}}listitem"))
+
+
+def _named_by_the_form(root):
+    texts = [value for element in root.iter() if isinstance(element.tag, str) and element.tag != f"{{{FM}}}enum"
+             for value in element.attrib.values()]
+    return "\n".join(texts + [script.text or "" for script in root.iter(f"{{{FM}}}script")])
+
+
+def _used_downloaded_enums(root):
+    # A form may carry lists it neither shows nor reads (GetListItemData in a calculation reads one by its name). Those are
+    # left alone: nothing is downloaded for them, and nothing is missing without them.
+    enums = [enum for enum in root.iter(f"{{{FM}}}enum") if _is_downloaded(enum)]
+    shown = {element.get("form602listname") for element in root.iter() if isinstance(element.tag, str) and element.get("form602listname")}
+    unshown = [enum for enum in enums if enum.get("name") not in shown]
+    named = _named_by_the_form(root) if unshown else ""
+    read = {enum.get("name") for enum in unshown if re.search(f"""['"]{re.escape(enum.get("name") or "")}['"]""", named)}
+    return [enum for enum in enums if enum.get("name") in shown or enum.get("name") in read]
 
 
 def _whisperer_list_name(field):
@@ -49,7 +74,7 @@ def _whisperers(root):
 
 
 def needed(root):
-    enums = {name for enum in root.iter(f"{{{FM}}}enum") for name in [_enum_list_name(enum)] if name}
+    enums = {name for enum in _used_downloaded_enums(root) for name in [_enum_list_name(enum)] if name}
     return enums | {name for _, name in _whisperers(root)}
 
 
@@ -123,7 +148,38 @@ def _stored(folder, name):
         return None, 0
 
 
-def load(names, folder):
+def never_stored(names, folder):
+    return sorted(name for name in names if not (folder / f"{name}.xml").exists())
+
+
+class _Download:
+    # The lists one opening lacks, fetched in the background while a page shows how far it got.
+    def __init__(self, names, folder):
+        self.total, self.done, self.finished = len(names), 0, False
+        threading.Thread(target=self._run, args=(names, folder), daemon=True).start()
+
+    def _run(self, names, folder):
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            for _ in pool.map(lambda name: _fetch(folder, name), names):
+                self.done += 1
+        self.finished = True
+
+
+def start_download(names, folder):
+    token = secrets.token_urlsafe(12)
+    with _downloads_lock:
+        _downloads[token] = _Download(names, folder)
+        while len(_downloads) > MAX_DOWNLOADS_FOLLOWED:
+            del _downloads[next(iter(_downloads))]
+    return token
+
+
+def download_progress(token):
+    download = _downloads.get(token)
+    return None if download is None else {"total": download.total, "done": download.done, "finished": download.finished}
+
+
+def load(names, folder, wait_seconds=None):
     # A stored list serves at once and an old one is renewed for next time; only a list never stored is waited for, and
     # one still downloading when the wait is over is stored for the next opening.
     lists, missing = {}, []
@@ -138,7 +194,7 @@ def load(names, folder):
     if missing:
         pool = ThreadPoolExecutor(max_workers=4)
         fetching = {pool.submit(_fetch, folder, name): name for name in missing}
-        done, _ = wait(fetching, timeout=OPENING_WAIT_SECONDS)
+        done, _ = wait(fetching, timeout=OPENING_WAIT_SECONDS if wait_seconds is None else wait_seconds)
         pool.shutdown(wait=False)
         for future in done:
             if future.result() is not None:
@@ -149,11 +205,10 @@ def load(names, folder):
 def fill(root, lists):
     # Into the form as it is open, never into the file: the lists are no part of what the office signed.
     unfilled = set()
-    for enum in root.iter(f"{{{FM}}}enum"):
+    for enum in _used_downloaded_enums(root):
         name = _enum_list_name(enum)
         if name is None:
-            address = enum.get("updateurl") or ""
-            if address and not PORTAL_RECIPIENTS.match(address) and not len(enum.findall(f"{{{FM}}}list/{{{FM}}}listitem")):
+            if not PORTAL_RECIPIENTS.match(enum.get("updateurl")):
                 unfilled.add(enum.get("name") or "")
             continue
         if name not in lists:

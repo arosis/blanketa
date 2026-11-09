@@ -21,10 +21,13 @@ FORM = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#" Id="_1
 <fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:fm="http://software602.cz/forms" xmlns:d="http://software602.cz/sample">
 <fm:formparams><fm:model><fm:instance><d:root><d:stat/><d:obec/><d:kod/><d:cizi/></d:root></fm:instance>
 <fm:bind Id="k" nodeset="/d:root"><fm:bind Id="stat" nodeset="d:stat"/><fm:bind Id="obec" nodeset="d:obec"/><fm:bind Id="kod" nodeset="d:kod"/>
-<fm:bind Id="cizi" nodeset="d:cizi"/></fm:bind></fm:model>
+<fm:bind Id="cizi" nodeset="d:cizi"/>
+<fm:bind Id="pojistovna" nodeset="d:kod" calculate="GetListItemData('Pojistovny', ., 'itemtext')"/></fm:bind></fm:model>
 <fm:enum name="Staty" updateurl='$(Eval("StrCat(GetCustomConfigValue(VratCiselnik),Stat.xml)"))'/>
 <fm:enum name="PrijemcePodani" updateurl='$(Eval("StrCat(GetCustomConfigValue(url_base),fas-adapter-codelists/,DataXpath(//d:Ciselnik_PrijemcePodani),.xml)"))'/>
 <fm:enum name="Cizi" updateurl="https://attacker.example/seznam.xml"/>
+<fm:enum name="Pojistovny" updateurl='$(Eval("StrCat(GetCustomConfigValue(VratCiselnik),ZdravotniPojistovna.xml)"))'/>
+<fm:enum name="Rok" updateurl='$(Eval("StrCat(GetCustomConfigValue(VratCiselnik),Rok.xml)"))'/>
 </fm:formparams>
 <fo:layout-master-set><fo:simple-page-master master-name="A4"><fo:region-body/></fo:simple-page-master></fo:layout-master-set>
 <fo:page-sequence master-reference="A4"><fo:flow flow-name="xsl-region-body"><fo:block>
@@ -49,21 +52,21 @@ class CodeLists(unittest.TestCase):
         self.folder.mkdir(exist_ok=True)
         (self.folder / f"{name}.xml").write_text(text, encoding="utf-8")
 
-    def test_only_lists_of_mpsvs_service_are_needed(self):
-        self.assertEqual(codelists.needed(self.root), {"Stat", "Obec"})
+    def test_only_lists_of_mpsvs_service_the_form_shows_or_reads_are_needed(self):
+        self.assertEqual(codelists.needed(self.root), {"Stat", "Obec", "ZdravotniPojistovna"})
 
     def test_stored_lists_fill_the_form_and_its_whisperer(self):
         self.store("Stat", STAT)
         self.store("Obec", OBEC)
         unfilled = codelists.fill(self.root, codelists.load(codelists.needed(self.root), self.folder))
-        self.assertEqual(unfilled, {"Cizi"})
+        self.assertEqual(unfilled, {"ZdravotniPojistovna", "Cizi"})
         self.assertEqual(self.root.xpath("//fm:enum[@name='Staty']//fm:listitem/@value", namespaces={"fm": codelists.FM}), ["CZ", "SK"])
         whisperer = self.root.xpath("//*[@form602ct='acm']")[0]
         self.assertEqual(whisperer.get(form_scripts.WHISPERER_LIST_ATTRIBUTE), "blanketa-naseptavac-Obec")
 
     def test_without_the_internet_a_list_never_stored_is_missing(self):
         unfilled = codelists.fill(self.root, codelists.load(codelists.needed(self.root), self.folder))
-        self.assertEqual(unfilled, {"Stat", "Obec", "Cizi"})
+        self.assertEqual(unfilled, {"Stat", "Obec", "ZdravotniPojistovna", "Cizi"})
 
     def test_an_old_list_serves_and_is_renewed_for_next_time(self):
         self.store("Stat", STAT)
@@ -82,6 +85,16 @@ class CodeLists(unittest.TestCase):
             started = time.monotonic()
             self.assertEqual(codelists.load({"Stat"}, self.folder), {})
             self.assertLess(time.monotonic() - started, 0.8)
+
+    def test_a_background_download_reports_how_far_it_got(self):
+        with mock.patch.object(codelists, "_fetch", return_value=None):
+            token = codelists.start_download(["Stat", "Obec"], self.folder)
+            for _ in range(100):
+                if codelists.download_progress(token)["finished"]:
+                    break
+                time.sleep(0.01)
+        self.assertEqual(codelists.download_progress(token), {"total": 2, "done": 2, "finished": True})
+        self.assertIsNone(codelists.download_progress("neznamy"))
 
     def test_only_items_with_their_two_texts_are_taken_over(self):
         hostile = ('<fm:enum xmlns:fm="http://software602.cz/forms" name="Stat"><fm:list lid="1029" onload="x">'
@@ -150,6 +163,14 @@ class CodeListsOnThePage(unittest.TestCase):
         self.assertEqual(html.xpath("//input[@name='obec']/@list"), ["blanketa-naseptavac-Obec"])
         self.assertEqual(html.xpath("//datalist[@id='blanketa-naseptavac-Obec']/option/@value"), ["Praha", "Brno"])
         self.assertTrue(page_data(page)["info"]["missing_lists"])  # the list of attacker.example is never fetched
+
+    def test_a_list_never_stored_shows_its_download_first(self):
+        (Path(self.folder.name) / "codelists" / "Obec.xml").unlink()
+        with mock.patch.dict(os.environ, {"ZFO_OFFLINE": ""}), mock.patch.object(codelists, "start_download", return_value="t1") as started:
+            page = app.render_zfo_page("codelists-test")
+            self.assertEqual(page_data(page), {"token": "t1"})
+            self.assertEqual(started.call_args[0][0], ["Obec", "ZdravotniPojistovna"])
+            self.assertIn("session", page_data(app.render_zfo_page("codelists-test", lists_waited_for=True)))
 
     def test_the_form_file_stays_as_the_office_published_it(self):
         app.render_zfo_page("codelists-test")

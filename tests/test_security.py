@@ -707,6 +707,10 @@ class LocalServer(unittest.TestCase):
                 else:
                     self.assertEqual(lookups.ask(ares)["status"], outcome)
 
+    def test_progress_of_an_unknown_download_is_not_found(self):
+        self.assertEqual(self.request("GET", "/codelists-progress?t=neznamy")[0], 404)
+        self.assertEqual(self.request("GET", "/codelists-progress?t=x", host="attacker.example")[0], 403)
+
     def test_lookup_follows_no_redirect(self):
         handler = public_services._NoRedirects()
         self.assertIsNone(handler.redirect_request(None, None, 302, "Found", {}, "https://attacker.example/"))

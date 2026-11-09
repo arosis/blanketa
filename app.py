@@ -69,8 +69,9 @@ SHELL_STYLE = re.search(r"<style>.*?</style>", SHELL, re.S).group(0).replace("__
 PDF_PAGE = (RESOURCES / "ui/pdf.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
 MESSAGE_PAGE = (RESOURCES / "ui/message.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
 CONTAINER_PAGE = (RESOURCES / "ui/container.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
+CODELISTS_PAGE = (RESOURCES / "ui/codelists.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
 PAGE_SCRIPTS = {f"/{name}": RESOURCES / "ui" / name
-                for name in ("files.js", "shell.js", "pdf.mjs", "message.js", "container.js")}
+                for name in ("files.js", "shell.js", "pdf.mjs", "message.js", "container.js", "codelists.js")}
 
 
 def json_for_script(value):
@@ -301,14 +302,23 @@ def published_form_with_data(fo, data):
     return etree.tostring(published)
 
 
-def render_zfo_page(name, blank=False, data=None):
+def render_codelists_page(names, folder):
+    return page_with_data(CODELISTS_PAGE, {"token": codelists.start_download(names, folder)})
+
+
+def render_zfo_page(name, blank=False, data=None, lists_waited_for=False):
     fo = zfo_verify.read_form_fo(form_path(name))
+    folder = certstore.config_dir() / "codelists"
+    # The first opening shows how the lists download; imported data waits on this request, it cannot come back for a second.
+    never_stored = codelists.never_stored(codelists.needed(parse_fo(fo)), folder)
+    if never_stored and data is None and not lists_waited_for and not os.environ.get("ZFO_OFFLINE"):
+        return render_codelists_page(never_stored, folder)
     if blank or data is not None:
         fo = published_form_with_data(fo, data)
     engine_doc = engine.open_document(fo)
     session = new_session({"name": name, "doc": engine_doc})
     doc = parse_fo(fo)
-    lists = codelists.load(codelists.needed(doc), certstore.config_dir() / "codelists")
+    lists = codelists.load(codelists.needed(doc), folder, wait_seconds=0 if lists_waited_for else None)
     codelists.fill(engine_doc.root, lists)
     unfilled_lists = codelists.fill(doc, lists)
     form_scripts.name_buttons_for_page(doc)
@@ -598,7 +608,7 @@ class Handler(BaseHTTPRequestHandler):
             return render_message_page(name)
         if asic_verify.is_signed_path(path):
             return render_container_page(name)
-        return render_zfo_page(name, first_query_value(query, "blank") == "1", data)
+        return render_zfo_page(name, first_query_value(query, "blank") == "1", data, first_query_value(query, "codelists") == "1")
 
     def _serve_form_page(self, name, query):
         try:
@@ -632,6 +642,9 @@ class Handler(BaseHTTPRequestHandler):
             return self._serve_attachment(url.query)
         if url.path == "/identities":
             return self._send_json(certstore.signing_identities())
+        if url.path == "/codelists-progress":
+            progress = codelists.download_progress(first_query_value(url.query, "t"))
+            return self._send_json(progress) if progress else self._send_not_found()
         name = first_query_value(url.query, "form", None)
         if not name and SINGLE_FILE and not FORMS:
             return self._send_response(200, render_empty_window().encode(), HTML_UTF8)
