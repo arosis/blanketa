@@ -28,6 +28,7 @@ import isds_message
 import lookups
 import pdf_form_data
 import pdf_sign
+import ruian
 import zfo_sign
 import zfo_verify
 from zfoengine import api as engine
@@ -683,6 +684,15 @@ class Handler(BaseHTTPRequestHandler):
         except OSError:
             return self._send_json({"error": lookups.UNAVAILABLE})
 
+    def _check_addresses(self, session):
+        # Only the addresses the form's own check collected (form_scripts.czech_addresses): the page cannot add any.
+        with LOCK:
+            addresses = list(session["doc"].addresses_to_check) if "doc" in session else []
+        try:
+            return self._send_json({"results": [ruian.check(address) for address in addresses]})
+        except OSError:
+            return self._send_json({"error": ruian.UNAVAILABLE})
+
     def _answer_engine_message(self, session, body):
         message = json.loads(body)
         self._send_json(engine.handle(session["doc"], message.get("type"), message.get("data")))
@@ -743,6 +753,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._report_revocation(body)
         if url.path == "/lookup":  # outside the lock for the same reason
             return self._answer_lookup(body)
+        if url.path == "/check-addresses":
+            return self._check_addresses(session)
         with LOCK:
             if url.path == "/ipc":
                 return self._answer_engine_message(session, body)

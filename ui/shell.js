@@ -397,6 +397,42 @@
     setStatus('');
     send(JSON.stringify({type: 'run_form_script', data: {...retry, lookups: {...retry.lookups, [url]: answer}}}));
   };
+  const addressesNotChecked = 'Adresy nebyly ověřeny v\u00a0registru RÚIAN. Před odesláním je zkontrolujte.';
+  const addressLine = address => {
+    const number = address.CisloPopisne || (address.CisloEvidencni && `č.\u00a0ev. ${address.CisloEvidencni}`);
+    return [[address.Ulice || address.CastObce, [number, address.CisloOrientacni].filter(Boolean).join('/')].filter(Boolean).join(' '),
+      [address.Psc, address.Obec].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+  };
+  const addressVerdict = ({address, verdict, registered}) => ({
+    known: null,
+    similar: `Adresu „${address}“ registr nezná. Zná: ${registered.map(text => `„${text}“`).join(', ')}.`,
+    unknown: `Adresu „${address}“ registr nezná.`,
+  })[verdict];
+  const checkAddresses = async addresses => {
+    const question = 'Formulář chce ověřit adresy v\u00a0registru RÚIAN.\n\nBlanketa pošle Českému úřadu zeměměřickému a\u00a0katastrálnímu '
+      + `(ags.cuzk.gov.cz) tyto adresy:\n${addresses.map(address => `• ${addressLine(address)}`).join('\n')}\n\nNic jiného z\u00a0formuláře neodejde. Poslat?`;
+    if (!confirm(question)) {
+      setStatus(addressesNotChecked);
+      return;
+    }
+    setStatus('Ověřuji adresy v\u00a0registru RÚIAN…');
+    const answer = await fetch(`/check-addresses?s=${SESSION}`, {method: 'POST', body: '{}'})
+      .then(response => response.ok ? response.json() : {error: addressesNotChecked})
+      .catch(() => ({error: addressesNotChecked}));
+    if (answer.error) {
+      alert(answer.error);
+      setStatus(answer.error);
+      return;
+    }
+    const problems = answer.results.map(addressVerdict).filter(Boolean);
+    if (!problems.length) {
+      setStatus('Registr RÚIAN adresy zná.');
+      return;
+    }
+    alert(`${problems.join('\n\n')}\n\nOpravte adresu podle registru, nebo ji zkontrolujte. Úřad může podání s\u00a0adresou, kterou registr nezná, odmítnout.`);
+    const count = problems.length;
+    setStatus(count === 1 ? 'Jednu adresu registr RÚIAN nezná.' : `Registr RÚIAN nezná ${count}\u00a0${count < 5 ? 'adresy' : 'adres'}.`);
+  };
   window.run_form_button = button => send(JSON.stringify({type: 'run_form_script', data: {button: Number(button.dataset.formButton), repe: get_parent_repe(button)}}));
   window.form_script_callback = result => {
     if (result.question) {
@@ -433,6 +469,7 @@
     queue.then(() => {
       if (result.problems?.length) showCheck(result.problems);
       if (result.focus) focusField(result.focus, Boolean(result.sections));
+      if (result.addresses?.length) checkAddresses(result.addresses);
     });
   };
 

@@ -34,11 +34,17 @@ MAX_QUESTIONS_PER_RUN = 8
 MAX_NAMED_PARAMETERS = 1_000
 MAX_LOOKUPS_PER_RUN = 3
 MAX_STYLESHEET_RUNS_PER_RUN = 50  # a stylesheet's own work spends no budget; MPSV forms run 7 per click
-# Lists of the addresses a form checks in RÚIAN, in the two generations of MPSV forms. Empty here: no address gets checked.
+# Lists of the addresses a form would send to MPSV's own service, in the two generations of MPSV forms. The form gets an
+# empty list: Blanketa checks the addresses itself in RÚIAN (ruian.py), after the user agrees.
 ADDRESS_LIST_STYLESHEETS = {"Validace_AdresaWS_XpathAdres", "XsltGetAdresy"}
+# An address of an MPSV form is an element with these parts, marked by the place its check result goes, in both generations.
+ADDRESS_PARTS = ("Ulice", "CisloPopisne", "CisloEvidencni", "CisloOrientacni", "Psc", "Obec", "CastObce")
+ADDRESSES_IN_DATA = ("//*[*[local-name() = 'Ruian' or local-name() = '__PomValidovanaAdresa']]"
+                     "[not(*[local-name() = '__ValidovanaAdresa'] = 'true')]"
+                     "[not(*[local-name() = 'Stat'] != '' and *[local-name() = 'Stat'] != 'CZ')][not(*[local-name() = 'Cislo'])]")
+MAX_ADDRESSES_CHECKED = 10
 KEEP_EARLIER_CHECK_RESULTS = "noclean"
 CHECK_RESULT_TAG = "control"
-ADDRESS_NOT_CHECKED_NOTICE = "Adresy nebyly ověřeny v registru RÚIAN, Blanketa formulářům síť nepovoluje. Před odesláním je zkontrolujte."
 WHISPERER_FIELD_TYPE = "acm"
 WHISPERER_LIST_ATTRIBUTE = "blanketa-list"
 DATA_ROOT_PATH = "/*"
@@ -164,6 +170,7 @@ class FormActionHost:
     self.stylesheet_runs = 0
     self.focus_bind = None
     self.has_section_changes = False
+    self.addresses = None
 
   def _current_path(self):
     owner = next(iter(self.element.xpath("ancestor-or-self::*[@form602bind][1]")), None)
@@ -308,8 +315,7 @@ class FormActionHost:
 
   def form_data(self, stylesheet_name):
     if stylesheet_name in ADDRESS_LIST_STYLESHEETS:
-      if ADDRESS_NOT_CHECKED_NOTICE not in self.notices:
-        self.notices.append(ADDRESS_NOT_CHECKED_NOTICE)
+      self.addresses = czech_addresses(self.document)
       return ""
     if self.document.get_template_text(stylesheet_name) is None:
       raise js602.Unsupported("GetFormData")
@@ -435,6 +441,16 @@ def serialized_data(document):
   return etree.tostring(document._get_data_root())
 
 
+def czech_addresses(document):
+  addresses = []
+  for element in document._get_data_root().xpath(ADDRESSES_IN_DATA):
+    parts = {child.xpath("local-name()"): (child.text or "").strip() for child in element if isinstance(child.tag, str)}
+    address = {part: parts.get(part, "") for part in ADDRESS_PARTS}
+    if any(address.values()) and address not in addresses:
+      addresses.append(address)
+  return addresses[:MAX_ADDRESSES_CHECKED]
+
+
 def _result_of_finished_run(document, host, values_before, data_before):
   if host.has_section_changes:
     document.recalc_form()
@@ -446,6 +462,9 @@ def _result_of_finished_run(document, host, values_before, data_before):
     document.is_changed = True
   result = {"values": changed_values, "changed": data_changed, "messages": host.messages, "notices": host.notices,
             "focus": host.focus_bind, "problems": host.problems}
+  if host.addresses is not None:
+    document.addresses_to_check = host.addresses
+    result["addresses"] = host.addresses
   if host.has_section_changes:
     tree = _section_tree(document, document.get_repeatable_sections())
     result["sections"] = tree
