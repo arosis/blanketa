@@ -42,6 +42,7 @@ import isds_message
 import lookups
 import pdf_form_data
 import public_services
+import ruian
 import xades_verify
 import zfo_verify
 from zfoengine import api as engine
@@ -690,6 +691,23 @@ class LocalServer(unittest.TestCase):
         self.assertEqual(self.request("POST", "/lookup", body=json.dumps({"url": ares}))[0], 404)
         status, answer = self.request("POST", f"/lookup?s={session}", body=json.dumps({"url": ares}))
         self.assertEqual((status, json.loads(answer)), (200, {"error": lookups.UNAVAILABLE}))
+
+    def test_address_check_sends_only_what_the_form_collected(self):
+        session = self.session_of("cuzk-test")
+        self.assertEqual(self.request("POST", "/check-addresses", body="{}")[0], 404)
+        self.assertEqual(self.request("POST", f"/check-addresses?s={session}", origin="https://attacker.example", body="{}")[0], 403)
+        with mock.patch.object(ruian, "check") as check:
+            status, answer = self.request("POST", f"/check-addresses?s={session}", body=json.dumps({"addresses": [{"Obec": "Cizi"}]}))
+        self.assertEqual((status, json.loads(answer)), (200, {"results": []}))
+        check.assert_not_called()
+        address = {"Ulice": "", "CisloPopisne": "12", "CisloEvidencni": "", "CisloOrientacni": "", "Psc": "26301", "Obec": "Obořiště",
+                   "CastObce": "Lhotka"}
+        doc = app.SESSIONS[session]["doc"]
+        doc.addresses_to_check, doc.addresses_asked = [address], {form_scripts.address_text(address)}
+        with mock.patch.dict(os.environ, {"ZFO_OFFLINE": "1"}):
+            status, answer = self.request("POST", f"/check-addresses?s={session}", body="{}")
+        self.assertEqual((status, json.loads(answer)), (200, {"error": ruian.UNAVAILABLE}))
+        self.assertEqual(doc.addresses_asked, set())  # not checked after all: asked about again next time
 
     def test_a_page_that_is_not_the_registers_answer_counts_as_unavailable(self):
         class Answer(io.BytesIO):
