@@ -66,6 +66,31 @@ class SignatureReplacementNotice(unittest.TestCase):
 
 
 @needs_node
+class SwitchedPartsOnThePage(unittest.TestCase):
+    """Runs the answer that shows and hides the parts of a switch on ui/shell.html: the engine names the parts to show."""
+    SCRIPT = """
+    const window = globalThis;
+    let finished = 0;
+    const gtk_handler_finished = () => finished++;
+    const parts = Object.fromEntries(['1', '2', '3'].map(value => [`div-krok-${value}`, {tagName: 'DIV', style: {display: ''}}]));
+    const elementsNamed = name => parts[name] ? [parts[name]] : [];
+    const $ = part => ({show: () => { part.style.display = ''; }, hide: () => { part.style.display = 'none'; }});
+    %s
+    window.set_multiswitch_controls_callback({data: [{bindref: 'krok', cases: ['1', '2', '3'], shown: JSON.parse(process.argv[1])}]});
+    console.log(JSON.stringify({finished, shown: Object.keys(parts).filter(name => parts[name].style.display !== 'none')}));
+    """
+
+    def shown_after(self, shown):
+        answer = re.search(r"window\.set_multiswitch_controls_callback = .*?\n  \};", ui_source("shell.js"), re.S).group(0)
+        return json.loads(run_in_node(self.SCRIPT % answer, json.dumps(shown)))
+
+    def test_only_the_parts_the_engine_names_are_shown(self):
+        for shown, parts in ((["2"], ["div-krok-2"]), ([], []), (["1", "2", "3"], ["div-krok-1", "div-krok-2", "div-krok-3"])):
+            with self.subTest(shown):
+                self.assertEqual(self.shown_after(shown), {"finished": 1, "shown": parts})
+
+
+@needs_node
 class RegisterLookupOnThePage(unittest.TestCase):
     """Runs the lookup handling of ui/shell.js: the user confirms, the server asks the register, the script runs again."""
     SCRIPT = """
