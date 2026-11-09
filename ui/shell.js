@@ -398,11 +398,6 @@
     send(JSON.stringify({type: 'run_form_script', data: {...retry, lookups: {...retry.lookups, [url]: answer}}}));
   };
   const addressesNotChecked = 'Adresy nebyly ověřeny v\u00a0registru RÚIAN. Před odesláním je zkontrolujte.';
-  const addressLine = address => {
-    const number = address.CisloPopisne || (address.CisloEvidencni && `č.\u00a0ev. ${address.CisloEvidencni}`);
-    return [[address.Ulice || address.CastObce, [number, address.CisloOrientacni].filter(Boolean).join('/')].filter(Boolean).join(' '),
-      [address.Psc, address.Obec].filter(Boolean).join(' ')].filter(Boolean).join(', ');
-  };
   const addressVerdict = ({address, verdict, registered}) => ({
     known: null,
     similar: `Adresu „${address}“ registr nezná. Zná: ${registered.map(text => `„${text}“`).join(', ')}.`,
@@ -410,7 +405,7 @@
   })[verdict];
   const checkAddresses = async addresses => {
     const question = 'Formulář chce ověřit adresy v\u00a0registru RÚIAN.\n\nBlanketa pošle Českému úřadu zeměměřickému a\u00a0katastrálnímu '
-      + `(ags.cuzk.gov.cz) tyto adresy:\n${addresses.map(address => `• ${addressLine(address)}`).join('\n')}\n\nNic jiného z\u00a0formuláře neodejde. Poslat?`;
+      + `(ags.cuzk.gov.cz) tyto adresy:\n${addresses.map(address => `• ${address}`).join('\n')}\n\nNic jiného z\u00a0formuláře neodejde. Poslat?`;
     if (!confirm(question)) {
       setStatus(addressesNotChecked);
       return;

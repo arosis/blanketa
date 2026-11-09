@@ -41,7 +41,7 @@ ADDRESS_LIST_STYLESHEETS = {"Validace_AdresaWS_XpathAdres", "XsltGetAdresy"}
 ADDRESS_PARTS = ("Ulice", "CisloPopisne", "CisloEvidencni", "CisloOrientacni", "Psc", "Obec", "CastObce")
 ADDRESSES_IN_DATA = ("//*[*[local-name() = 'Ruian' or local-name() = '__PomValidovanaAdresa']]"
                      "[not(*[local-name() = '__ValidovanaAdresa'] = 'true')]"
-                     "[not(*[local-name() = 'Stat'] != '' and *[local-name() = 'Stat'] != 'CZ')][not(*[local-name() = 'Cislo'])]")
+                     "[*[local-name() = 'Stat'] = 'CZ' or not(*[local-name() = 'Stat'])][not(*[local-name() = 'Cislo'])]")
 MAX_ADDRESSES_CHECKED = 10
 KEEP_EARLIER_CHECK_RESULTS = "noclean"
 CHECK_RESULT_TAG = "control"
@@ -441,6 +441,20 @@ def serialized_data(document):
   return etree.tostring(document._get_data_root())
 
 
+def address_text(address, with_post_office=True):
+  # One line as the register writes an address ("Na Poříčním právu 376/1, Nové Město, 12800 Praha"): what the user agrees
+  # to send is exactly what is sent.
+  registry = not address["CisloPopisne"] and address["CisloEvidencni"]
+  number = (f"č.ev. {address['CisloEvidencni']}" if registry else address["CisloPopisne"]) + (
+    f"/{address['CisloOrientacni']}" if address["CisloOrientacni"] else "")
+  place = address["Ulice"] if registry else address["Ulice"] or address["CastObce"] or address["Obec"]
+  building = " ".join(part for part in (place, number) if part)
+  part_of_municipality = address["CastObce"] if with_post_office and address["CastObce"] not in (place, address["Obec"]) else ""
+  postcode = re.sub(r"\D", "", address["Psc"]) if with_post_office else ""
+  post_office = " ".join(part for part in (postcode, address["Obec"]) if part)
+  return ", ".join(part for part in (building, part_of_municipality, post_office) if part)
+
+
 def czech_addresses(document):
   addresses = []
   for element in document._get_data_root().xpath(ADDRESSES_IN_DATA):
@@ -449,6 +463,14 @@ def czech_addresses(document):
     if any(address.values()) and address not in addresses:
       addresses.append(address)
   return addresses[:MAX_ADDRESSES_CHECKED]
+
+
+def _addresses_to_ask(document, addresses):
+  # Form Filler marks an address it checked and asks no more; Blanketa leaves the data as they are, so it remembers which
+  # addresses it asked about, and asks again only about one that changed since.
+  new = [address for address in addresses if address_text(address) not in document.addresses_asked]
+  document.addresses_asked.update(address_text(address) for address in new)
+  return new
 
 
 def _result_of_finished_run(document, host, values_before, data_before):
@@ -463,8 +485,8 @@ def _result_of_finished_run(document, host, values_before, data_before):
   result = {"values": changed_values, "changed": data_changed, "messages": host.messages, "notices": host.notices,
             "focus": host.focus_bind, "problems": host.problems}
   if host.addresses is not None:
-    document.addresses_to_check = host.addresses
-    result["addresses"] = host.addresses
+    document.addresses_to_check = _addresses_to_ask(document, host.addresses)
+    result["addresses"] = [address_text(address) for address in document.addresses_to_check]
   if host.has_section_changes:
     tree = _section_tree(document, document.get_repeatable_sections())
     result["sections"] = tree

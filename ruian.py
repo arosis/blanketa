@@ -5,14 +5,18 @@ import os
 import re
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, wait
 
 import public_services
+from zfoengine.form_scripts import address_text
 
 SEARCH = "https://ags.cuzk.gov.cz/arcgis/rest/services/RUIAN/MapServer/exts/GeocodeSOE/findAddressCandidates"
 ADDRESS_POINT = "AdresniMisto"
 CANDIDATES_ASKED = 5
 CANDIDATES_SHOWN = 3
 TIMEOUT_SECONDS = 8
+TOTAL_SECONDS = 20  # for all addresses of one check: the page waits meanwhile
+PARALLEL_CHECKS = 4
 MAX_ANSWER_BYTES = 256 * 1024
 JSON_CONTENT_TYPE = "application/json"
 UNAVAILABLE = "Registr RÚIAN teď není dostupný, adresy nebyly ověřeny. Před odesláním je zkontrolujte."
@@ -30,17 +34,6 @@ def _same(first, second):
 
 def _digits(text):
     return re.sub(r"\D", "", text or "")
-
-
-def written(address, with_post_office=True):
-    registry = not address["CisloPopisne"] and address["CisloEvidencni"]
-    number = (f"č.ev. {address['CisloEvidencni']}" if registry else address["CisloPopisne"]) + (
-        f"/{address['CisloOrientacni']}" if address["CisloOrientacni"] else "")
-    place = address["Ulice"] if registry else address["Ulice"] or address["CastObce"] or address["Obec"]
-    building = " ".join(part for part in (place, number) if part)
-    part_of_municipality = address["CastObce"] if address["CastObce"] not in (place, address["Obec"]) else ""
-    post_office = " ".join(part for part in (_digits(address["Psc"]) if with_post_office else "", address["Obec"]) if part)
-    return ", ".join(part for part in (building, part_of_municipality if with_post_office else "", post_office) if part)
 
 
 def _registered(text):
@@ -96,10 +89,20 @@ def _candidates(text):
 
 
 def check(address):
-    text = written(address)
+    text = address_text(address)
     # A wrong postcode or part of the municipality finds nothing; without them the register offers the address it knows.
-    found = _candidates(text) or _candidates(written(address, with_post_office=False))
+    found = _candidates(text) or _candidates(address_text(address, with_post_office=False))
     matching = [candidate for candidate in found if agrees(address, candidate)]
     if matching:
         return {"address": text, "verdict": KNOWN, "registered": matching[:1]}
     return {"address": text, "verdict": SIMILAR if found else UNKNOWN, "registered": found[:CANDIDATES_SHOWN]}
+
+
+def check_all(addresses):
+    pool = ThreadPoolExecutor(max_workers=PARALLEL_CHECKS)
+    checks = [pool.submit(check, address) for address in addresses]
+    done, waiting = wait(checks, timeout=TOTAL_SECONDS)
+    pool.shutdown(wait=False, cancel_futures=True)
+    if waiting:
+        raise OSError("the register did not answer in time")
+    return [found.result() for found in checks]

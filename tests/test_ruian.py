@@ -1,6 +1,7 @@
 """Addresses of MPSV forms checked in RÚIAN (ruian.py): collected from the form's data, sent to ČÚZK only as an address."""
 import io
 import os
+import time
 import unittest
 import urllib.parse
 from unittest import mock
@@ -24,9 +25,10 @@ FORM = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#" Id="_1
 <fm:formparams><fm:model><fm:instance><d:root>
 <d:Bydliste><d:Stat>CZ</d:Stat><d:Obec>Praha</d:Obec><d:CastObce>Nové Město</d:CastObce><d:Ulice>Na Poříčním právu</d:Ulice>
  <d:CisloPopisne>376</d:CisloPopisne><d:CisloOrientacni>1</d:CisloOrientacni><d:Psc>128 00</d:Psc><d:CisloEvidencni/><d:Ruian/></d:Bydliste>
-<d:Sidlo><d:Stat/><d:Obec>Obořiště</d:Obec><d:CastObce>Lhotka</d:CastObce><d:Ulice/><d:CisloPopisne>12</d:CisloPopisne>
+<d:Sidlo><d:Obec>Obořiště</d:Obec><d:CastObce>Lhotka</d:CastObce><d:Ulice/><d:CisloPopisne>12</d:CisloPopisne>
  <d:CisloOrientacni/><d:Psc>26301</d:Psc><d:__PomValidovanaAdresa/></d:Sidlo>
 <d:Ciziny><d:Stat>SK</d:Stat><d:Obec>Bratislava</d:Obec><d:Ruian/></d:Ciziny>
+<d:BezStatu><d:Stat/><d:Obec>Ostrava</d:Obec><d:Ruian/></d:BezStatu>
 <d:Overena><d:Obec>Brno</d:Obec><d:__ValidovanaAdresa>true</d:__ValidovanaAdresa><d:Ruian/></d:Overena>
 <d:Prazdna><d:Obec/><d:Ruian/></d:Prazdna><d:a/>
 </d:root></fm:instance><fm:bind Id="k" nodeset="/d:root"><fm:bind Id="a" nodeset="d:a"/></fm:bind></fm:model></fm:formparams>
@@ -37,12 +39,23 @@ ASK_FOR_ADDRESSES = ("{ var p = new DataParam(); p.xslName = 'Validace_AdresaWS_
 
 
 class AddressesOfTheForm(unittest.TestCase):
+    def setUp(self):
+        self.doc = engine.open_document((FORM % quoteattr(ASK_FOR_ADDRESSES)).encode())
+
+    def click(self):
+        return form_scripts.run_button_script(self.doc, 0, "", [])
+
     def test_the_form_gets_no_address_and_its_czech_ones_wait_for_the_check(self):
-        doc = engine.open_document((FORM % quoteattr(ASK_FOR_ADDRESSES)).encode())
-        result = form_scripts.run_button_script(doc, 0, "", [])
+        result = self.click()
         self.assertEqual(result["values"], {"a": "zadna"})
-        self.assertEqual(result["addresses"], [PRAGUE, VILLAGE])
-        self.assertEqual(doc.addresses_to_check, [PRAGUE, VILLAGE])
+        self.assertEqual(result["addresses"], ["Na Poříčním právu 376/1, Nové Město, 12800 Praha", "Lhotka 12, 26301 Obořiště"])
+        self.assertEqual(self.doc.addresses_to_check, [PRAGUE, VILLAGE])
+
+    def test_an_address_asked_about_once_is_asked_about_again_only_when_it_changes(self):
+        self.click()
+        self.assertEqual(self.click()["addresses"], [])
+        self.doc._get_data_root().find(".//{http://software602.cz/sample}Sidlo/{http://software602.cz/sample}Psc").text = "26302"
+        self.assertEqual(self.click()["addresses"], ["Lhotka 12, 26302 Obořiště"])
 
     def test_a_script_that_asks_for_no_addresses_leaves_none_to_check(self):
         doc = engine.open_document((FORM % quoteattr("{ GetDocument().GetElement().SetDataTo('a', 'x'); }")).encode())
@@ -52,10 +65,10 @@ class AddressesOfTheForm(unittest.TestCase):
 
 class WrittenAsTheRegisterWritesIt(unittest.TestCase):
     def test_an_address_is_searched_for_as_one_line(self):
-        self.assertEqual(ruian.written(PRAGUE), "Na Poříčním právu 376/1, Nové Město, 12800 Praha")
-        self.assertEqual(ruian.written(VILLAGE), "Lhotka 12, 26301 Obořiště")
-        self.assertEqual(ruian.written(REGISTRY_NUMBER), "č.ev. 12, 27731 Lhotka")
-        self.assertEqual(ruian.written(PRAGUE, with_post_office=False), "Na Poříčním právu 376/1, Praha")
+        self.assertEqual(form_scripts.address_text(PRAGUE), "Na Poříčním právu 376/1, Nové Město, 12800 Praha")
+        self.assertEqual(form_scripts.address_text(VILLAGE), "Lhotka 12, 26301 Obořiště")
+        self.assertEqual(form_scripts.address_text(REGISTRY_NUMBER), "č.ev. 12, 27731 Lhotka")
+        self.assertEqual(form_scripts.address_text(PRAGUE, with_post_office=False), "Na Poříčním právu 376/1, Praha")
 
     def test_the_register_agrees_only_when_every_part_does(self):
         self.assertTrue(ruian.agrees(PRAGUE, PRAGUE_REGISTERED))
@@ -76,17 +89,29 @@ class CheckedInTheRegister(unittest.TestCase):
             return ruian.check(address), [call.args[0] for call in candidates.call_args_list]
 
     def test_a_known_address_is_known(self):
-        self.assertEqual(self.check([PRAGUE_REGISTERED])[0], {"address": ruian.written(PRAGUE), "verdict": ruian.KNOWN,
+        self.assertEqual(self.check([PRAGUE_REGISTERED])[0], {"address": form_scripts.address_text(PRAGUE), "verdict": ruian.KNOWN,
                                                               "registered": [PRAGUE_REGISTERED]})
 
     def test_a_wrong_postcode_finds_the_address_the_register_knows(self):
         wrong_postcode = {**PRAGUE, "Psc": "11000"}
         result, asked = self.check([], [PRAGUE_REGISTERED], address=wrong_postcode)
         self.assertEqual((result["verdict"], result["registered"]), (ruian.SIMILAR, [PRAGUE_REGISTERED]))
-        self.assertEqual(asked, [ruian.written(wrong_postcode), ruian.written(wrong_postcode, with_post_office=False)])
+        self.assertEqual(asked, [form_scripts.address_text(wrong_postcode), form_scripts.address_text(wrong_postcode, with_post_office=False)])
 
     def test_an_address_found_nowhere_is_unknown(self):
         self.assertEqual(self.check([], [])[0]["verdict"], ruian.UNKNOWN)
+
+    def test_addresses_are_checked_together_and_only_so_long(self):
+        def slow(address):
+            time.sleep(0.3)
+            return address["Obec"]
+
+        with mock.patch.object(ruian, "check", side_effect=slow):
+            started = time.monotonic()
+            self.assertEqual(ruian.check_all([PRAGUE, VILLAGE, REGISTRY_NUMBER]), ["Praha", "Obořiště", "Lhotka"])
+            self.assertLess(time.monotonic() - started, 0.8)
+            with mock.patch.object(ruian, "TOTAL_SECONDS", 0.1):
+                self.assertRaises(OSError, ruian.check_all, [PRAGUE])
 
 
 class Answer(io.BytesIO):

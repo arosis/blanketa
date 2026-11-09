@@ -56,6 +56,7 @@ class ZFO_document:
     self.runaway_scripts = 0
     self.script_running = False
     self.addresses_to_check = []
+    self.addresses_asked = set()
     self.script_named_parameters = {}
     self.user_action_running = False
     self.prefix_map = prefix_map    

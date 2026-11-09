@@ -689,8 +689,10 @@ class Handler(BaseHTTPRequestHandler):
         with LOCK:
             addresses = list(session["doc"].addresses_to_check) if "doc" in session else []
         try:
-            return self._send_json({"results": [ruian.check(address) for address in addresses]})
+            return self._send_json({"results": ruian.check_all(addresses)})
         except OSError:
+            with LOCK:  # not checked after all: the next check of the form asks about them again
+                session["doc"].addresses_asked.difference_update(form_scripts.address_text(address) for address in addresses)
             return self._send_json({"error": ruian.UNAVAILABLE})
 
     def _answer_engine_message(self, session, body):

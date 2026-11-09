@@ -702,10 +702,12 @@ class LocalServer(unittest.TestCase):
         check.assert_not_called()
         address = {"Ulice": "", "CisloPopisne": "12", "CisloEvidencni": "", "CisloOrientacni": "", "Psc": "26301", "Obec": "Obořiště",
                    "CastObce": "Lhotka"}
-        app.SESSIONS[session]["doc"].addresses_to_check = [address]
+        doc = app.SESSIONS[session]["doc"]
+        doc.addresses_to_check, doc.addresses_asked = [address], {form_scripts.address_text(address)}
         with mock.patch.dict(os.environ, {"ZFO_OFFLINE": "1"}):
             status, answer = self.request("POST", f"/check-addresses?s={session}", body="{}")
         self.assertEqual((status, json.loads(answer)), (200, {"error": ruian.UNAVAILABLE}))
+        self.assertEqual(doc.addresses_asked, set())  # not checked after all: asked about again next time
 
     def test_a_page_that_is_not_the_registers_answer_counts_as_unavailable(self):
         class Answer(io.BytesIO):
