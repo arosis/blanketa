@@ -371,12 +371,39 @@
     field?.scrollIntoView({block: 'center'});
     field?.focus();
   };
+  const registerUnreachable = {error: 'Registru se nepodařilo položit dotaz. Údaje vyplňte ručně.'};
+  const askRegister = async ({url, question, retry}) => {
+    if (!confirm(question)) {
+      setStatus('Údaje z registru se nedoplnily, dotaz jste nepotvrdili. Zkontrolujte název a adresu firmy.');
+      return;
+    }
+    setStatus('Ptám se registru…');
+    const answer = await fetch(`/lookup?s=${SESSION}`, {method: 'POST', body: JSON.stringify({url})})
+      .then(response => response.ok ? response.json() : registerUnreachable)
+      .catch(() => registerUnreachable);
+    if (answer.error) {
+      alert(answer.error);
+      setStatus(answer.error);
+      return;
+    }
+    setStatus('');
+    send(JSON.stringify({type: 'run_form_script', data: {...retry, lookups: {...retry.lookups, [url]: answer}}}));
+  };
   window.run_form_button = button => send(JSON.stringify({type: 'run_form_script', data: {button: Number(button.dataset.formButton), repe: get_parent_repe(button)}}));
   window.form_script_callback = result => {
     if (result.question) {
       const {text, title, retry} = result.question;
       const answer = confirm(plainTextOf(title ? `${title}\n\n${text}` : text));
       send(JSON.stringify({type: 'run_form_script', data: {...retry, answers: [...retry.answers, answer]}}));
+      return;
+    }
+    if (result.lookup) {
+      askRegister(result.lookup);
+      return;
+    }
+    if (result.stopped) {
+      alert(result.stopped);
+      setStatus(result.stopped);
       return;
     }
     if (result.refused) {

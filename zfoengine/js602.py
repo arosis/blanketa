@@ -110,7 +110,7 @@ _TOKEN = re.compile(r'''
   | (?P<name>[^\W\d][\w]*|\$[\w$]*)
   | (?P<num>0[xX][0-9a-fA-F]+|(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)
   | (?P<str>"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*')
-  | (?P<punct>>>>=|===|!==|>>>|<<=|>>=|=>|==|!=|<=|>=|&&|\|\||\+\+|--|\+=|-=|\*=|/=|%=|&=|\|=|\^=|<<|>>|[{}()\[\];,.?:~!<>=+\-*/%&|^])
+  | (?P<punct>>>>=|===|!==|>>>|<<=|>>=|=>|==|!=|<=|>=|&&|\|\||\?\.(?!\d)|\+\+|--|\+=|-=|\*=|/=|%=|&=|\|=|\^=|<<|>>|[{}()\[\];,.?:~!<>=+\-*/%&|^])
 ''', re.X | re.S)
 _REGEX = re.compile(r'/((?:[^/\\\n\[]|\\.|\[(?:[^\]\\\n]|\\.)*\])+)/([a-z]*)')
 _ESCAPES = {"n": "\n", "t": "\t", "r": "\r", "b": "\b", "f": "\f", "v": "\v", "0": "\0", "\n": ""}
@@ -2354,8 +2354,20 @@ class _Compiler:
     else:
       value = self.primary()
     base, key = None, None  # the object and key value was read from, for this in a call
+    is_optional_chain = False
     while self.pos < self.end:
-      if self.accept("."):
+      if self.accept("?."):
+        is_optional_chain = True
+        value = _stopping_chain_at_nothing(value)
+        if self.at("("):
+          base, key = None, None  # the guarded value is what gets called
+          continue
+        if self.at("["):
+          continue
+        key_value = self._property_name()
+        base, key = value, _constant(key_value)
+        value = self._read(base, key)
+      elif self.accept("."):
         key_value = self._property_name()
         base, key = value, _constant(key_value)
         value = self._read(base, key)
@@ -2370,7 +2382,7 @@ class _Compiler:
         base, key = None, None
       else:
         break
-    return value
+    return _ending_optional_chain(value) if is_optional_chain else value
 
   def new_expression(self):
     self.pos += 1
@@ -2500,6 +2512,28 @@ def _constant(value):
   return lambda scope: value
 
 
+class _OptionalChainEnd(Exception):
+  pass
+
+
+def _stopping_chain_at_nothing(value):
+  def guarded(scope):
+    result = value(scope)
+    if result is None or result is UNDEFINED:
+      raise _OptionalChainEnd()
+    return result
+  return guarded
+
+
+def _ending_optional_chain(value):
+  def chain(scope):
+    try:
+      return value(scope)
+    except _OptionalChainEnd:
+      return UNDEFINED
+  return chain
+
+
 class _Member:
   # Reading a[b]. Stays inspectable: an assignment or ++ then writes to the same place.
   __slots__ = ("get", "base", "key")
@@ -2615,14 +2649,18 @@ _FORM_ACTION_CONSTANTS = {
   "IDOK": 1.0, "IDYES": 6.0, "IDNO": 7.0,
   "VarStr": 0.0, "VarFXML": 1.0, "VarFPdf": 2.0, "VarFFo": 3.0, "VarFUndef": 4.0, "VarCUTF8": 5.0,
   "GFD_INCLUDINGIRRELEVANT": 1.0, "GFD_CUTNAMESPACES": 2.0, "GFD_ORIGINAL": 4.0, "GFD_SIGNDATA": 8.0,
+  "SM_GET": 0.0, "SM_POST": 1.0, "SR_OK": 0.0, "SR_CANCELED": 1.0, "SR_ERROR": 2.0,
+  "SHTTP_NODLG": 1.0, "SHTTP_AUTHENTICNEVER": 2.0, "SHTTP_WEB_SERVERSENDS": 4.0, "SHTTP_WEB_CLIENTSENDS": 8.0,
 }
 MB_YESNO = _FORM_ACTION_CONSTANTS["MB_YESNO"]
 IDOK, IDYES, IDNO = _FORM_ACTION_CONSTANTS["IDOK"], _FORM_ACTION_CONSTANTS["IDYES"], _FORM_ACTION_CONSTANTS["IDNO"]
+SM_GET, SR_OK = _FORM_ACTION_CONSTANTS["SM_GET"], _FORM_ACTION_CONSTANTS["SR_OK"]
 
 
 def run_form_action(interpreter, source, host):
   # Runs the script of a button or of a field change against host (form_scripts.FormActionHost). What the application
   # offered beyond these names, sending, saving, printing and signing above all, is absent here, so it stops the script.
+  # SendData reaches only the lookups form_scripts.known_lookup names, after the user confirmed them.
   # A script can keep these functions in a global: they refuse outside the run they were made for, and in the calculations
   # nested in it.
   run_level = interpreter.runs_in_progress + 1
@@ -2652,6 +2690,12 @@ def run_form_action(interpreter, source, host):
     xsl_name = interpreter.get(parameters, "xslName") if isinstance(parameters, ScriptObject) else UNDEFINED
     return ScriptObject({"data": host.form_data(to_string(xsl_name))})
 
+  def send_data(_data=UNDEFINED, parameters=UNDEFINED, *_):
+    if not isinstance(parameters, ScriptObject):
+      raise Unsupported("SendData")
+    body = host.send_data(to_number(interpreter.get(parameters, "method")), text(interpreter.get(parameters, "url")))
+    return ScriptObject({"code": SR_OK, "data": ScriptObject({"data": body})})
+
   def load_form_data_part(part=UNDEFINED, path=UNDEFINED):
     content = interpreter.get(part, "data") if isinstance(part, ScriptObject) else UNDEFINED
     host.load_empty_data_part(text(content), text(path))
@@ -2675,6 +2719,7 @@ def run_form_action(interpreter, source, host):
     "CheckData": native(lambda *_: host.check_data()),
     "GetFormData": native(form_data),
     "LoadFormDataPart": native(load_form_data_part),
+    "SendData": native(send_data),
     "XSLCheck": native(lambda name=UNDEFINED, mode=UNDEFINED, *_: host.xsl_check(text(name), "" if mode is UNDEFINED else text(mode))),
   })
   named_parameters = host.named_parameters
@@ -2689,6 +2734,7 @@ def run_form_action(interpreter, source, host):
     "GetCustomItem": native(lambda *_: ""),
     "Variant": object_factory(),
     "DataParam": object_factory(),
+    "SendParam": object_factory(),
   }
   try:
     interpreter.run(source, globals_for_action)

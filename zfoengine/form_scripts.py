@@ -32,6 +32,7 @@ MAX_SECTION_CHANGES_PER_RUN = 200
 MAX_MESSAGES_PER_RUN = 5
 MAX_QUESTIONS_PER_RUN = 8
 MAX_NAMED_PARAMETERS = 1_000
+MAX_LOOKUPS_PER_RUN = 3
 MAX_STYLESHEET_RUNS_PER_RUN = 50  # a stylesheet's own work spends no budget; MPSV forms run 7 per click
 # Lists of the addresses a form checks in RÚIAN, in the two generations of MPSV forms. Empty here: no address gets checked.
 ADDRESS_LIST_STYLESHEETS = {"Validace_AdresaWS_XpathAdres", "XsltGetAdresy"}
@@ -44,6 +45,50 @@ XML_LANG_ATTRIBUTE = "{http://www.w3.org/XML/1998/namespace}lang"
 FO_NAMESPACES = {"fo": ns.FO_URI, "fm": ns.FM_URI}
 TRAILING_POSITION = re.compile(r"^(.*)\[(\d+)\]$", re.S)
 EMPTY_ELEMENT = re.compile(r"<([\w.\-]+)\s*(?:/>|></\1\s*>)")
+ARES_REGISTERS = {register: f"https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/{register}/"
+                  for register in ("ekonomicke-subjekty", "ekonomicke-subjekty-res")}
+ARES_SUBJECT_URL = re.compile(r"https://ares\.gov\.cz/ekonomicke-subjekty-v-be/rest/(ekonomicke-subjekty(?:-res)?)/([0-9]{8})")
+CLOSED_ARES_URL = re.compile(r"https?://wwwinfo\.mfcr\.cz/cgi-bin/ares/.*", re.S)
+CLOSED_ARES_NOTICE = "Formulář se ptá staré služby ARES, která už nefunguje. Údaje firmy vyplňte ručně."
+HTTP_OK = 200
+HTTP_NOT_FOUND = 404
+
+
+def known_lookup(url):
+  # The only address a form may ask. The user confirms each lookup, and only the IČO in the address leaves the computer.
+  match = ARES_SUBJECT_URL.fullmatch(url) if isinstance(url, str) else None
+  if match is None:
+    return None
+  register, number = match.groups()
+  return {"url": url, "register": register, "number": number,
+          "question": f"Formulář chce doplnit údaje firmy z\u00a0registru ARES.\n\nBlanketa pošle IČO {number} Ministerstvu financí (ares.gov.cz). "
+                      "Nic jiného z\u00a0formuláře neodejde.\n\nPoslat?"}
+
+
+def _lookup_failure(lookup, status):
+  if status == HTTP_NOT_FOUND:
+    return f"Registr ARES subjekt s\u00a0IČO {lookup['number']} nezná. Údaje vyplňte ručně."
+  return f"Registr ARES údaje nevrátil (chyba {status}). Údaje vyplňte ručně."
+
+
+def _usable_lookups(lookups):
+  # They come from the page, which got them from the server: anything else in them is left out, not trusted.
+  if not isinstance(lookups, dict):
+    return {}
+  return {url: answer for url, answer in lookups.items()
+          if known_lookup(url) and isinstance(answer, dict) and type(answer.get("status")) is int and isinstance(answer.get("body"), str)}
+
+
+class _LookupNeeded(js602.Unsupported):
+  def __init__(self, lookup):
+    super().__init__("SendData")
+    self.lookup = lookup
+
+
+class _LookupFailed(js602.Unsupported):
+  def __init__(self, message):
+    super().__init__("SendData")
+    self.message = message
 
 
 class _AnswerNeeded(js602.Unsupported):
@@ -100,8 +145,10 @@ def _repe_text(repetitions):
 
 
 class FormActionHost:
-  def __init__(self, document, element, repe, answers):
+  def __init__(self, document, element, repe, answers, lookups):
     self.document = document
+    self.lookups = lookups
+    self.lookups_asked = 0
     self.element = element
     self.repetitions = _repetitions_of(repe)
     self.answers = list(answers)
@@ -311,6 +358,21 @@ class FormActionHost:
     self.problems.extend(self._check_problem(item, fields) for item in items)
     return not items
 
+  def send_data(self, method, url):
+    if CLOSED_ARES_URL.fullmatch(url):
+      raise _LookupFailed(CLOSED_ARES_NOTICE)
+    lookup = known_lookup(url) if method == js602.SM_GET else None
+    self.lookups_asked += 1
+    if lookup is None or self.lookups_asked > MAX_LOOKUPS_PER_RUN:
+      raise js602.Unsupported("SendData")
+    answer = self.lookups.get(url)
+    if answer is None:
+      raise _LookupNeeded(lookup)
+    if answer["status"] != HTTP_OK:
+      raise _LookupFailed(_lookup_failure(lookup, answer["status"]))
+    self._charge_write(answer["body"])
+    return answer["body"]
+
   def set_named_parameter(self, name, value):
     if name not in self.named_parameters and len(self.named_parameters) >= MAX_NAMED_PARAMETERS:
       raise js602.Exhausted("parametry")
@@ -398,21 +460,28 @@ def _use_czech_for_form_texts(document):
     root.set(XML_LANG_ATTRIBUTE, "cs")
 
 
-def _run(document, element, script, repe, answers, retry):
+def _run(document, element, script, repe, answers, lookups, retry):
   _use_czech_for_form_texts(document)
   saved_data = copy.deepcopy(document._get_data_root())
   saved_computing_data = copy.deepcopy(document._get_computable_data_root())
   saved_parameters = dict(document.script_named_parameters)
   values_before = _page_values(document)
   data_before = serialized_data(document)
-  host = FormActionHost(document, element, repe, answers)
+  lookups = _usable_lookups(lookups)
+  host = FormActionHost(document, element, repe, answers, lookups)
   was_script_running = document.script_running
   document.script_running = True
   outcome = None
   try:
     js602.run_form_action(document.script_interpreter(), script, host)
   except _AnswerNeeded as question:
-    outcome = {"question": {"text": question.text, "title": question.title, "retry": {**retry, "repe": repe or "", "answers": list(answers)}}}
+    outcome = {"question": {"text": question.text, "title": question.title,
+                            "retry": {**retry, "repe": repe or "", "answers": list(answers), "lookups": lookups}}}
+  except _LookupNeeded as needed:
+    outcome = {"lookup": {"url": needed.lookup["url"], "question": needed.lookup["question"],
+                          "retry": {**retry, "repe": repe or "", "answers": list(answers), "lookups": lookups}}}
+  except _LookupFailed as failed:
+    outcome = {"stopped": failed.message}
   except js602.Unsupported as unsupported:
     log.info("Form script stopped at %s", unsupported)
     outcome = {"refused": str(unsupported)}
@@ -442,15 +511,15 @@ def _treat_typed_text_as_chosen_item(document, bind_id, repe):
   document.script_named_parameters.update({"ACIItemId": typed, "ACIText": typed})
 
 
-def run_button_script(document, position, repe, answers):
+def run_button_script(document, position, repe, answers, lookups=None):
   buttons = button_elements(document.root)
   if not 0 <= position < len(buttons):
     return None
   element = buttons[position]
-  return _run(document, element, element.get("form602btnclick"), repe, answers, {"button": position})
+  return _run(document, element, element.get("form602btnclick"), repe, answers, lookups, {"button": position})
 
 
-def run_field_change_script(document, bind_id, repe, answers):
+def run_field_change_script(document, bind_id, repe, answers, lookups=None):
   # The same field drawn twice carries the same script twice, it runs once. It does not start other fields' scripts.
   if not isinstance(bind_id, str) or not re.fullmatch(r"[\w.\-]+", bind_id):
     return None
@@ -463,4 +532,4 @@ def run_field_change_script(document, bind_id, repe, answers):
   element = next(field for field in fields if field.get("form602onchange") == scripts[0])
   if element.get("form602ct") == WHISPERER_FIELD_TYPE:
     _treat_typed_text_as_chosen_item(document, bind_id, repe)
-  return _run(document, element, scripts[0], repe, answers, {"field": bind_id})
+  return _run(document, element, scripts[0], repe, answers, lookups, {"field": bind_id})

@@ -5,6 +5,7 @@ import hashlib
 import http.client
 import io
 import json
+import os
 import re
 import sys
 import tempfile
@@ -38,6 +39,7 @@ import asic_verify
 import certstore
 import desktop
 import isds_message
+import lookups
 import pdf_form_data
 import xades_verify
 import zfo_verify
@@ -352,13 +354,38 @@ class HostileFormScripts(unittest.TestCase):
                      "GetDocument().PrepareSignature(1)", "GetDocument().FinalizeSignature(1)", "GetDocument().ChooseCert()",
                      "GetDocument().Close()", "GetDocument().CloseApp()", "GetDocument().OpenAux('x')", "GetDocument().LoadFormData(1)",
                      "GetDocument().GetElement().OpenLink('http://example.org')", "GetDocument().GetElement().SetBinData('.', 1)",
-                     "new SendParam()", "new XMLHttpRequest()", "eval('1')", "require('os')", "__import__('os')"):
+                     "new XMLHttpRequest()", "eval('1')", "require('os')", "__import__('os')"):
             with self.subTest(call):
                 doc = form_running(WRITE + call + ";")
                 result = click(doc)
                 self.assertIn("refused", result)
                 self.assertEqual(value_of_a(doc), "puvodni")
                 self.assertFalse(doc.get_value("soucet"))
+
+    def test_only_the_known_register_can_be_asked(self):
+        ares = "https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty/00006947"
+        for method, url in (("SM_POST", ares), ("SM_GET", ares.replace("https:", "http:")), ("SM_GET", ares + "?x=1"), ("SM_GET", ares + "/../x"),
+                            ("SM_GET", ares.replace("ares.gov.cz", "ares.gov.cz.attacker.example")), ("SM_GET", ares.replace("00006947", "0000694")), ("SM_GET", ares.replace("00006947", "٠٠٠٠٦٩٤٧")),
+                            ("SM_GET", "https://attacker.example/?ico=00006947"), ("undefined", ares)):
+            with self.subTest(method=method, url=url):
+                script = WRITE + f"var p = new SendParam(); p.method = {method}; p.url = '{url}'; GetDocument().SendData(new Variant(VarStr, ''), p);"
+                doc = form_running(script)
+                result = form_scripts.run_button_script(doc, 0, "", [], {url: {"status": 200, "body": "{}"}})
+                self.assertEqual(result, {"refused": "SendData"})
+                self.assertEqual(value_of_a(doc), "puvodni")
+
+    def test_answers_the_page_did_not_get_from_the_server_are_ignored(self):
+        ares = "https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty/00006947"
+        script = f"var p = new SendParam(); p.method = SM_GET; p.url = '{ares}'; GetDocument().SendData(new Variant(VarStr, ''), p);"
+        for forged in ({ares: {"status": "200", "body": "{}"}}, {ares: {"status": 200, "body": 5}}, {ares: "{}"}, [ares], "x"):
+            with self.subTest(forged=forged):
+                self.assertIn("lookup", form_scripts.run_button_script(form_running(script), 0, "", [], forged))
+
+    def test_lookups_of_one_click_are_few(self):
+        urls = [f"https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty/0000000{digit}" for digit in range(form_scripts.MAX_LOOKUPS_PER_RUN + 1)]
+        script = "".join(f"var p = new SendParam(); p.method = SM_GET; p.url = '{url}'; GetDocument().SendData(new Variant(VarStr, ''), p);" for url in urls)
+        result = form_scripts.run_button_script(form_running(script), 0, "", [], {url: {"status": 200, "body": "{}"} for url in urls})
+        self.assertEqual(result, {"refused": "SendData"})
 
     def test_loading_an_empty_part_restores_it_as_published(self):
         doc = form_running("var e = GetDocument().GetElement(); e.SetDataTo('b', 'vyplneno');" + load_part("<sekce></sekce>", "/d:root/d:sekce"))
@@ -651,6 +678,37 @@ class LocalServer(unittest.TestCase):
         self.assertEqual(list(json.loads(answer)), [known])
         self.assertEqual(self.request("POST", f"/revocation?s={session}", body="not json")[0], 400)
         self.assertEqual(self.request("POST", f"/revocation?s={session}", origin="https://attacker.example", body="[]")[0], 403)
+
+    def test_lookup_goes_only_to_the_known_register(self):
+        session = self.session_of("cuzk-test")
+        ares = "https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty/00006947"
+        for body in (json.dumps({"url": "https://attacker.example/"}), json.dumps({"url": ares + "/x"}), json.dumps([ares]), "not json"):
+            with self.subTest(body):
+                self.assertEqual(self.request("POST", f"/lookup?s={session}", body=body)[0], 400)
+        self.assertEqual(self.request("POST", f"/lookup?s={session}", origin="https://attacker.example", body=json.dumps({"url": ares}))[0], 403)
+        self.assertEqual(self.request("POST", "/lookup", body=json.dumps({"url": ares}))[0], 404)
+        status, answer = self.request("POST", f"/lookup?s={session}", body=json.dumps({"url": ares}))
+        self.assertEqual((status, json.loads(answer)), (200, {"error": lookups.UNAVAILABLE}))
+
+    def test_a_page_that_is_not_the_registers_answer_counts_as_unavailable(self):
+        class Answer(io.BytesIO):
+            def __init__(self, content_type):
+                super().__init__(b"<html>Prihlaste se k Wi-Fi</html>")
+                self.status, self.headers = 200, http.client.HTTPMessage()
+                self.headers["Content-Type"] = content_type
+
+        ares = "https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty/00006947"
+        for content_type, outcome in (("text/html", None), ("application/json; charset=utf-8", 200)):
+            opener = mock.Mock(open=mock.Mock(return_value=Answer(content_type)))
+            with self.subTest(content_type), mock.patch.dict(os.environ, {"ZFO_OFFLINE": ""}), mock.patch.object(lookups, "_opener", return_value=opener):
+                if outcome is None:
+                    self.assertRaises(OSError, lookups.ask, ares)
+                else:
+                    self.assertEqual(lookups.ask(ares)["status"], outcome)
+
+    def test_lookup_follows_no_redirect(self):
+        handler = lookups._NoRedirects()
+        self.assertIsNone(handler.redirect_request(None, None, 302, "Found", {}, "https://attacker.example/"))
 
     def test_damaged_file_gets_a_message(self):
         with tempfile.TemporaryDirectory() as folder:
