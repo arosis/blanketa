@@ -578,9 +578,11 @@
   }
   function clearCheck({keepStatus}) {
     clearCheckMarks();
+    const check = queryOne('[data-check]');
+    const checkWasShown = !check.hidden;
     queryOne('[data-check-list]').replaceChildren();
-    queryOne('[data-check]').hidden = true;
-    if (!keepStatus) setStatus('');
+    check.hidden = true;
+    if (checkWasShown && !keepStatus) setStatus('');
   }
   function showCheck(problems, scripts = []) {
     clearCheckMarks();

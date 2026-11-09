@@ -18,11 +18,12 @@ class SignatureReplacementNotice(unittest.TestCase):
     const queue = Promise.resolve(), document = {getElementsByName: () => []}, calls = [];
     for (const name of ['gtk_handler_start', 'gtk_handler_finished', 'send', 'set_inputs_init_values', 'redrawSections',
                         'calc_repeatable_sections', 'set_readonly_inputs', 'set_multiswitch_controls', 'setStatus', 'alert',
-                        'showCheck', 'clearCheck', 'focusField']) window[name] = () => calls.push(name);
+                        'showCheck', 'focusField']) window[name] = () => calls.push(name);
+    const clearCheck = ({keepStatus}) => calls.push(keepStatus ? 'clearCheck keeping the status' : 'clearCheck');
     const plainTextOf = text => text;
     %s
     eval(process.argv[1]);
-    console.log(JSON.stringify({notices, calls}));
+    queue.then(() => console.log(JSON.stringify({notices, calls})));
     """
     ANSWER = {"values": {}, "changed": False, "messages": [], "notices": [], "focus": None, "problems": []}
 
@@ -51,6 +52,13 @@ class SignatureReplacementNotice(unittest.TestCase):
 
     def test_engine_answer_that_the_data_changed(self):
         self.assertEqual(self.notices_after('data_changed_callback()'), 1)
+
+    def test_a_check_that_found_nothing_clears_the_earlier_one(self):
+        calls = lambda answer: self.page_after(f"form_script_callback({json.dumps({**self.ANSWER, **answer})})")["calls"]
+        self.assertIn("clearCheck", calls({}))
+        self.assertIn("clearCheck keeping the status", calls({"notices": ["Adresy nebyly ověřeny."]}))
+        self.assertFalse({"clearCheck", "showCheck"} & set(calls({"problems": None})))
+        self.assertIn("showCheck", calls({"problems": [{"field": "a", "index": 0, "kind": "form", "message": "F001"}]}))
 
     def test_script_answer_refreshes_every_copy_of_the_sections(self):
         # result.values names a field only by its bind; the values of the second and further copies come with the refresh.
