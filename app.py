@@ -1,5 +1,6 @@
 import base64
 import copy
+import functools
 import hashlib
 import io
 import json
@@ -308,19 +309,21 @@ def render_codelists_page(names, folder):
 
 def render_zfo_page(name, blank=False, data=None, lists_waited_for=False):
     fo = zfo_verify.read_form_fo(form_path(name))
-    folder = certstore.config_dir() / "codelists"
-    # The first opening shows how the lists download; imported data waits on this request, it cannot come back for a second.
-    never_stored = codelists.never_stored(codelists.needed(parse_fo(fo)), folder)
-    if never_stored and data is None and not lists_waited_for and not os.environ.get("ZFO_OFFLINE"):
-        return render_codelists_page(never_stored, folder)
     if blank or data is not None:
         fo = published_form_with_data(fo, data)
     engine_doc = engine.open_document(fo)
-    session = new_session({"name": name, "doc": engine_doc})
     doc = parse_fo(fo)
-    lists = codelists.load(codelists.needed(doc), folder, wait_seconds=0 if lists_waited_for else None)
-    codelists.fill(engine_doc.root, lists)
-    unfilled_lists = codelists.fill(doc, lists)
+    data_text = functools.partial(engine.data_text, engine_doc)
+    folder = certstore.config_dir() / "codelists"
+    names = codelists.needed(doc, data_text)
+    # The first opening shows how the lists download; imported data waits on this request, it cannot come back for a second.
+    never_stored = codelists.never_stored(names, folder)
+    if never_stored and data is None and not lists_waited_for and not os.environ.get("ZFO_OFFLINE"):
+        return render_codelists_page(never_stored, folder)
+    session = new_session({"name": name, "doc": engine_doc})
+    lists = codelists.load(names, folder, wait_seconds=0 if lists_waited_for else None)
+    codelists.fill(engine_doc.root, lists, data_text)
+    unfilled_lists = codelists.fill(doc, lists, data_text)
     form_scripts.name_buttons_for_page(doc)
     form_scripts.name_repeating_sections_by_bind(doc)
     for hidden in doc.xpath("//dsig:SignatureProperties | //dsig:Object[not(@Id)]", namespaces={"dsig": DS}):

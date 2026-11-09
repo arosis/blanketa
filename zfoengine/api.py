@@ -26,7 +26,7 @@ import logging
 import threading
 import zipfile
 
-from . import form_scripts, msg_types, msgs, zfo_parser
+from . import form_scripts, form_stylesheets, msg_types, msgs, zfo_parser
 from . import gtkgui_events_handlers as geh
 from .global_var import Global
 
@@ -71,6 +71,7 @@ def open_document(fo_bytes):
     _activate(doc)
     # build the data model now (the GTK app did it lazily on the first message)
     doc._get_data_root()
+    doc.calculate_system_binds()
     # done on "document.ready" in zfo_gui.main(); also needed before that
     # message for forms with attachment inputs
     doc.prepare_attachment_binds()
@@ -130,6 +131,21 @@ def data_element(doc):
   '''
   with _LOCK:
     return copy.deepcopy(doc._get_data_root().getroot())
+
+
+def data_text(doc, path):
+  '''
+  The text the form's data has at path (an XPath with the form's own prefixes), "" when there is none.
+  '''
+  with _LOCK:
+    return doc._get_data_root().xpath("string(%s)" % path, namespaces=doc._get_used_ns_prefix(path))
+
+
+def reshape_list(form_root, stylesheet, enum):
+  '''
+  A list the form downloads (fm:enum), in the shape the form's stylesheet of that name gives it.
+  '''
+  return form_stylesheets.transform_list(form_root, stylesheet, enum)
 
 
 def readonly_binds(doc):

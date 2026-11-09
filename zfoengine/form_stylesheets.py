@@ -16,7 +16,7 @@ import functools
 
 import lxml.etree as etree
 
-from . import js602
+from . import js602, ns
 from .xpath_ext import stylesheet_loads_other_stylesheets
 
 MSXSL_URI = "urn:schemas-microsoft-com:xslt"
@@ -60,13 +60,26 @@ def _script_functions(template, budget):
   return extensions
 
 
-def transform(document, name, budget):
-  template = document.get_template_text(name)
+def _apply(template, name, source, budget):
   if template is None or stylesheet_loads_other_stylesheets(template):
     raise js602.Unsupported(f"šablona {name}")
   try:
     # without DENY_ALL a form's stylesheet reads files and addresses with document() and writes files with exsl:document
     stylesheet = etree.XSLT(template, access_control=etree.XSLTAccessControl.DENY_ALL, extensions=_script_functions(template, budget))
-    return stylesheet(document._get_data_root())
+    return stylesheet(source)
   except (etree.XSLTParseError, etree.XSLTApplyError) as error:
     raise js602.Unsupported(f"šablona {name}") from error
+
+
+def transform(document, name, budget):
+  return _apply(document.get_template_text(name), name, document._get_data_root(), budget)
+
+
+def transform_list(form_root, name, enum):
+  '''
+  A list the form downloads, in the shape its own stylesheet (fm:enum/@updatexsl) gives it, as Form Filler does after
+  the download.
+  '''
+  templates = form_root.xpath("//fm:template[@name=$name]", namespaces={"fm": ns.FM_URI}, name=name)
+  template = templates[0][0] if templates and len(templates[0]) else None
+  return _apply(template, name, etree.ElementTree(enum), js602.Budget()).getroot()

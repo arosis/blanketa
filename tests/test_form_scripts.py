@@ -162,6 +162,28 @@ NO_FAULTS = stylesheet("Bez", "<control/>")
 ADDRESS_PATHS = stylesheet("Seznam", "<seznam><xpath>/d:root/d:a</xpath></seznam>")
 
 
+FORM_WITH_SYSTEM_BIND = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#" Id="_1"><dsig:Object Id="_2" MimeType="text/xml">
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:fm="http://software602.cz/forms" xmlns:d="http://software602.cz/sample">
+<fm:formparams><fm:model><fm:instance><d:root><d:seznam/><d:email>ulozeny@example.cz</d:email></d:root></fm:instance>
+<fm:bind Id="k" nodeset="/d:root"><fm:bind Id="seznam" nodeset="d:seznam" depends="system" calculate="'PrijemcePodani'"/>
+<fm:bind Id="email" nodeset="d:email" depends="seznam" calculate="concat(/d:root/d:seznam, '@example.cz')"/></fm:bind>
+</fm:model></fm:formparams></fo:root></dsig:Object></dsig:Signature>"""
+
+
+class SystemBinds(unittest.TestCase):
+    """Binds depending on "system" are calculated from the form's own settings, as Form Filler does when a form opens."""
+    def setUp(self):
+        self.doc = engine.open_document(FORM_WITH_SYSTEM_BIND.encode())
+
+    def test_opening_calculates_them_and_keeps_what_depends_on_them(self):
+        self.assertEqual(self.doc.get_value("seznam"), "PrijemcePodani")
+        self.assertEqual(self.doc.get_value("email"), "ulozeny@example.cz")
+
+    def test_recalculation_calculates_them_and_what_depends_on_them(self):
+        engine.handle(self.doc, "recalc_form", "")
+        self.assertEqual(self.doc.get_value("email"), "PrijemcePodani@example.cz")
+
+
 class FormStylesheetChecks(unittest.TestCase):
     """Forms of MPSV check their data with their own stylesheets, document.XSLCheck() in their scripts."""
 

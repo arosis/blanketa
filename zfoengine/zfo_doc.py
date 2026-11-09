@@ -784,9 +784,14 @@ class ZFO_document:
     get the binds that do not depend on any other bind (they do not have 'depends' attribute)
     '''
     no_depend = self.root.xpath("//fm:bind[not(@depends)]", namespaces={"fm": ns.FM_URI})
-    empty_depend = self.root.xpath('//fm:bind[@depends=""]', namespaces={"fm": ns.FM_URI})  
+    empty_depend = self.root.xpath('//fm:bind[@depends=""]', namespaces={"fm": ns.FM_URI})
     no_depend.extend(empty_depend)
+    no_depend.extend(self._get_system_binds())
     return no_depend
+
+  def _get_system_binds(self):
+    # zfoengine: "system" is no bind; Form Filler calculates these binds from the form's own settings when it opens
+    return self.root.xpath('//fm:bind[@depends="system"][@calculate]', namespaces={"fm": ns.FM_URI})
   
   def _get_input_direct_children(self, rep_block, rep_block_xpath=None, 
                                 repe_ancestors=None):
@@ -1114,7 +1119,7 @@ class ZFO_document:
                                )
     return res
   
-  def recalc_form(self):
+  def recalc_form(self, only=None):
     '''
     Go through binds, for each evaluate calculate attribute.
     Starts with binds that do not depend on any other bind
@@ -1167,15 +1172,20 @@ class ZFO_document:
         log.debug("Recalculating {0}".format(bind.get("Id")))     
         calculated = calculate_one_bind(bind)       
         results.update(calculated)        
-        deps = self._get_dependent_binds(bind.get("Id"))
-        recalculate(deps)
+        if only is None:
+          recalculate(self._get_dependent_binds(bind.get("Id")))
         log.debug("{0} recalculated".format(bind.get("Id")))
     
-    roots = self._get_binds_with_no_dependents()
+    roots = self._get_binds_with_no_dependents() if only is None else only
     # maybe keep track of calculated binds? Now, there is each bind
     # as many times how many dependents it has.
     recalculate(roots)
     return results
+
+  def calculate_system_binds(self):
+    # zfoengine: on opening only these: what depends on them was stored with them, and the form's downloaded lists, which
+    # some of those binds read, are not there yet
+    return self.recalc_form(only=self._get_system_binds())
     
   
   def calculate_values(self, bind_id, repe_data):
