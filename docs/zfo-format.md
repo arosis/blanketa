@@ -91,7 +91,7 @@ Vzhled je XSL-FO (`fo:root`, `fo:simple-page-master`, tabulky, bloky). Pole jsou
 | Písmo | výchozí Tahoma; pole s `font-family` v buňce dědí písmo buňky |
 | Barvy polí | z `fm:formparams` (`proprequiredformfieldbkcolor`, `proproformfieldbkcolor`) |
 | Rozměr stránky | první `fo:simple-page-master` |
-| Multiswitch | hodnota vybere `case` se shodným `case-name`; prázdná hodnota vybere `case` se `starting-state="show"`, a když žádný není, první `case`; hodnota `all` má zvláštní význam (nejspíš zobrazí všechny) |
+| Multiswitch | hodnota `all` znamená zvláštní režim přepínače a Form Filler ji zkontroluje dřív než názvy `case`; jinak hodnota vybere `case` se shodným `case-name`, a když žádný neodpovídá, nevybere žádný; prázdná hodnota vybere `case` se `starting-state="show"`, a když žádný není, první `case`. Blanketa při `all` ukáže všechny `case`. Že je režim `all` zobrazí všechny, je odvozené ze statického rozboru, spuštěním ověřené není. Žádný ze 159 stažených veřejných formulářů `starting-state` ani `all` nepoužívá |
 | Opakované sekce | tlačítka jsou aplikační události `addsect`/`delsect`; prázdný koncový sloupec tabulky opakování se nezobrazuje |
 | Nápověda k poli | atribut `form602tooltip` |
 | Obrázky | `fm:internal-graphic` v base64 (také **BMP**), rozměr z obalujícího `fo:instream-foreign-object` |

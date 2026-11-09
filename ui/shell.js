@@ -165,9 +165,9 @@
   };
   // Showing or hiding a part measures the page even when nothing changes, and this runs after every stored value.
   window.set_multiswitch_controls_callback = ({data: switches}) => {
-    for (const {bindref, active_value, cases} of switches) {
+    for (const {bindref, shown, cases} of switches) {
       for (const value of cases) {
-        const show = value === active_value;
+        const show = shown.includes(value);
         for (const part of elementsNamed(`div-${bindref}-${value}`)) {
           if (part.tagName === 'DIV' && (part.style.display === 'none') === show) $(part)[show ? 'show' : 'hide']();
         }

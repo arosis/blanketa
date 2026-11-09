@@ -44,6 +44,33 @@ def decode_itf(widths):
     return digits
 
 
+SWITCHED_FORM = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#" Id="_1"><dsig:Object Id="_2" MimeType="text/xml">
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:fm="http://software602.cz/forms" xmlns:d="http://software602.cz/sample">
+<fm:formparams><fm:model><fm:instance><d:root><d:krok>%s</d:krok></d:root></fm:instance>
+<fm:bind Id="k" nodeset="/d:root"><fm:bind Id="krok" nodeset="d:krok"/></fm:bind></fm:model></fm:formparams>
+<fo:multi-switch form602ct="swi"><fm:data-switch form602ct="dsw" form602bindref="krok"/>
+<fo:multi-case case-name="1" form602ct="cas"/><fo:multi-case case-name="2" form602ct="cas"%s/><fo:multi-case case-name="3" form602ct="cas"/>
+</fo:multi-switch></fo:root></dsig:Object></dsig:Signature>"""
+
+
+class SwitchedParts(unittest.TestCase):
+    """The value of a switch picks the part of the form shown, as Form Filler picks it."""
+    def shown(self, value, starting=""):
+        doc = engine.open_document((SWITCHED_FORM % (value, starting)).encode())
+        return doc.get_multiswitch_values()["data"][0]["shown"]
+
+    def test_a_value_shows_its_case_and_an_unknown_one_none(self):
+        self.assertEqual(self.shown("3"), ["3"])
+        self.assertEqual(self.shown("9"), [])
+
+    def test_an_empty_value_shows_the_case_marked_to_start_shown_or_the_first(self):
+        self.assertEqual(self.shown("", ' starting-state="show"'), ["2"])
+        self.assertEqual(self.shown(""), ["1"])
+
+    def test_all_shows_every_case(self):
+        self.assertEqual(self.shown("all", ' starting-state="show"'), ["1", "2", "3"])
+
+
 class Barcodes(unittest.TestCase):
     def test_interleaved_2_of_5_round_trip(self):
         for data in ("7582212456", "0000", "1234567"):

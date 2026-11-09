@@ -42,6 +42,22 @@ from . import js602, msg_types, tools
 XML_NAMESPACE = "http://www.w3.org/XML/1998/namespace"
 
 
+SHOW_ALL_CASES = "all"
+STARTING_CASE = "show"
+
+
+def _shown_cases(value, cases):
+  # As Form Filler 4.81 chooses: "all" before any case name, then the case of that name; an empty value shows the case
+  # marked to start shown, or the first one (an untouched checkbox switch shows its "off" case).
+  names = [case.get("case-name") for case in cases]
+  if value == SHOW_ALL_CASES:
+    return names
+  if value:
+    return [value] if value in names else []
+  starting = [case.get("case-name") for case in cases if case.get("starting-state") == STARTING_CASE]
+  return starting[:1] or names[:1]
+
+
 class ZFO_document:
   
   def __init__(self, parsed_content, prefix_map, file_name, comes_from_zip):
@@ -1062,7 +1078,6 @@ class ZFO_document:
       if value is None:
         value = ''
             
-      sw["active_value"] = value
       # now get all multicase siblings
       siblings = switch.xpath("../fo:multi-case", namespaces = {'fo' : ns.FO_URI})
       
@@ -1070,11 +1085,7 @@ class ZFO_document:
       for sibling in siblings:
         case_name = sibling.get("case-name")        
         sw["cases"].append(case_name)
-
-      # zfoengine: an empty value shows the first case, as Form Filler does
-      # (e.g. an untouched checkbox switch shows its "off" case)
-      if value == '' and sw["cases"]:
-        sw["active_value"] = sw["cases"][0]
+      sw["shown"] = _shown_cases(value, siblings)
       res.append(sw)
           
     r["data"] = res
