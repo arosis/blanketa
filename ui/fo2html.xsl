@@ -26,8 +26,8 @@
     </input>
   </xsl:template>
 
-  <!-- Some forms download a code list when they open, and a form gets no network here. The field stays fillable by hand:
-       as an empty list it could never be filled, and a required one would stop the form at each check. -->
+  <!-- Some forms download a code list when they open; one Blanketa could not get (codelists.py) stays empty. The field stays
+       fillable by hand: as an empty list it could never be filled, and a required one would stop the form at each check. -->
   <xsl:template name="create-select">
     <xsl:param name="list-name"/>
     <xsl:param name="list-bindname"/>
@@ -47,8 +47,20 @@
     </xsl:choose>
   </xsl:template>
 
+  <!-- A whisperer offers the items of a list Blanketa got for it (codelists.py); the list goes onto the page once. -->
   <xsl:template match="fo:inline[@form602ct='acm']">
-    <input type="text" title="{@form602tooltip}" style="width: 100%;" name="{@form602bind}"/>
+    <input type="text" title="{@form602tooltip}" style="width: 100%;" name="{@form602bind}">
+      <xsl:if test="@blanketa-list">
+        <xsl:attribute name="list"><xsl:value-of select="@blanketa-list"/></xsl:attribute>
+      </xsl:if>
+    </input>
+    <xsl:if test="@blanketa-list and not(preceding::fo:inline[@form602ct='acm'][@blanketa-list = current()/@blanketa-list])">
+      <datalist id="{@blanketa-list}">
+        <xsl:for-each select="//fm:enum[@name = current()/@blanketa-list]/fm:list/fm:listitem">
+          <option value="{@itemtext}"/>
+        </xsl:for-each>
+      </datalist>
+    </xsl:if>
   </xsl:template>
 
   <!-- A button with a script names itself by its position: the script stays on the server and runs from there. -->

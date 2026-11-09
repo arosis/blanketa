@@ -40,6 +40,7 @@ KEEP_EARLIER_CHECK_RESULTS = "noclean"
 CHECK_RESULT_TAG = "control"
 ADDRESS_NOT_CHECKED_NOTICE = "Adresy nebyly ověřeny v registru RÚIAN, Blanketa formulářům síť nepovoluje. Před odesláním je zkontrolujte."
 WHISPERER_FIELD_TYPE = "acm"
+WHISPERER_LIST_ATTRIBUTE = "blanketa-list"
 DATA_ROOT_PATH = "/*"
 XML_LANG_ATTRIBUTE = "{http://www.w3.org/XML/1998/namespace}lang"
 FO_NAMESPACES = {"fo": ns.FO_URI, "fm": ns.FM_URI}
@@ -504,11 +505,17 @@ def _run(document, element, script, repe, answers, lookups, retry):
   return outcome
 
 
-def _treat_typed_text_as_chosen_item(document, bind_id, repe):
-  # Such a field offers items downloaded from the office, and its script clears a text no item was chosen for.
-  # A form gets no network here, so the text the user typed has to count.
+def _choose_whispered_item(document, element, bind_id, repe):
+  # Such a field offers items downloaded from the office, and its script clears a text no item was chosen for. With the
+  # list at hand (blanketa-list, see codelists.py) the text picks its item; without it the text the user typed has to count.
   typed = document.get_value(bind_id, repe or None) or ""
-  document.script_named_parameters.update({"ACIItemId": typed, "ACIText": typed})
+  list_name = element.get(WHISPERER_LIST_ATTRIBUTE)
+  if not list_name:
+    document.script_named_parameters.update({"ACIItemId": typed, "ACIText": typed})
+    return
+  chosen = document.root.xpath("//fm:enum[@name=$list]/fm:list/fm:listitem[@itemtext=$text][1]/@value",
+                               namespaces=FO_NAMESPACES, list=list_name, text=typed)
+  document.script_named_parameters.update({"ACIItemId": str(chosen[0]) if chosen else "", "ACIText": typed})
 
 
 def run_button_script(document, position, repe, answers, lookups=None):
@@ -531,5 +538,5 @@ def run_field_change_script(document, bind_id, repe, answers, lookups=None):
     log.info("Field %s has %d different change scripts, the first runs", bind_id, len(scripts))
   element = next(field for field in fields if field.get("form602onchange") == scripts[0])
   if element.get("form602ct") == WHISPERER_FIELD_TYPE:
-    _treat_typed_text_as_chosen_item(document, bind_id, repe)
+    _choose_whispered_item(document, element, bind_id, repe)
   return _run(document, element, scripts[0], repe, answers, lookups, {"field": bind_id})

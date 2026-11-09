@@ -141,6 +141,14 @@
     const first = elementsNamed(name).find(element => element.type === 'radio');
     if (first) chooseRadio(first, value);
   };
+  // A field that became a list once Blanketa got its code list (codelists.py) can hold a text typed in before: it stays
+  // shown as a choice of its own, else the field would look empty while the form keeps the value.
+  const keepingValueOutsideTheList = (input, value) => {
+    if (input.tagName === 'SELECT' && value && ![...input.options].some(option => option.value === value || option.text === value)) {
+      input.append(new Option(value, value));
+    }
+    return input;
+  };
   // Its fill_inputs also counted each section's copies through a full walk of the page and never used the number.
   window.fill_inputs = (parent, data) => {
     if (parent == null) separateRadioGroups();
@@ -151,7 +159,7 @@
         const input = get_html_elem(parent, name, true);
         if (!input || $(input).hasClass('shouldStayEmpty')) continue;
         if (input.type === 'radio') chooseRadio(input, value);
-        else set_input_value(input, value);
+        else set_input_value(keepingValueOutsideTheList(input, value), value);
       }
     }
   };
@@ -509,14 +517,14 @@
     pageData.blank && 'Zobrazeny výchozí hodnoty – vyplněná data nejsou načtena.',
     info.scripts && 'Některé výpočty nebo kontroly v JavaScriptu 602 Blanketa neumí provést.',
     info.actions && 'Skripty spouštěné při nahrání přílohy Blanketa nespouští.',
-    info.downloaded_lists && 'Číselníky, které si formulář stahuje z\u00a0internetu, Blanketa nenačítá.',
+    info.missing_lists && 'Některé číselníky, které si formulář stahuje z\u00a0internetu, Blanketa nezískala.',
   ].filter(Boolean).join('<br>');
-  if (info.scripts || info.actions || info.downloaded_lists) {
+  if (info.scripts || info.actions || info.missing_lists) {
     const notice = queryOne('[data-notice]');
     notice.querySelector('span').textContent = (info.scripts
       ? 'Některé výpočty nebo kontroly v tomto formuláři Blanketa neumí provést, pole proto mohou zůstat prázdná nebo neaktuální. '
       : info.actions ? 'Při nahrání přílohy tento formulář spouští skripty, které Blanketa z\u00a0bezpečnostních důvodů nespouští. '
-      : 'Formulář si stahuje číselníky a ověřuje adresy na internetu, což Blanketa formulářům nepovoluje. Tyto položky vyplňte ručně. ')
+      : 'Některé číselníky, které si formulář stahuje z\u00a0internetu, se nepodařilo získat. Tyto položky vyplňte ručně. ')
       + 'Před odesláním formulář zkontrolujte, spolehlivý výsledek dá Software602 Form Filler.';
     notice.querySelector('button').addEventListener('click', () => { notice.hidden = true; });
     notice.hidden = false;

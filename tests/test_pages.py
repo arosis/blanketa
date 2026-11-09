@@ -97,6 +97,23 @@ class RegisterLookupOnThePage(unittest.TestCase):
 
 
 @needs_node
+class ValueOutsideACodeList(unittest.TestCase):
+    """Runs keepingValueOutsideTheList of ui/shell.js: a field that became a list keeps a text typed in before."""
+    SCRIPT = """
+    class Option { constructor(text, value) { this.text = text; this.value = value; } }
+    const select = value => ({tagName: 'SELECT', options: [new Option('', ''), new Option('Česká republika', 'CZ')],
+                              append(option) { this.options.push(option); }});
+    %s
+    console.log(JSON.stringify(JSON.parse(process.argv[1]).map(value => keepingValueOutsideTheList(select(), value).options.map(option => option.value))));
+    """
+
+    def test_only_a_value_the_list_lacks_is_added(self):
+        part = re.search(r"  const keepingValueOutsideTheList = .*?\n  \};", ui_source("shell.js"), re.S).group(0)
+        lists = json.loads(run_in_node(self.SCRIPT % part, json.dumps(["CZ", "Česká republika", "", "cz"])))
+        self.assertEqual(lists, [["", "CZ"], ["", "CZ"], ["", "CZ"], ["", "CZ", "cz"]])
+
+
+@needs_node
 class RadioButtonsInSectionCopies(unittest.TestCase):
     """Runs the radio button handling of ui/shell.html on a page with a group outside sections and two copies of a section."""
     SCRIPT = """
