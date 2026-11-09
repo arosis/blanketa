@@ -89,6 +89,12 @@ class FormScripts(unittest.TestCase):
         self.assertNotIn(b"tmp", etree.tostring(doc._get_data_root().getroot()))
         self.assertTrue(doc.script_problems)
 
+    def test_result_that_form_filler_refuses_changes_nothing_and_is_reported(self):
+        doc = engine.open_document((FORM_WITH_ATTRIBUTE % '{ Result(1); }').encode())
+        engine.handle(doc, "recalc_form", "")
+        self.assertEqual(doc._get_data_root().getroot()[0].get("a"), "")
+        self.assertEqual(doc.script_problems, {"chyba ve skriptu formuláře"})
+
     def test_scripts_get_nothing_of_the_application_through_xpath(self):
         for call in ('GetEnvVariable(\\"HOME\\")', "CurrentUserName()", 'SendAppEvent(\\"saveformsign\\")', 'SaveAs(\\"x\\")',
                      'SetAttribute(\\"a\\", \\"b\\")', 'GetListItemData(\\"x\\", concat(\\"Get\\", \\"EnvVariable()\\"), \\"@a\\")'):
@@ -294,10 +300,10 @@ class Interpreter(unittest.TestCase):
         return js602.evaluate(js602.Interpreter(library), source, lambda expression: answer, "/d:root/d:x")
 
     def test_python_stays_out_of_reach(self):
-        for source in ('Result("".__class__)', 'Result([].__class__)', 'Result(Result.__globals__)', 'Result(GetDocument.__self__)',
-                       'Result((function(){}).__code__)', 'Result("".constructor)', 'Result(({}).__proto__)', 'Result(new Date().__class__)'):
-            with self.subTest(source):
-                self.assertEqual(self.run_script("{" + source + "}"), "undefined")
+        for reach in ('"".__class__', '[].__class__', 'Result.__globals__', 'GetDocument.__self__', '(function(){}).__code__',
+                      '"".constructor', '({}).__proto__', 'new Date().__class__'):
+            with self.subTest(reach):
+                self.assertEqual(self.run_script("{ Result(" + reach + ' + ""); }'), "undefined")
 
     def test_host_objects_offer_only_what_they_list(self):
         for source in ("GetDocument().SendData()", "GetDocument().Print2PDF()", "GetDocument().__class__", "GetDocument().GetElement().SetData('a', 'b')",
@@ -335,6 +341,18 @@ class Interpreter(unittest.TestCase):
                        'var s = "x".repeat(3000000); var a = [s]; while (true) a.join();'):
             with self.subTest(source[-25:]), self.assertRaises(js602.Exhausted):
                 self.run_script("{" + source + "}")
+
+    def test_result_takes_one_text_and_the_last_one_counts(self):
+        interpreter = js602.Interpreter()
+        self.assertEqual(js602.evaluate(interpreter, '{ Result("prvni"); Result(1 + ""); }', lambda expression: "", ""), "1")
+        self.assertIsNone(js602.evaluate(interpreter, '{ var a = 1; }', lambda expression: "", ""))
+
+    def test_result_of_anything_else_stops_the_calculation(self):
+        for call in ("Result()", "Result(1)", "Result('a', 'b')", "Result(true)", "Result(null)", "Result(undefined)", "Result(['a'])",
+                     "Result('a'); Result(2)"):
+            with self.subTest(call), self.assertRaises(js602.Thrown):
+                self.run_script("{ " + call + "; }")
+        self.assertEqual(self.run_script("{ try { Result(1); } catch (e) { Result(e.name); } }"), "TypeError")
 
     def test_one_scripts_variables_do_not_reach_another(self):
         interpreter = js602.Interpreter()
