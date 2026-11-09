@@ -5,6 +5,7 @@ import hashlib
 import http.client
 import io
 import json
+import os
 import re
 import sys
 import tempfile
@@ -688,6 +689,22 @@ class LocalServer(unittest.TestCase):
         self.assertEqual(self.request("POST", "/lookup", body=json.dumps({"url": ares}))[0], 404)
         status, answer = self.request("POST", f"/lookup?s={session}", body=json.dumps({"url": ares}))
         self.assertEqual((status, json.loads(answer)), (200, {"error": lookups.UNAVAILABLE}))
+
+    def test_a_page_that_is_not_the_registers_answer_counts_as_unavailable(self):
+        class Answer(io.BytesIO):
+            def __init__(self, content_type):
+                super().__init__(b"<html>Prihlaste se k Wi-Fi</html>")
+                self.status, self.headers = 200, http.client.HTTPMessage()
+                self.headers["Content-Type"] = content_type
+
+        ares = "https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty/00006947"
+        for content_type, outcome in (("text/html", None), ("application/json; charset=utf-8", 200)):
+            opener = mock.Mock(open=mock.Mock(return_value=Answer(content_type)))
+            with self.subTest(content_type), mock.patch.dict(os.environ, {"ZFO_OFFLINE": ""}), mock.patch.object(lookups, "_opener", return_value=opener):
+                if outcome is None:
+                    self.assertRaises(OSError, lookups.ask, ares)
+                else:
+                    self.assertEqual(lookups.ask(ares)["status"], outcome)
 
     def test_lookup_follows_no_redirect(self):
         handler = lookups._NoRedirects()

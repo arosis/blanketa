@@ -58,6 +58,45 @@ class SignatureReplacementNotice(unittest.TestCase):
 
 
 @needs_node
+class RegisterLookupOnThePage(unittest.TestCase):
+    """Runs the lookup handling of ui/shell.js: the user confirms, the server asks the register, the script runs again."""
+    SCRIPT = """
+    const SESSION = 's1', sent = [], statuses = [], alerts = [], asked = [];
+    const setStatus = text => statuses.push(text), alert = text => alerts.push(text), send = message => sent.push(JSON.parse(message));
+    const [confirmed, server] = JSON.parse(process.argv[1]);
+    const confirm = () => confirmed;
+    const fetch = async (address, request) => { asked.push([address, JSON.parse(request.body)]);
+      if (server === 'down') throw new Error('offline'); return {ok: server !== 'refused', json: async () => server}; };
+    %s
+    askRegister({url: 'https://ares.gov.cz/x/00006947', question: 'Poslat?', retry: {field: 'ico', repe: '', answers: [], lookups: {}}})
+      .then(() => console.log(JSON.stringify({sent, statuses, alerts, asked})));
+    """
+
+    def run_page(self, confirmed, server):
+        page = ui_source("shell.js")
+        part = re.search(r"  const registerUnreachable = .*?\n  const askRegister = .*?\n  \};", page, re.S).group(0)
+        return json.loads(run_in_node(self.SCRIPT % part, json.dumps([confirmed, server])))
+
+    def test_confirmed_lookup_runs_the_script_again_with_the_answer(self):
+        page = self.run_page(True, {"status": 200, "body": "{}"})
+        self.assertEqual(page["asked"], [["/lookup?s=s1", {"url": "https://ares.gov.cz/x/00006947"}]])
+        self.assertEqual(page["sent"], [{"type": "run_form_script", "data": {"field": "ico", "repe": "", "answers": [],
+                                         "lookups": {"https://ares.gov.cz/x/00006947": {"status": 200, "body": "{}"}}}}])
+
+    def test_declined_lookup_asks_nothing(self):
+        page = self.run_page(False, None)
+        self.assertEqual((page["asked"], page["sent"]), ([], []))
+        self.assertIn("nepotvrdili", page["statuses"][-1])
+
+    def test_unreachable_register_says_so_and_runs_nothing(self):
+        for server in ("down", "refused", {"error": "Registr ARES teď není dostupný."}):
+            with self.subTest(server=server):
+                page = self.run_page(True, server)
+                self.assertEqual(page["sent"], [])
+                self.assertEqual(len(page["alerts"]), 1)
+
+
+@needs_node
 class RadioButtonsInSectionCopies(unittest.TestCase):
     """Runs the radio button handling of ui/shell.html on a page with a group outside sections and two copies of a section."""
     SCRIPT = """

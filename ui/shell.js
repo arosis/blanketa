@@ -371,15 +371,16 @@
     field?.scrollIntoView({block: 'center'});
     field?.focus();
   };
+  const registerUnreachable = {error: 'Registru se nepodařilo položit dotaz. Údaje vyplňte ručně.'};
   const askRegister = async ({url, question, retry}) => {
     if (!confirm(question)) {
-      setStatus('Údaje z registru se nedoplnily, dotaz jste nepotvrdili.');
+      setStatus('Údaje z registru se nedoplnily, dotaz jste nepotvrdili. Zkontrolujte název a adresu firmy.');
       return;
     }
     setStatus('Ptám se registru…');
     const answer = await fetch(`/lookup?s=${SESSION}`, {method: 'POST', body: JSON.stringify({url})})
-      .then(response => response.ok ? response.json() : {error: 'Registr se nepodařilo zeptat. Údaje vyplňte ručně.'})
-      .catch(() => ({error: 'Registr se nepodařilo zeptat. Údaje vyplňte ručně.'}));
+      .then(response => response.ok ? response.json() : registerUnreachable)
+      .catch(() => registerUnreachable);
     if (answer.error) {
       alert(answer.error);
       setStatus(answer.error);

@@ -11,6 +11,7 @@ from zfoengine import form_scripts
 
 TIMEOUT_SECONDS = 8
 MAX_ANSWER_BYTES = 1024 * 1024
+JSON_CONTENT_TYPE = "application/json"
 UNAVAILABLE = "Registr ARES teď není dostupný. Údaje vyplňte ručně."
 
 
@@ -31,9 +32,11 @@ def ask(url):
         raise ValueError("unknown lookup")
     if os.environ.get("ZFO_OFFLINE"):
         raise OSError("offline")
-    request = urllib.request.Request(url, headers={"User-Agent": "Blanketa", "Accept": "application/json"})
+    request = urllib.request.Request(url, headers={"User-Agent": "Blanketa", "Accept": JSON_CONTENT_TYPE})
     try:
         with _opener().open(request, timeout=TIMEOUT_SECONDS) as response:
+            if response.headers.get_content_type() != JSON_CONTENT_TYPE:  # a proxy's or a Wi-Fi sign-in page, not the register
+                raise OSError("not an answer of the register")
             status, data = response.status, response.read(MAX_ANSWER_BYTES + 1)
     except urllib.error.HTTPError as error:
         status, data = error.code, error.read(MAX_ANSWER_BYTES + 1)
