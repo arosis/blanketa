@@ -509,14 +509,14 @@
     pageData.blank && 'Zobrazeny výchozí hodnoty – vyplněná data nejsou načtena.',
     info.scripts && 'Některé výpočty nebo kontroly v JavaScriptu 602 Blanketa neumí provést.',
     info.actions && 'Skripty spouštěné při nahrání přílohy Blanketa nespouští.',
-    info.downloaded_lists && 'Číselníky, které si formulář stahuje z\u00a0internetu, Blanketa nenačítá.',
+    info.missing_lists && 'Některé číselníky, které si formulář stahuje z\u00a0internetu, Blanketa nezískala.',
   ].filter(Boolean).join('<br>');
-  if (info.scripts || info.actions || info.downloaded_lists) {
+  if (info.scripts || info.actions || info.missing_lists) {
     const notice = queryOne('[data-notice]');
     notice.querySelector('span').textContent = (info.scripts
       ? 'Některé výpočty nebo kontroly v tomto formuláři Blanketa neumí provést, pole proto mohou zůstat prázdná nebo neaktuální. '
       : info.actions ? 'Při nahrání přílohy tento formulář spouští skripty, které Blanketa z\u00a0bezpečnostních důvodů nespouští. '
-      : 'Formulář si stahuje číselníky a ověřuje adresy na internetu, což Blanketa formulářům nepovoluje. Tyto položky vyplňte ručně. ')
+      : 'Některé číselníky, které si formulář stahuje z\u00a0internetu, se nepodařilo získat. Tyto položky vyplňte ručně. ')
       + 'Před odesláním formulář zkontrolujte, spolehlivý výsledek dá Software602 Form Filler.';
     notice.querySelector('button').addEventListener('click', () => { notice.hidden = true; });
     notice.hidden = false;
