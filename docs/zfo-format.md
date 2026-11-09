@@ -7,7 +7,8 @@ Software602 formát veřejně nepopisuje. Vše níže vychází z rozboru skute�
 Veřejné zdroje:
 - registrace typu u IANA: [`application/vnd.software602.filler.form-xml-zip`](https://www.iana.org/assignments/media-types/application/vnd.software602.filler.form-xml-zip) (ZFO) a [`application/vnd.software602.filler.form+xml`](https://www.iana.org/assignments/media-types/application/vnd.software602.filler.form+xml) (FO);
 - příručky Software602 (uživatelská příručka Form Filleru, příručka návrháře, „XPath výrazy“), kopie jsou jen lokálně v `docs-src/`;
-- projekt zfo-editor (CZ.NIC, 2011, LGPL 2.0+), jehož XSLT a logika formulářů jsou základem `zfoengine/`. Zdroj je v `vendor/zfo-editor-src/`.
+- projekt zfo-editor (CZ.NIC, 2011, LGPL 2.0+), jehož XSLT a logika formulářů jsou základem `zfoengine/`. Zdroj je v `vendor/zfo-editor-src/`;
+- statický rozbor instalace Form Filleru 4.81 kvůli kompatibilitě (oddíl 9). Form Filler se při něm nespouštěl a do repozitáře z něj nic nepřešlo.
 
 ## 1. Kontejner
 
@@ -61,6 +62,8 @@ Toto je hlavní zjištění z referenčního souboru vyplněného ve Form Filler
 
 Software602 uvádí, že formulář lze opatřit časovým razítkem, ale způsob uložení nepopisuje a žádný dostupný vzorek razítko neobsahuje. `dsig:SignatureProperties` nese jen čas uvedený podepisujícím, proto ho panel podpisů nepovažuje za potvrzený.
 
+Podpisová knihovna Form Filleru umí XAdES ve verzích 1.1.1 (`http://uri.etsi.org/01903/v1.1.1#`) a 1.3.2 (`http://uri.etsi.org/01903/v1.3.2#`). Razítko ukládá jako `xades:SignatureTimeStamp/xades:EncapsulatedTimeStamp` v `xades:UnsignedSignatureProperties` (XAdES-T). Výchozí autorita je `https://www.secustamp.com/tsa/req`. Jádro obsahuje šablonu podpisu s `xades:QualifyingProperties` (verze 1.3.2), exkluzivní c14n pro `SignedInfo`, RSA-SHA256, SHA-256 pro reference a referencí typu `http://uri.etsi.org/01903#SignedProperties`. Ve kterém případě Form Filler XAdES místo popsaných vrstev použije, rozbor neurčil, proto chybí vzorek.
+
 ## 4. Datový model a vazby
 
 - **Instance:** `form:model/form:instance` je výchozí XML dat. Prvky mají vlastní jmenný prostor formuláře, např. `d:`.
@@ -68,7 +71,7 @@ Software602 uvádí, že formulář lze opatřit časovým razítkem, ale způso
 - **Id vazby není název prvku.** Například pole s vazbou `o1_check_adresa_pre_dorucovani` zapisuje do `d:check_adresa_pre_dorucovani`. Spojení se hledá přes `nodeset`.
 - **Opakované sekce:** odpovídají opakujícím se prvkům instance. Ve vzhledu je obalují tabulky s třídou `602-repetition-table`.
 - **Kontrola (Zkontrolovat):** povinná pole (`required`) a `constraint` se vyhodnocují pro každý uzel zvlášť.
-- **Výpočty:** `calculate` a `constraint` jsou XPath, nebo blok JavaScriptu 602 ve složených závorkách, který předá výsledek funkcí `Result`. Bloky provádí `zfoengine/js602.py`, funkce sdílené formulářem jsou ve `form:script`. Oficiální popis tohoto jazyka se nepodařilo najít, chování vychází ze skutečných formulářů. Dva předpoklady: když skript zavolá `Result` víckrát, platí poslední hodnota; a když formulář definuje vlastní funkci `RegExp`, `new RegExp` dál znamená vestavěný konstruktor.
+- **Výpočty:** `calculate` a `constraint` jsou XPath, nebo blok JavaScriptu 602 ve složených závorkách, který předá výsledek funkcí `Result`. Bloky provádí `zfoengine/js602.py`, funkce sdílené formulářem jsou ve `form:script`. Oficiální popis tohoto jazyka se nepodařilo najít. Form Filler ho provádí enginem V8, jde tedy o běžný JavaScript s funkcemi aplikace (oddíl 9). `Result` přijme právě jeden argument typu řetězec, jinak skript skončí výjimkou. Když ho skript zavolá víckrát, platí poslední hodnota, a skript po něm běží dál. Před každým výpočtem se výsledek vynuluje. Blanketa je mírnější: převede na text jakoukoli hodnotu. Funkce z `form:script` běží ve stejném globálním kontextu jako výpočty, takže vlastní funkce formuláře `RegExp` ve Form Filleru vestavěný konstruktor nejspíš přepíše. Blanketa v takovém případě pro `new RegExp` dál používá vestavěný konstruktor, protože ho formuláře jedné rodiny používají vedle vlastní funkce. Jak to dopadne ve Form Filleru, ověřené není.
 - **Skripty tlačítek a změn polí:** `form602btnclick` a `form602onchange` jsou bloky JavaScriptu 602, které běží v `zfoengine/form_scripts.py` jako celek: když se skript zastaví, data se vrátí. Kroky průvodce jsou `multi-switch` řízený hodnotou v datech. Opakovanou sekci některé formuláře značí jen `form602ct="rep"` a `form602bind` bez `form602repe`. Form Filler při otevření doplní jazyk do `/d:root/@xml:lang` a formuláře podle něj vybírají texty dialogů.
 - **Kontroly šablonami (`XSLCheck`):** starší formuláře MPSV kontrolují data šablonami XSLT uloženými v `fm:template`. Skript zavolá `doc.XSLCheck("Název")` nebo `doc.XSLCheck("Název", "noclean")`. Šablona běží nad daty a vrátí `<control><item><text>…</text><focus>/d:root[1]/…</focus></item>…</control>`, jednu položku za každou chybu: `text` je hláška pro uživatele, `focus` cesta k chybnému uzlu v datech. Bez položek kontrola vrátí `true`. Bez `noclean` začíná výsledek znovu, s ním se přidá k předchozí kontrole. Šablona `<control/>` (u MPSV `XsltClean`) tak chyby jen smaže. Pomocné funkce šablon jsou v JScriptu v `msxsl:script` s `implements-prefix`, jako v MSXML. Blanketa je pouští v interpretu skriptů (`zfoengine/form_stylesheets.py`). `GetFormData` s `xslName` vrátí výstup takové šablony jako text.
 - **Dotazy na webové služby:** skript sestaví `new SendParam()` s `method` (`SM_GET`, `SM_POST`), `url` a `flags` a zavolá `doc.SendData(data, sendparam)`. Odpověď má `code` (`SR_OK` při úspěchu) a text v `data.data`. Formuláře MPSV a Jihomoravského kraje se tak ptají registru ARES (`https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty/<IČO>`, u JMK `…/ekonomicke-subjekty-res/<IČO>`) a odpověď JSON čtou přes `JSON.parse`. Starší formuláře JMK volají zrušenou službu `wwwinfo.mfcr.cz`. Blanketa pustí jen GET na ARES, po potvrzení uživatele, a dotaz provede server (`lookups.py`).
@@ -87,7 +90,7 @@ Vzhled je XSL-FO (`fo:root`, `fo:simple-page-master`, tabulky, bloky). Pole jsou
 | Písmo | výchozí Tahoma; pole s `font-family` v buňce dědí písmo buňky |
 | Barvy polí | z `fm:formparams` (`proprequiredformfieldbkcolor`, `proproformfieldbkcolor`) |
 | Rozměr stránky | první `fo:simple-page-master` |
-| Multiswitch | prázdná hodnota zobrazí **první** `case` |
+| Multiswitch | hodnota vybere `case` se shodným `case-name`; prázdná hodnota vybere `case` se `starting-state="show"`, a když žádný není, první `case`; hodnota `all` má zvláštní význam (nejspíš zobrazí všechny) |
 | Opakované sekce | tlačítka jsou aplikační události `addsect`/`delsect`; prázdný koncový sloupec tabulky opakování se nezobrazuje |
 | Nápověda k poli | atribut `form602tooltip` |
 | Obrázky | `fm:internal-graphic` v base64 (také **BMP**), rozměr z obalujícího `fo:instream-foreign-object` |
@@ -129,6 +132,39 @@ Pro každou vrstvu se kontroluje:
 Důvěryhodnost se hodnotí v úložišti certifikátů systému: na Macu přes `SecTrustEvaluateWithError`, ve Form Filleru přes úložiště Windows. Form Filler hlásí vydavatele Software602 jako „nebyl nalezen certifikát vystavitele“, pokud v systému chybí jejich CA. Nejde o chybu podpisu.
 
 Implementace: `zfo_verify.py` (ověření), `zfo_sign.py` (podpis), `macsign/` (klíč v klíčence nebo tokenu).
+
+## 9. Poznatky ze statického rozboru Form Filleru 4.81
+
+Rozbor proběhl nad instalací pro Windows bez jejího spuštění, kvůli kompatibilitě. Popisuje chování, ne kód; nic z programu se do repozitáře nepřebírá. Co nebylo ověřeno pozorováním, je označeno jako odhad.
+
+**Složení programu**
+
+| Část | Úloha |
+|---|---|
+| `Filler602.exe` | okno aplikace a tisk |
+| `xmlcore.dll` | jádro formulářů: datový model, vazby, vzhled, kontroly, šablony |
+| `JSInterpret.dll` + `v8.dll` | skripty formulářů (engine V8) včetně ladění |
+| `W5_SIGN.dll`, `w7_sign.dll` | podpis a ověření: libxmlsec s OpenSSL 3, Windows CNG a NSS; XAdES, časová razítka, šifrování XML |
+| `fffo2xhtml.xsl`, `ffxhtml2fo.xsl` | převod XSL-FO na XHTML a zpět, podle všeho pro pole s formátovaným textem (editor TinyMCE); vzhled stránky nekreslí |
+
+Ukázkové formuláře v instalaci (úvodní stránka, datové zprávy, podpis PDF, konverze, e-faktura) jsou vlastní rozhraní aplikace napsané jako ZFO. Funkce, které používají, nevypovídají o úředních formulářích.
+
+**Skriptové API.** `JSInterpret.dll` registruje 331 názvů:
+- metody objektu dokumentu (`XSLCheck`, `GetFormData`, `SignData`, `SendData`, `InsertSection`, `GetBinData` …);
+- parametrické objekty `DataParam`, `SignParam`, `SendParam`, `MailParam`, `PrintParam`;
+- objekty `Signature`, `Certificate`, `Timestamp`, `AuxDocument`, `AuxElement`, `PdfClass`;
+- globální funkce (`MessageBox`, `CurrentDate`, `RCCheck`, `ChooseCert`, `B64EncodeData` …).
+
+Funkce kontrolují počet a typ argumentů a při chybě vyhodí `SyntaxError` nebo `TypeError`. Blanketa z nich zná přibližně čtvrtinu. Sémantika `Result` a sdílený kontext skriptů jsou popsané v oddílu 4.
+
+**`XSLCheck`.** Přijme jeden nebo dva řetězce, druhý má výchozí hodnotu `/` (podle všeho cesta XPath). Slovo `noclean` se v programu nevyskytuje, takže popis režimu `noclean` v oddílu 4 vychází jen z chování formulářů a ověřený není. Výstup šablony zpracovává stejná funkce jako kontrolu dat formuláře:
+- každý `item` s `text` a `focus` označí pole jako chybné;
+- `warning` s `text` se ukáže jako varování v samostatném dialogu a za chybu se nepočítá;
+- bez položek `item` vrátí `true`.
+
+Před kontrolou dat se smažou atributy `form602error` z předchozí kontroly.
+
+**Vzhled.** Jádro zná pevný seznam vlastností XSL-FO (včetně `border-*-radius`, `keep-*`, `break-*`, `page-break-*` a vlastností vodítek `leader-*`) a 75 atributů `form602*`/`lk602*`, mimo jiné `form602minval`, `form602maxval`, `form602maxchars`, `form602datestyle`, `form602default`, `form602tooltip` a `form602btnlook`. Výchozí písmo Tahoma používá okno aplikace; jádro samo zná Arial, Times New Roman a Lucida Sans Unicode. Další pravidla z oddílu 5 (šířka tabulek, barva okrajů, padding) jsou v kreslicím kódu a statickým rozborem ověřená nejsou.
 
 ## Pomocné programy
 
