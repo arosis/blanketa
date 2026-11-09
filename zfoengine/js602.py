@@ -787,7 +787,7 @@ class _Definition:
     self.functions = ()
 
 
-class _Budget:
+class Budget:
   __slots__ = ("left",)
   def __init__(self):
     self.left = STEP_BUDGET
@@ -812,7 +812,7 @@ class Interpreter:
   # One form's scripts. The library stays compiled for all runs, its globals live as long as the form is open.
 
   def __init__(self, library=()):
-    self.budget = _Budget()
+    self.budget = Budget()
     self.depth = 0
     self.runs_in_progress = 0
     self.globals = _Scope(None, self._builtins())

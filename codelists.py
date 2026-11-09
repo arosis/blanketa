@@ -12,6 +12,8 @@ from concurrent.futures import ThreadPoolExecutor, wait
 from lxml import etree
 
 import public_services
+from zfoengine import api as engine
+from zfoengine import js602
 from zfoengine.form_scripts import WHISPERER_FIELD_TYPE, WHISPERER_LIST_ATTRIBUTE
 
 SOURCE = "https://mpsv.gov.cz/fas-adapter-codelists/"
@@ -20,8 +22,10 @@ LIST_NAME = r"([A-Z][A-Za-z0-9_]{0,63})"
 # What MPSV forms put in fm:enum/@updateurl: the address of their list service, from the settings of MPSV's portal.
 NAMED_IN_UPDATE_ADDRESS = re.compile(r'\$\(Eval\("StrCat\(GetCustomConfigValue\((?:VratCiselnik\)|url_base\),fas-adapter-codelists/),'
                                      + LIST_NAME + r'\.xml\)"\)\)?')
-# The offices a form is sent to through MPSV's portal, named by the form's data. Sending is the portal's, not Blanketa's.
-PORTAL_RECIPIENTS = re.compile(r'\$\(Eval\("StrCat\(GetCustomConfigValue\(url_base\),fas-adapter-codelists/,DataXpath\(')
+# The offices a form is sent to: their list is named in the form's data, calculated from its own settings when it opens.
+NAMED_IN_DATA = re.compile(r'\$\(Eval\("StrCat\(GetCustomConfigValue\(url_base\),fas-adapter-codelists/,DataXpath\((//d:[A-Za-z_]{1,64})\),'
+                           r'\.xml\)"\)\)?')
+RECIPIENT_LIST_NAME = re.compile(r"PrijemcePodani[A-Za-z]{0,40}")  # nothing else of the data goes out with the address
 WHISPERER_LISTS = {"CISELNIK_OBEC": "Obec", "ČÍSELNÍK - OBEC": "Obec"}
 WHISPERER_CALL = re.compile(r"""Naseptavac\(\s*['"]([^'"]+)['"]\s*\)""")
 WHISPERER_ENUM_PREFIX = "blanketa-naseptavac-"
@@ -37,9 +41,12 @@ _refreshing = set()
 _refreshing_lock = threading.Lock()
 
 
-def _enum_list_name(enum):
-    match = NAMED_IN_UPDATE_ADDRESS.fullmatch((enum.get("updateurl") or "").strip())
-    return match.group(1) if match else None
+def _enum_list_name(enum, data_text):
+    address = (enum.get("updateurl") or "").strip()
+    if match := NAMED_IN_UPDATE_ADDRESS.fullmatch(address):
+        return match.group(1)
+    name = data_text(match.group(1)) if (match := NAMED_IN_DATA.fullmatch(address)) else ""
+    return name if RECIPIENT_LIST_NAME.fullmatch(name) else None
 
 
 def _is_downloaded(enum):
@@ -73,9 +80,21 @@ def _whisperers(root):
             for name in [_whisperer_list_name(field)] if name]
 
 
-def needed(root):
-    enums = {name for enum in _used_downloaded_enums(root) for name in [_enum_list_name(enum)] if name}
+def needed(root, data_text):
+    enums = {name for enum in _used_downloaded_enums(root) for name in [_enum_list_name(enum, data_text)] if name}
     return enums | {name for _, name in _whisperers(root)}
+
+
+def _kept_items(enum, name, texts_of):
+    lists = enum.findall(f"{{{FM}}}list")
+    if not lists:
+        raise ValueError(f"list {name} is empty")
+    clean = etree.Element(f"{{{FM}}}enum", nsmap={"fm": FM}, name=name)
+    for found in lists:
+        kept = etree.SubElement(clean, f"{{{FM}}}list", lid=found.get("lid") or "")
+        for item in found.findall(f"{{{FM}}}listitem"):
+            etree.SubElement(kept, f"{{{FM}}}listitem", texts_of(item))
+    return clean
 
 
 def _items_of(data, name):
@@ -83,15 +102,21 @@ def _items_of(data, name):
     root = etree.fromstring(data, etree.XMLParser(resolve_entities=False, no_network=True, huge_tree=False))
     if root.tag != f"{{{FM}}}enum" or root.get("name") != name:
         raise ValueError(f"not the list {name}")
-    lists = root.findall(f"{{{FM}}}list")
-    if not lists:
-        raise ValueError(f"list {name} is empty")
-    clean = etree.Element(f"{{{FM}}}enum", nsmap={"fm": FM}, name=name)
-    for found in lists:
-        kept = etree.SubElement(clean, f"{{{FM}}}list", lid=found.get("lid") or "")
-        for item in found.findall(f"{{{FM}}}listitem"):
-            etree.SubElement(kept, f"{{{FM}}}listitem", itemtext=item.get("itemtext") or "", value=item.get("value") or "")
-    return clean
+    return _kept_items(root, name, lambda item: {"itemtext": item.get("itemtext") or "", "value": item.get("value") or ""})
+
+
+def _shaped_by_the_form(root, stylesheet, items):
+    # The form's own stylesheet reshapes a list as it comes (an office's text into its name, e-mail and data box, an empty
+    # first item). A list it cannot reshape is offered as it came rather than not at all.
+    if not stylesheet:
+        return items
+    try:
+        shaped = engine.reshape_list(root, stylesheet, items)
+        if shaped is None:
+            return items
+        return _kept_items(shaped, items.get("name"), lambda item: {key: value for key, value in item.attrib.items() if not key.startswith("{")})
+    except (js602.Unsupported, js602.Exhausted, ValueError):
+        return items
 
 
 def _download(name):
@@ -202,19 +227,18 @@ def load(names, folder, wait_seconds=None):
     return lists
 
 
-def fill(root, lists):
+def fill(root, lists, data_text):
     # Into the form as it is open, never into the file: the lists are no part of what the office signed.
     unfilled = set()
     for enum in _used_downloaded_enums(root):
-        name = _enum_list_name(enum)
+        name = _enum_list_name(enum, data_text)
         if name is None:
-            if not PORTAL_RECIPIENTS.match(enum.get("updateurl")):
-                unfilled.add(enum.get("name") or "")
+            unfilled.add(enum.get("name") or "")
             continue
         if name not in lists:
             unfilled.add(name)
             continue
-        for found in lists[name].findall(f"{{{FM}}}list"):
+        for found in _shaped_by_the_form(root, enum.get("updatexsl"), lists[name]).findall(f"{{{FM}}}list"):
             enum.append(etree.fromstring(etree.tostring(found)))
     params = root.find(f".//{{{FM}}}formparams")
     added = set()
