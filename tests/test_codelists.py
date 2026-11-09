@@ -13,6 +13,7 @@ from support import page_data
 import app
 import certstore
 import codelists
+import public_services
 from zfoengine import api as engine
 from zfoengine import form_scripts
 
@@ -72,6 +73,16 @@ class CodeLists(unittest.TestCase):
             self.assertIn("Stat", codelists.load({"Stat"}, self.folder))
         refresh.assert_called_once_with(self.folder, "Stat")
 
+    def test_opening_waits_for_missing_lists_only_so_long(self):
+        def slow(folder, name):
+            time.sleep(1)
+            return codelists._items_of(STAT.encode(), "Stat")
+
+        with mock.patch.object(codelists, "OPENING_WAIT_SECONDS", 0.1), mock.patch.object(codelists, "_fetch", side_effect=slow):
+            started = time.monotonic()
+            self.assertEqual(codelists.load({"Stat"}, self.folder), {})
+            self.assertLess(time.monotonic() - started, 0.8)
+
     def test_only_items_with_their_two_texts_are_taken_over(self):
         hostile = ('<fm:enum xmlns:fm="http://software602.cz/forms" name="Stat"><fm:list lid="1029" onload="x">'
                    '<fm:listitem itemtext="A" value="1" style="x"><script>alert(1)</script></fm:listitem></fm:list><cizi/></fm:enum>')
@@ -103,11 +114,10 @@ class CodeLists(unittest.TestCase):
         for content_type, works in (("application/xml", True), ("text/html", False)):
             opener = mock.Mock(open=mock.Mock(return_value=Answer(content_type)))
             with self.subTest(content_type), mock.patch.dict(os.environ, {"ZFO_OFFLINE": ""}), \
-                    mock.patch.object(codelists, "_opener", return_value=opener):
+                    mock.patch.object(public_services, "opener", return_value=opener):
                 self.assertEqual(codelists._fetch(self.folder, "Stat") is not None, works)
                 self.assertEqual(opener.open.call_args[0][0].full_url, "https://mpsv.gov.cz/fas-adapter-codelists/Stat.xml")
-        redirects = next(handler for handler in codelists._opener().handlers if hasattr(handler, "redirect_request"))
-        self.assertIsNone(redirects.redirect_request(None, None, 302, "Found", {}, "https://attacker.example/"))
+        self.assertIsNone(public_services._NoRedirects().redirect_request(None, None, 302, "Found", {}, "https://attacker.example/"))
 
 
 class CodeListsOnThePage(unittest.TestCase):

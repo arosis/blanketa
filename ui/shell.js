@@ -141,6 +141,14 @@
     const first = elementsNamed(name).find(element => element.type === 'radio');
     if (first) chooseRadio(first, value);
   };
+  // A field that became a list once Blanketa got its code list (codelists.py) can hold a text typed in before: it stays
+  // shown as a choice of its own, else the field would look empty while the form keeps the value.
+  const keepingValueOutsideTheList = (input, value) => {
+    if (input.tagName === 'SELECT' && value && ![...input.options].some(option => option.value === value || option.text === value)) {
+      input.append(new Option(value, value));
+    }
+    return input;
+  };
   // Its fill_inputs also counted each section's copies through a full walk of the page and never used the number.
   window.fill_inputs = (parent, data) => {
     if (parent == null) separateRadioGroups();
@@ -151,7 +159,7 @@
         const input = get_html_elem(parent, name, true);
         if (!input || $(input).hasClass('shouldStayEmpty')) continue;
         if (input.type === 'radio') chooseRadio(input, value);
-        else set_input_value(input, value);
+        else set_input_value(keepingValueOutsideTheList(input, value), value);
       }
     }
   };

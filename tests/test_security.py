@@ -41,6 +41,7 @@ import desktop
 import isds_message
 import lookups
 import pdf_form_data
+import public_services
 import xades_verify
 import zfo_verify
 from zfoengine import api as engine
@@ -700,14 +701,14 @@ class LocalServer(unittest.TestCase):
         ares = "https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty/00006947"
         for content_type, outcome in (("text/html", None), ("application/json; charset=utf-8", 200)):
             opener = mock.Mock(open=mock.Mock(return_value=Answer(content_type)))
-            with self.subTest(content_type), mock.patch.dict(os.environ, {"ZFO_OFFLINE": ""}), mock.patch.object(lookups, "_opener", return_value=opener):
+            with self.subTest(content_type), mock.patch.dict(os.environ, {"ZFO_OFFLINE": ""}), mock.patch.object(public_services, "opener", return_value=opener):
                 if outcome is None:
                     self.assertRaises(OSError, lookups.ask, ares)
                 else:
                     self.assertEqual(lookups.ask(ares)["status"], outcome)
 
     def test_lookup_follows_no_redirect(self):
-        handler = lookups._NoRedirects()
+        handler = public_services._NoRedirects()
         self.assertIsNone(handler.redirect_request(None, None, 302, "Found", {}, "https://attacker.example/"))
 
     def test_damaged_file_gets_a_message(self):

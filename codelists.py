@@ -2,16 +2,15 @@
 # this program's. Nothing the user filled in is sent, and a list is kept in the settings for use without the internet.
 import os
 import re
-import ssl
 import tempfile
 import threading
 import time
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, wait
 
-import certifi
 from lxml import etree
 
+import public_services
 from zfoengine.form_scripts import WHISPERER_FIELD_TYPE, WHISPERER_LIST_ATTRIBUTE
 
 SOURCE = "https://mpsv.gov.cz/fas-adapter-codelists/"
@@ -27,6 +26,7 @@ WHISPERER_CALL = re.compile(r"""Naseptavac\(\s*['"]([^'"]+)['"]\s*\)""")
 WHISPERER_ENUM_PREFIX = "blanketa-naseptavac-"
 FRESH_SECONDS = 7 * 24 * 3600
 TIMEOUT_SECONDS = 6
+OPENING_WAIT_SECONDS = 6  # for all missing lists together: the window stays empty meanwhile
 MAX_LIST_BYTES = 8 * 1024 * 1024
 XML_CONTENT_TYPES = {"application/xml", "text/xml"}
 _refreshing = set()
@@ -53,16 +53,6 @@ def needed(root):
     return enums | {name for _, name in _whisperers(root)}
 
 
-def _opener():
-    class NoRedirects(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, *_):  # a redirect would lead off MPSV's list service
-            return None
-    # The system's certificates too: offices with a TLS-inspecting proxy have its authority only there.
-    context = ssl.create_default_context()
-    context.load_verify_locations(cafile=certifi.where())
-    return urllib.request.build_opener(NoRedirects(), urllib.request.HTTPSHandler(context=context))
-
-
 def _items_of(data, name):
     # A list is a hostile file like a form: only fm:listitem with its two texts is taken over, nothing else of it.
     root = etree.fromstring(data, etree.XMLParser(resolve_entities=False, no_network=True, huge_tree=False))
@@ -83,7 +73,7 @@ def _download(name):
     if os.environ.get("ZFO_OFFLINE"):
         raise OSError("offline")
     request = urllib.request.Request(SOURCE + name + ".xml", headers={"User-Agent": "Blanketa"})
-    with _opener().open(request, timeout=TIMEOUT_SECONDS) as response:
+    with public_services.opener().open(request, timeout=TIMEOUT_SECONDS) as response:
         if response.headers.get_content_type() not in XML_CONTENT_TYPES:  # a proxy's or a Wi-Fi sign-in page
             raise OSError(f"list {name} is not XML")
         data = response.read(MAX_LIST_BYTES + 1)
@@ -134,7 +124,8 @@ def _stored(folder, name):
 
 
 def load(names, folder):
-    # A stored list serves at once and an old one is renewed for next time; only a list never stored is waited for.
+    # A stored list serves at once and an old one is renewed for next time; only a list never stored is waited for, and
+    # one still downloading when the wait is over is stored for the next opening.
     lists, missing = {}, []
     for name in sorted(names):
         items, stored_at = _stored(folder, name)
@@ -145,10 +136,13 @@ def load(names, folder):
         if time.time() - stored_at > FRESH_SECONDS:
             _refresh_later(folder, name)
     if missing:
-        with ThreadPoolExecutor(max_workers=4) as pool:
-            for name, items in zip(missing, pool.map(lambda name: _fetch(folder, name), missing), strict=True):
-                if items is not None:
-                    lists[name] = items
+        pool = ThreadPoolExecutor(max_workers=4)
+        fetching = {pool.submit(_fetch, folder, name): name for name in missing}
+        done, _ = wait(fetching, timeout=OPENING_WAIT_SECONDS)
+        pool.shutdown(wait=False)
+        for future in done:
+            if future.result() is not None:
+                lists[fetching[future]] = future.result()
     return lists
 
 
