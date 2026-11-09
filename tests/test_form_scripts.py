@@ -218,14 +218,14 @@ class FormStylesheetChecks(unittest.TestCase):
                             "GetDocument().GetElement().SetDataTo('a', /<xpath>([^<]*)<\\/xpath>/.exec(r.data)[1]);")
         self.assertEqual(result["values"], {"a": "/d:root/d:a"})
 
-    def test_address_lists_of_both_generations_are_empty_with_a_notice(self):
+    def test_address_lists_of_both_generations_are_empty_and_left_to_blanketa(self):
         for name in ("XsltGetAdresy", "Validace_AdresaWS_XpathAdres"):
             with self.subTest(name):
                 result = self.click(f"var p = new DataParam(); p.xslName = '{name}';"
                                     "if (GetDocument().GetFormData(p).data == '') GetDocument().GetElement().SetDataTo('a', 'prazdny');",
                                     stylesheets=(stylesheet(name, "<x><xpath>/d:root/d:a</xpath></x>"),))
                 self.assertEqual(result["values"], {"a": "prazdny"})
-                self.assertEqual(result["notices"], [form_scripts.ADDRESS_NOT_CHECKED_NOTICE])
+                self.assertEqual((result["notices"], result["addresses"]), ([], []))
 
     def test_a_check_that_answers_otherwise_is_refused_instead_of_passing(self):
         for body in ("", "<x/>", '<control xmlns="urn:jiny"/>'):
