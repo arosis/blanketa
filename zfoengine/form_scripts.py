@@ -45,7 +45,9 @@ XML_LANG_ATTRIBUTE = "{http://www.w3.org/XML/1998/namespace}lang"
 FO_NAMESPACES = {"fo": ns.FO_URI, "fm": ns.FM_URI}
 TRAILING_POSITION = re.compile(r"^(.*)\[(\d+)\]$", re.S)
 EMPTY_ELEMENT = re.compile(r"<([\w.\-]+)\s*(?:/>|></\1\s*>)")
-ARES_SUBJECT_URL = re.compile(r"https://ares\.gov\.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty(?:-res)?/(\d{8})")
+ARES_REGISTERS = {register: f"https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/{register}/"
+                  for register in ("ekonomicke-subjekty", "ekonomicke-subjekty-res")}
+ARES_SUBJECT_URL = re.compile(r"https://ares\.gov\.cz/ekonomicke-subjekty-v-be/rest/(ekonomicke-subjekty(?:-res)?)/([0-9]{8})")
 CLOSED_ARES_URL = re.compile(r"https?://wwwinfo\.mfcr\.cz/cgi-bin/ares/.*", re.S)
 CLOSED_ARES_NOTICE = "Formulář se ptá staré služby ARES, která už nefunguje. Údaje firmy vyplňte ručně."
 HTTP_OK = 200
@@ -57,8 +59,8 @@ def known_lookup(url):
   match = ARES_SUBJECT_URL.fullmatch(url) if isinstance(url, str) else None
   if match is None:
     return None
-  number = match.group(1)
-  return {"url": url, "number": number,
+  register, number = match.groups()
+  return {"url": url, "register": register, "number": number,
           "question": f"Formulář chce doplnit údaje firmy z\u00a0registru ARES.\n\nBlanketa pošle IČO {number} Ministerstvu financí (ares.gov.cz). "
                       "Nic jiného z\u00a0formuláře neodejde.\n\nPoslat?"}
 

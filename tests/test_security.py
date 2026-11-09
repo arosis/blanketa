@@ -365,7 +365,7 @@ class HostileFormScripts(unittest.TestCase):
     def test_only_the_known_register_can_be_asked(self):
         ares = "https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty/00006947"
         for method, url in (("SM_POST", ares), ("SM_GET", ares.replace("https:", "http:")), ("SM_GET", ares + "?x=1"), ("SM_GET", ares + "/../x"),
-                            ("SM_GET", ares.replace("ares.gov.cz", "ares.gov.cz.attacker.example")), ("SM_GET", ares.replace("00006947", "0000694")),
+                            ("SM_GET", ares.replace("ares.gov.cz", "ares.gov.cz.attacker.example")), ("SM_GET", ares.replace("00006947", "0000694")), ("SM_GET", ares.replace("00006947", "٠٠٠٠٦٩٤٧")),
                             ("SM_GET", "https://attacker.example/?ico=00006947"), ("undefined", ares)):
             with self.subTest(method=method, url=url):
                 script = WRITE + f"var p = new SendParam(); p.method = {method}; p.url = '{url}'; GetDocument().SendData(new Variant(VarStr, ''), p);"
