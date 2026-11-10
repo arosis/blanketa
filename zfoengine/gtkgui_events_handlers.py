@@ -134,7 +134,8 @@ def store_val(document, msg_data):
         
   if constr_ok:
      # zfoengine: the page also sends values it only loaded, those are no change of the field
-     script_answer = _field_change_script_answer(document, field, msg_data["repe"], []) if stored_val != old_val else []
+     script_answer = (_field_change_script_answer(document, field, msg_data["repe"], [], values=(stored_val, old_val))
+                      if stored_val != old_val else [])
      res = {}
      # shorten the value for the message
      if len(stored_val) > LOG_MSG_MAX_LEN: 
@@ -166,8 +167,8 @@ def _data_change_answer(document, data_before):
 def _script_answer(result):
   return _construct_web_response("form_script_callback(%s)" % json.dumps(result)) if result else []
 
-def _field_change_script_answer(document, field, repe, answers, lookups=None):
-  return _script_answer(form_scripts.run_field_change_script(document, field, repe, answers, lookups))
+def _field_change_script_answer(document, field, repe, answers, lookups=None, values=()):
+  return _script_answer(form_scripts.run_field_change_script(document, field, repe, answers, lookups, values))
 
 def run_form_script(document, msg_data):
   # zfoengine: the page names a button or a field of the form, never the text of a script
@@ -175,7 +176,8 @@ def run_form_script(document, msg_data):
   lookups = msg_data.get("lookups")
   repe = msg_data.get("repe") or ""
   if "field" in msg_data:
-    return _field_change_script_answer(document, msg_data["field"], repe, answers, lookups)
+    values = [value for value in msg_data.get("values") or [] if isinstance(value, str)]
+    return _field_change_script_answer(document, msg_data["field"], repe, answers, lookups, values)
   return _script_answer(form_scripts.run_button_script(document, int(msg_data["button"]), repe, answers, lookups))
 
 def delete_attachment(document, msg_data):

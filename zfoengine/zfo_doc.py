@@ -890,10 +890,6 @@ class ZFO_document:
           results[bind.get("Id")] = "" if t is None else t 
         else:
           results[bind.get("Id")] = val[0]
-      # zfoengine: the page checks a box only by "on", as get_initial_values answers it
-      on_value = child.get("form602on") if child.get("form602ct") == "chb" else None
-      if on_value is not None:
-        results[bind.get("Id")] = "on" if results[bind.get("Id")] == on_value else "off"
       #results.append({"key": bind.get("Id"), "value": val[0]})
     # now go through repeating children
     for rep_child in repe_children:
@@ -985,7 +981,6 @@ class ZFO_document:
     # zfoengine: a control with no name at all has an empty id, and the page's selector "#" would stop it loading the rest
     input_dic.pop("", None)
     for input_id in input_dic:
-      type = input_dic[input_id]["type"]
       # zfoengine: JSON.stringify drops an undefined "bind" (input without name)
       bind_id = input_dic[input_id].get("bind") or ""
       if bind_id == "":
@@ -996,15 +991,7 @@ class ZFO_document:
         val = self.get_value_file(bind_id)
       else:        
         val = self.get_value(bind_id)
-      if type == 'check':
-        #off_val = self._get_checkbox_off_value(bind)
-        on_val = self._get_checkbox_on_value(bind_id)
-        if val == on_val:
-          input_dic[input_id]["value"] = "on"
-        else:
-          input_dic[input_id]["value"] = "off"      
-      else:
-        input_dic[input_id]["value"] = val
+      input_dic[input_id]["value"] = val
     return input_dic
   
   def get_readonly_binds(self):

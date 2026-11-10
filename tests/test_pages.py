@@ -94,6 +94,47 @@ class SwitchedPartsOnThePage(unittest.TestCase):
 
 
 @needs_node
+class CheckBoxGroupsOnThePage(unittest.TestCase):
+    """Runs the check boxes of ui/shell.html: boxes of one bind with their own values make one choice in each copy."""
+    SCRIPT = """
+    const window = globalThis;
+    const SECTION_COPY = '.copy', sent = [];
+    const box = (name, value, copy, off) => ({type: 'checkbox', name, value, id: name, checked: false, dataset: off === undefined ? {} : {off},
+                                             closest: () => copy});
+    const boxes = [box('podava', '1', null), box('podava', '2', null), box('podava', '3', null), box('podava', '1', 'kopie'),
+                   box('souhlas', 'ano', null, 'ne')];
+    const elementsNamed = name => boxes.filter(element => element.name === name);
+    const $ = element => [element];
+    const gtk_handler_start = () => {}, get_parent_repe = () => '';
+    window.field_changed_handler = () => sent.push('other field');
+    const send = message => sent.push(JSON.parse(message).data.value);
+    %s
+    eval(process.argv[1]);
+    console.log(JSON.stringify({checked: boxes.map(element => element.checked), sent}));
+    """
+
+    def page_after(self, call):
+        source = ui_source("shell.js")
+        code = re.search(r"  const checkboxGroupOf = .*?\n  \};", source, re.S).group(0)
+        return json.loads(run_in_node(self.SCRIPT % code, call))
+
+    def test_the_value_of_the_field_checks_its_box_in_that_copy_only(self):
+        self.assertEqual(self.page_after("set_checkbox_value(boxes[1], '2')")["checked"], [False, True, False, False, False])
+        self.assertEqual(self.page_after("set_checkbox_value(boxes[0], 'off')")["checked"], [False] * 5)
+
+    def test_checking_a_box_writes_its_value_and_unchecks_the_others(self):
+        after = self.page_after("boxes[0].checked = true; boxes[1].checked = true; field_changed_handler(boxes[1])")
+        self.assertEqual(after, {"checked": [False, True, False, False, False], "sent": ["2"]})
+
+    def test_unchecking_a_box_writes_its_off_value_or_nothing(self):
+        self.assertEqual(self.page_after("field_changed_handler(boxes[1])")["sent"], [""])
+        self.assertEqual(self.page_after("field_changed_handler(boxes[4])")["sent"], ["ne"])
+
+    def test_other_fields_change_as_before(self):
+        self.assertEqual(self.page_after("field_changed_handler({type: 'text'})")["sent"], ["other field"])
+
+
+@needs_node
 class RegisterLookupOnThePage(unittest.TestCase):
     """Runs the lookup handling of ui/shell.js: the user confirms, the server asks the register, the script runs again."""
     SCRIPT = """

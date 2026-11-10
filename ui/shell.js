@@ -135,6 +135,20 @@
   };
   const radioGroupOf = radio => elementsNamed(radio.name).filter(other => other.type === 'radio' && other.form === radio.form);
   const chooseRadio = (radio, value) => radioGroupOf(radio).forEach(other => { other.checked = other.value === value; });
+  // Check boxes of one bind write their own values to it (form602on, form602off or empty when unchecked): together they
+  // make one choice, within one copy of a section. The engine answers with the value of the field, not with on or off.
+  const checkboxGroupOf = box => elementsNamed(box.name)
+    .filter(other => other.type === 'checkbox' && other.closest(SECTION_COPY) === box.closest(SECTION_COPY));
+  const checkBoxes = (box, value) => checkboxGroupOf(box).forEach(other => { other.checked = other.value === value; });
+  window.set_checkbox_value = (box, value) => checkBoxes($(box)[0], value);
+  const storeFieldChange = window.field_changed_handler;
+  window.field_changed_handler = field => {
+    if (field.type !== 'checkbox') { storeFieldChange(field); return; }
+    const value = field.checked ? field.value : (field.dataset.off ?? '');
+    checkBoxes(field, value);
+    gtk_handler_start();
+    send(JSON.stringify({type: 'store_val', data: {field: field.name, value, repe: get_parent_repe(field), input_id: field.id}}));
+  };
   // Its set_radio_value found the button by an id that every copy of a section repeats and never cleared a choice. Its
   // callers pass only the name, so the value goes to the first group, the one outside sections or in the first copy.
   window.set_radio_value = (name, value) => {
@@ -799,14 +813,14 @@
   function applyDefault({field, value}) {
     const element = lastField?.name === field ? lastField : document.getElementsByName(field)[0];
     if (!element || value === null) { setStatus('Pole nemá výchozí hodnotu.'); return; }
-    if (element.type === 'radio') {
+    if (element.type === 'radio' || element.type === 'checkbox') {
       // The change event of the clicked button would store that button's value, and with no button chosen there is none.
-      chooseRadio(element, value);
+      if (element.type === 'radio') chooseRadio(element, value);
+      else checkBoxes(element, value);
       gtk_handler_start();
       send(JSON.stringify({type: 'store_val', data: {field, value, repe: get_parent_repe(element), input_id: element.id}}));
     } else {
-      if (element.type === 'checkbox') element.checked = !['', '0', 'false'].includes(value);
-      else element.value = value;
+      element.value = value;
       $(element).trigger('change');
     }
     setStatus(`Obnovena výchozí hodnota pole ${shortOneLine(labelFor(element))}`);
