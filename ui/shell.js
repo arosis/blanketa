@@ -570,16 +570,29 @@
     const list = dialog.querySelector('[data-navigation-list]');
     list.replaceChildren(...anchors.map(anchor => {
       const item = document.createElement('button');
+      item.type = 'button';
       item.className = 'zfo-btn';
-      item.value = 'go';
       item.textContent = anchor.dataset.anchor;
+      // Closing gives the focus back to the button that opened the dialog, so the part is reached only after that.
       item.addEventListener('click', () => {
-        anchor.scrollIntoView({block: 'start'});
-        anchor.querySelector('input:not([type="hidden"]), select, textarea')?.focus({preventScroll: true});
+        dialog.close();
+        goToPart(anchor);
       });
       return item;
     }));
     dialog.showModal();
+  };
+  // A part of the form is mostly its heading alone: its fields follow it in the page, up to the next part. A part whose
+  // fields are all hidden takes the focus itself, so the next Tab still starts there.
+  const isAfter = (node, other) => Boolean(node.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_FOLLOWING);
+  const goToPart = anchor => {
+    const nextPart = [...page.querySelectorAll('[data-anchor]')].find(other => !anchor.contains(other) && isAfter(anchor, other));
+    const field = [...page.querySelectorAll('input:not([type="hidden"]), select, textarea')]
+      .find(candidate => candidate.offsetParent && !candidate.disabled
+        && (anchor.contains(candidate) || isAfter(anchor, candidate)) && !(nextPart && isAfter(nextPart, candidate)));
+    if (!field) anchor.tabIndex = -1;
+    (field ?? anchor).focus({preventScroll: true});
+    anchor.scrollIntoView({block: 'start'});
   };
   const closeWindow = () => {
     if (native) native.postMessage({action: 'close'});
