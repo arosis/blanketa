@@ -7,7 +7,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from datetime import timezone
 
-from asn1crypto import cms
+from asn1crypto import cms, core
 from lxml import etree
 from pyhanko.sign.validation import generic_cms
 from pyhanko_certvalidator import ValidationContext
@@ -25,6 +25,8 @@ SIGNATURE_TIME_STAMP_TOKEN_OID = "1.2.840.113549.1.9.16.2.14"
 DIGITAL_AND_INFORMATION_AGENCY_ID = "NTRCZ-17651921"
 INTERIOR_MINISTRY_ID = "NTRCZ-00007064"
 ISDS_OPERATOR_IDS = (DIGITAL_AND_INFORMATION_AGENCY_ID, INTERIOR_MINISTRY_ID)
+# What asn1crypto raises on a damaged structure; its ObjectDescriptor, InstanceOf and Real have no Python value at all.
+DAMAGED_STRUCTURE = (TypeError, KeyError, AttributeError, OverflowError)
 XML_PARSER = etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False, huge_tree=True)
 
 
@@ -90,7 +92,7 @@ def _signed_content(data):
         if encapsulated["content_type"].native != "data" or encapsulated["content"].native is None:
             raise ValueError("signed message without content")
         return signed_data, encapsulated["content"].native
-    except (TypeError, KeyError, AttributeError, OverflowError) as error:
+    except DAMAGED_STRUCTURE as error:
         raise ValueError("damaged signed message") from error
 
 
@@ -188,7 +190,7 @@ def _stamp_details(status):
 
 def _signature_stamps(signer_info, digest):
     attributes = signer_info["unsigned_attrs"]
-    if not attributes.native or not any(attribute["type"].dotted == SIGNATURE_TIME_STAMP_TOKEN_OID for attribute in attributes):
+    if isinstance(attributes, core.Void) or not any(attribute["type"].dotted == SIGNATURE_TIME_STAMP_TOKEN_OID for attribute in attributes):
         return [], None
     try:  # no fetching: the page must not wait for the network, and trust comes from the trusted lists
         timing = asyncio.run(generic_cms.collect_timing_info(signer_info, ValidationContext(allow_fetching=False), digest))
@@ -213,17 +215,20 @@ def describe_seal(message):
     except Exception as error:  # noqa: BLE001 - pyHanko reports a missing signer certificate in its own errors
         # Nothing can be said about who sealed it; the message is refused rather than shown with an anonymous seal.
         raise ValueError("message without a readable seal certificate") from error
-    stamps, reported = _signature_stamps(signer_info, _content_digest(message))
-    if reported is None:
-        reported = generic_cms.extract_self_reported_ts(signer_info)
-    return {
-        "subject": _display_name(certificate.subject), "issuer": _display_name(certificate.issuer),
-        "intact": _seal_is_intact(message), "isds_operator": is_isds_operator(certificate),
-        "not_after": certificate["tbs_certificate"]["validity"]["not_after"].native.isoformat(),
-        "signed_at": reported.astimezone(timezone.utc).isoformat() if reported else None,
-        "der": certificate.dump(), "stamps": stamps,
-        "publisher": False, "modified": False, "changes_unchecked": False, "covers_whole": True,
-    }
+    try:
+        stamps, reported = _signature_stamps(signer_info, _content_digest(message))
+        if reported is None:
+            reported = generic_cms.extract_self_reported_ts(signer_info)
+        return {
+            "subject": _display_name(certificate.subject), "issuer": _display_name(certificate.issuer),
+            "intact": _seal_is_intact(message), "isds_operator": is_isds_operator(certificate),
+            "not_after": certificate["tbs_certificate"]["validity"]["not_after"].native.isoformat(),
+            "signed_at": reported.astimezone(timezone.utc).isoformat() if reported else None,
+            "der": certificate.dump(), "stamps": stamps,
+            "publisher": False, "modified": False, "changes_unchecked": False, "covers_whole": True,
+        }
+    except DAMAGED_STRUCTURE as error:
+        raise ValueError("message with a damaged seal") from error
 
 
 def submission_stamp(message):
