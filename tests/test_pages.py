@@ -145,6 +145,46 @@ class FieldLabelsOnThePage(unittest.TestCase):
 
 
 @needs_node
+class StatusAfterStoredValuesOnThePage(unittest.TestCase):
+    """Runs window.send of ui/shell.js: a refused value stays in the status line until that field stores a good one."""
+    SCRIPT = """
+    const window = globalThis, SESSION = 's1', INFO_MESSAGE = 'info', ready = true, GlobalVars = {handlers_active: 0};
+    const status = {textContent: 'Formulář je připraven'}, setStatus = text => { status.textContent = text; };
+    const fitPage = () => {}, noteChange = () => {}, gtk_handler_finished = () => {};
+    class DOMParser { parseFromString(text) { return {body: {textContent: text}}; } }
+    const tasks = [], enqueue = task => tasks.push(task), shown = [];
+    const answers = [];
+    const fetch = async () => ({ok: true, json: async () => answers.shift()});
+    %s
+    const refusal = [{type: 'gtk', info_area: 'message_area', info_type: 'error', data: {to_display: 'PSČ má pět číslic'}}];
+    const store = (field, repe, answer) => {
+      answers.push(answer);
+      send(JSON.stringify({type: 'store_val', data: {field, value: 'x', repe, input_id: field}}));
+    };
+    for (const [field, repe, refused, before] of JSON.parse(process.argv[1])) {
+      if (before) tasks.push(async () => setStatus(before));
+      store(field, repe, refused ? refusal : []);
+      tasks.push(async () => shown.push(status.textContent));
+    }
+    (async () => { for (const task of tasks) await task(); console.log(JSON.stringify(shown)); })();
+    """
+
+    def statuses(self, *stores):
+        code = re.search(r"  const REFRESHES = .*?\n  window\.send = .*?\n  \};\n", ui_source("shell.js"), re.S).group(0)
+        return json.loads(run_in_node(self.SCRIPT % code, json.dumps(stores)))
+
+    def test_a_good_value_clears_the_refusal_of_that_field(self):
+        self.assertEqual(self.statuses(["psc", "", True, None], ["psc", "", False, None]), ["PSČ má pět číslic", ""])
+
+    def test_a_good_value_leaves_the_status_line_alone_otherwise(self):
+        self.assertEqual(self.statuses(["jmeno", "", False, None]), ["Formulář je připraven"])
+        self.assertEqual(self.statuses(["psc", "", True, None], ["jmeno", "", False, None], ["psc", "sekce-rep-2", False, None]),
+                         ["PSČ má pět číslic"] * 3)
+        self.assertEqual(self.statuses(["psc", "", True, None], ["psc", "", False, "Obnovena výchozí hodnota pole PSČ"]),
+                         ["PSČ má pět číslic", "Obnovena výchozí hodnota pole PSČ"])
+
+
+@needs_node
 class CheckBoxGroupsOnThePage(unittest.TestCase):
     """Runs the check boxes of ui/shell.html: boxes of one bind with their own values make one choice in each copy."""
     SCRIPT = """

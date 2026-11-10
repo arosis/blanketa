@@ -25,7 +25,6 @@ Messages and button values for ZFO editor
 
 FORM_READY = "Formulář připraven"
 FORM_CLOSED = "Formulář zavřen"
-FIELD_VALUE_STORED = "Hodnota <b>{0}</b> uložena do pole <b>{1}</b>"
 
 FILE_SAVED = "Formulář uložen"
 FILE_SAVING_OK = "Formulář uložen do souboru <b><tt>{0}</tt></b>"
@@ -92,8 +91,6 @@ APP_EVENT_FILE_SUBMIT_OK = "Data uloženy do souboru {0}"
 APP_EVENT_FILE_DELETED = "Soubor '{0}' zmazán"
 
 APP_EVENT_RECALCULATED = "Hodnoty prepočítány"
-
-APP_EVENT_VALUE_SET_TO = "Hodnota '{0}' uložena do pole '{1}'"
 
 APP_EVENT_UNKNOW = "Neznámy typ aplikační události"
 

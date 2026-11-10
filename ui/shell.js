@@ -336,14 +336,16 @@
   const REFRESHES = new Set(['get_repeatable', 'get_readonly_binds', 'get_multiswitch_list']);
   const newestRefresh = new Map();
   let messages = 0;
+  let refusedValue = null;
   window.send = message => {
-    const type = JSON.parse(message).type;
+    const {type, data} = JSON.parse(message);
     const number = ++messages;
     if (REFRESHES.has(type)) newestRefresh.set(type, number);
     enqueue(async () => {
       if (REFRESHES.has(type) && newestRefresh.get(type) !== number) { gtk_handler_finished(); return; }
       const response = await fetch('/ipc?s=' + SESSION, {method: 'POST', body: message});
       if (!response.ok) { setStatus('Chyba: ' + await response.text()); return; }
+      let refused = false;
       for (const answer of await response.json()) {
         if (answer.type === 'check') {
           showCheck(answer.data, answer.scripts);
@@ -354,7 +356,15 @@
         } else if (answer.type === 'gtk' && answer.info_area === 'message_area' && (ready || answer.info_type !== INFO_MESSAGE)) {
           // The message may carry markup and the form's own texts: parsed inertly, only its text is shown.
           setStatus(new DOMParser().parseFromString(String(answer.data?.to_display ?? ''), 'text/html').body.textContent);
+          if (type === 'store_val') {
+            refused = true;
+            refusedValue = {field: data.field, repe: data.repe, status: status.textContent};
+          }
         }
+      }
+      if (type === 'store_val' && !refused && refusedValue?.field === data.field && refusedValue.repe === data.repe) {
+        if (status.textContent === refusedValue.status) setStatus('');
+        refusedValue = null;
       }
       if (GlobalVars.handlers_active < 0) GlobalVars.handlers_active = 0;
       if (ready) fitPage();
