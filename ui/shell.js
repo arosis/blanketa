@@ -135,6 +135,109 @@
   };
   const radioGroupOf = radio => elementsNamed(radio.name).filter(other => other.type === 'radio' && other.form === radio.form);
   const chooseRadio = (radio, value) => radioGroupOf(radio).forEach(other => { other.checked = other.value === value; });
+  // The form stores dates, times and numbers the XML way (1990-02-01, 08:30:00, 1234.5) and shows them by the field's
+  // Windows picture in form602format (d.M.yyyy, H:mm, # ##0,00), as Form Filler does. What the user types goes back to
+  // the stored form; a text that is no date, time or number stays as typed and the form check names it.
+  const pad = number => String(number).padStart(2, '0');
+  const formatDate = (value, picture) => {
+    const match = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(value);
+    if (!picture || !match || /MMM|ddd/.test(picture)) return value;
+    const [year, month, day] = match.slice(1).map(Number);
+    const parts = {yyyy: String(year), yy: pad(year % 100), MM: pad(month), M: String(month), dd: pad(day), d: String(day)};
+    return picture.replace(/yyyy|yy|MM|M|dd|d/g, token => parts[token]);
+  };
+  const storedDate = text => {
+    const typed = /^(\d{1,2})\s*[./-]\s*(\d{1,2})\s*[./-]\s*(\d{4})\.?$/.exec(text.trim());
+    const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(text.trim());
+    if (!typed && !iso) return text;
+    const [day, month, year] = (typed ? typed.slice(1) : iso.slice(1).reverse()).map(Number);
+    const date = new Date(Date.UTC(year, month - 1, day));
+    return date.getUTCMonth() === month - 1 && date.getUTCDate() === day ? `${year}-${pad(month)}-${pad(day)}` : text;
+  };
+  const formatTime = (value, picture) => {
+    const match = /^(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?$/.exec(value);
+    if (!picture || !match || /[ht]/.test(picture)) return value;
+    const [hours, minutes, seconds = 0] = match.slice(1).map(part => Number(part ?? 0));
+    const parts = {HH: pad(hours), H: String(hours), mm: pad(minutes), m: String(minutes), ss: pad(seconds), s: String(seconds)};
+    return picture.replace(/HH|H|mm|m|ss|s/g, token => parts[token]);
+  };
+  const storedTime = text => {
+    const match = /^(\d{1,2})\s*[:.]\s*(\d{2})(?:\s*[:.]\s*(\d{2}))?$/.exec(text.trim());
+    if (!match) return text;
+    const [hours, minutes, seconds = 0] = match.slice(1).map(part => Number(part ?? 0));
+    return hours < 24 && minutes < 60 && seconds < 60 ? `${pad(hours)}:${pad(minutes)}:${pad(seconds)}` : text;
+  };
+  const numberPicture = picture => {
+    const match = /^([^#0]*)([#0](?:[#0 ]*[#0])?)(?:,([#0]+))?(.*)$/.exec(picture ?? '');
+    if (!match) return null;
+    const [, quotedPrefix, whole, decimals = '', quotedSuffix] = match;
+    const [prefix, suffix] = [quotedPrefix, quotedSuffix].map(text => text.replace(/'([^']*)'/g, '$1'));
+    return {prefix, suffix, grouped: whole.includes(' '), fewest: decimals.split('0').length - 1, most: decimals.length};
+  };
+  // A field shows every digit it holds, an output rounds to the picture as Form Filler prints it.
+  const formatNumber = (value, picture, rounded) => {
+    const parts = numberPicture(picture);
+    const match = /^([-+]?)(\d*)(?:\.(\d*))?$/.exec(value);
+    if (!parts || !match || !/\d/.test(value)) return value;
+    let [, sign, whole, fraction = ''] = match;
+    if (rounded && fraction.length > parts.most) [whole, fraction = ''] = Math.abs(Number(value)).toFixed(parts.most).split('.');
+    fraction = fraction.replace(/0+$/, '').padEnd(parts.fewest, '0');
+    whole = (whole.replace(/^0+(?=\d)/, '') || '0');
+    if (parts.grouped) whole = whole.replace(/\B(?=(\d{3})+$)/g, '\u00a0');
+    return `${parts.prefix}${sign === '-' ? '-' : ''}${whole}${fraction ? ',' + fraction : ''}${parts.suffix}`;
+  };
+  const storedNumber = (text, picture) => {
+    const parts = numberPicture(picture) ?? {prefix: '', suffix: ''};
+    let plain = text.trim();
+    if (parts.prefix.trim() && plain.startsWith(parts.prefix.trim())) plain = plain.slice(parts.prefix.trim().length);
+    if (parts.suffix.trim() && plain.endsWith(parts.suffix.trim())) plain = plain.slice(0, -parts.suffix.trim().length);
+    plain = plain.replace(/[\s\u00a0]/g, '').replace(',', '.');
+    return /^[-+]?\d*\.?\d*$/.test(plain) && /\d/.test(plain) ? plain : text;
+  };
+  const fieldKind = element => {
+    const picture = element.dataset?.format ?? '';
+    if (element.classList.contains('date-pick')) return 'date';
+    if (element.classList.contains('timeInput')) return 'time';
+    if (element.classList.contains('numberInput')) return 'number';
+    if (!element.classList.contains('outputelement') || !picture) return '';
+    return /[#0]/.test(picture) ? 'number' : /[Hhms]/.test(picture) && !/[yd]/.test(picture) ? 'time' : /[yMd]/.test(picture) ? 'date' : '';
+  };
+  // Form Filler takes 00.0 in a number field for no value (spfillcz.xsl reads it out as "nevyplněno").
+  const UNFILLED_NUMBER = '00.0';
+  const shownValue = (element, value) => {
+    const picture = element.dataset?.format ?? '';
+    const text = value === UNFILLED_NUMBER && element.classList.contains('numberInput') ? '' : value ?? '';
+    return {date: () => formatDate(text, picture), time: () => formatTime(text, picture),
+            number: () => formatNumber(text, picture, element.classList.contains('outputelement'))}[fieldKind(element)]?.() ?? text;
+  };
+  const storedValue = (element, text) => ({date: () => storedDate(text), time: () => storedTime(text),
+                                           number: () => storedNumber(text, element.dataset?.format)}[fieldKind(element)]?.() ?? text);
+  const setValue = window.set_input_value;
+  window.set_input_value = (input, value) => {
+    const element = $(input)[0];
+    if (!element) return;
+    if (element.classList.contains('outputelement')) element.textContent = shownValue(element, value);
+    else setValue(input, shownValue(element, value));
+  };
+  const setInitialValues = window.set_inputs_init_values_callback;
+  window.set_inputs_init_values_callback = data => {
+    for (const [id, item] of Object.entries(data)) {
+      const output = document.getElementById(id);
+      if (!output?.classList.contains('outputelement')) continue;
+      set_input_value(output, item.value);
+      delete data[id];
+    }
+    setInitialValues(data);
+  };
+  // jQuery UI writes and reads the date by its own letters: d, dd, m, mm, y and yy stand for d, dd, M, MM, yy and yyyy.
+  const pickerFormat = picture => (!picture || /MMM|ddd/.test(picture) ? 'yy-mm-dd'
+    : picture.replace(/yyyy|yy|MM|M|dd|d/g, token => ({yyyy: 'yy', yy: 'y', MM: 'mm', M: 'm', dd: 'dd', d: 'd'})[token]));
+  const prepareDates = window.prepare_date_inputs;
+  window.prepare_date_inputs = context => {
+    prepareDates(context);
+    $('.date-pick', context ?? undefined).each(function () { $(this).datepicker('option', 'dateFormat', pickerFormat(this.dataset.format)); });
+  };
+  window.number_input_keypress_handler = () => {};
   // Check boxes of one bind write their own values to it (form602on, form602off or empty when unchecked): together they
   // make one choice, within one copy of a section. The engine answers with the value of the field, not with on or off.
   const checkboxGroupOf = box => elementsNamed(box.name)
@@ -143,9 +246,10 @@
   window.set_checkbox_value = (box, value) => checkBoxes($(box)[0], value);
   const storeFieldChange = window.field_changed_handler;
   window.field_changed_handler = field => {
-    if (field.type !== 'checkbox') { storeFieldChange(field); return; }
-    const value = field.checked ? field.value : (field.dataset.off ?? '');
-    checkBoxes(field, value);
+    if (field.type !== 'checkbox' && !fieldKind(field)) { storeFieldChange(field); return; }
+    const value = field.type === 'checkbox' ? (field.checked ? field.value : (field.dataset.off ?? '')) : storedValue(field, field.value);
+    if (field.type === 'checkbox') checkBoxes(field, value);
+    else field.value = shownValue(field, value);
     gtk_handler_start();
     send(JSON.stringify({type: 'store_val', data: {field: field.name, value, repe: get_parent_repe(field), input_id: field.id}}));
   };

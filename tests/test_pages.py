@@ -185,6 +185,46 @@ class StatusAfterStoredValuesOnThePage(unittest.TestCase):
 
 
 @needs_node
+class FieldFormatsOnThePage(unittest.TestCase):
+    """Runs the pictures of ui/shell.js: stored dates, times and numbers are shown by form602format and typed text goes back."""
+    SCRIPT = """
+    const element = (kind, format) => ({dataset: {format}, classList: {contains: name => name === kind}});
+    %s
+    const date = element('date-pick', 'd.M.yyyy'), time = element('timeInput', 'H:mm'), money = element('numberInput', '# ##0,00');
+    const output = (format) => element('outputelement', format);
+    console.log(JSON.stringify({
+      shown: [shownValue(date, '1990-02-01'), shownValue(date, 'neco'), shownValue(time, '08:05:00'), shownValue(money, '1234567.5'),
+              shownValue(money, '0.125'), shownValue(output('# ##0,00'), '0.125'), shownValue(output('##0,00 Kč'), '12'),
+              shownValue(output('d. M. yyyy'), '2026-11-10'), shownValue(output('H:mm:ss'), '7:05'), shownValue(output('attch-size-kB'), 'QUJD'),
+              shownValue(element('numberInput', ''), '1.5'), shownValue(element('numberInput', "#0,00 '%%'"), '12'),
+              shownValue(money, '00.0'), shownValue(output('# ##0,00'), '00.0')],
+      stored: [storedValue(date, '1. 2. 1990'), storedValue(date, '01.02.1990'), storedValue(date, '1990-2-1'), storedValue(date, '31.2.1990'),
+               storedValue(time, '8.30'), storedValue(time, '8:30:15'), storedValue(time, '24:00'), storedValue(money, '1 234 567,50'),
+               storedValue(money, '-12'), storedValue(money, '12 Kč'), storedValue(element('numberInput', '##0,00 Kč'), '12,5 Kč'),
+               storedValue(element('numberInput', "#0,00 '%%'"), '12,5 %%')],
+      picker: ['d.M.yyyy', 'dd.MM.yy', 'd. MMMM yyyy', ''].map(pickerFormat),
+    }));
+    """
+
+    def run_page(self):
+        source = ui_source("shell.js")
+        code = re.search(r"  const pad = .*?(?=\n  const setValue = )", source, re.S).group(0)
+        picker = re.search(r"  const pickerFormat = .*?;\n", source, re.S).group(0)
+        return json.loads(run_in_node(self.SCRIPT % (code + "\n" + picker)))
+
+    def test_stored_values_are_shown_by_the_picture(self):
+        self.assertEqual(self.run_page()["shown"], [
+            "1.2.1990", "neco", "8:05", "1\u00a0234\u00a0567,50", "0,125", "0,13", "12,00 Kč", "10. 11. 2026", "7:05:00", "QUJD", "1.5", "12,00 %", "", "0,00"])
+
+    def test_typed_text_goes_back_to_the_stored_form(self):
+        self.assertEqual(self.run_page()["stored"], [
+            "1990-02-01", "1990-02-01", "1990-02-01", "31.2.1990", "08:30:00", "08:30:15", "24:00", "1234567.50", "-12", "12 Kč", "12.5", "12.5"])
+
+    def test_the_date_picker_writes_by_the_same_picture(self):
+        self.assertEqual(self.run_page()["picker"], ["d.m.yy", "dd.mm.y", "yy-mm-dd", "yy-mm-dd"])
+
+
+@needs_node
 class CheckBoxGroupsOnThePage(unittest.TestCase):
     """Runs the check boxes of ui/shell.html: boxes of one bind with their own values make one choice in each copy."""
     SCRIPT = """
@@ -197,6 +237,7 @@ class CheckBoxGroupsOnThePage(unittest.TestCase):
     const elementsNamed = name => boxes.filter(element => element.name === name);
     const $ = element => [element];
     const gtk_handler_start = () => {}, get_parent_repe = () => '';
+    const fieldKind = () => '', storedValue = (field, text) => text, shownValue = (field, value) => value;
     window.field_changed_handler = () => sent.push('other field');
     const send = message => sent.push(JSON.parse(message).data.value);
     %s

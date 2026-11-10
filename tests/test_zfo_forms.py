@@ -475,3 +475,55 @@ class DataChangesOutsideFields(unittest.TestCase):
     def test_script_value_in_a_further_copy_reaches_that_copy_on_the_page(self):
         engine.handle(self.doc, "run_form_script", {"button": 0, "repe": self.SECOND_COPY})
         self.assertEqual(self.sections_on_page(), [{"b": "", "c": "ne"}, {"b": "druha", "c": "ano"}])
+
+
+FIELD_VALUES_FORM = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#" Id="_1"><dsig:Object Id="_2" MimeType="text/xml">
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:fm="http://software602.cz/forms" xmlns:d="http://software602.cz/sample"
+ xmlns:xs="http://www.w3.org/2001/XMLSchema">
+<fm:formparams><fm:model><fm:instance><d:root><d:dat>1.2.1990</d:dat><d:cas>8:30</d:cas><d:psc>110 00</d:psc><d:pocet>x</d:pocet>
+<d:den/><d:kod>AB12</d:kod></d:root></fm:instance>
+<xs:schema><xs:simpleType name="PscT"><xs:restriction base="xs:string"><xs:pattern value="[0-9]{5}"/></xs:restriction></xs:simpleType>
+</xs:schema>
+<fm:bind Id="k" nodeset="/d:root"><fm:bind Id="dat" nodeset="d:dat"/><fm:bind Id="cas" nodeset="d:cas"/>
+<fm:bind Id="psc" nodeset="d:psc" type="d:PscT"/><fm:bind Id="pocet" nodeset="d:pocet" type="xs:int" required="true()"/>
+<fm:bind Id="den" nodeset="d:den" calculate="&quot;CurrentDate( dd.MM.yyyy )&quot;"/><fm:bind Id="kod" nodeset="d:kod"/></fm:bind>
+</fm:model></fm:formparams>
+<fo:page-sequence master-reference="p"><fo:flow flow-name="xsl-region-body">
+<fo:block form602bind="dat" form602ct="dat" form602format="d.M.yyyy"/><fo:block form602bind="cas" form602ct="tim" form602format="H:mm"/>
+<fo:block form602bind="psc" form602ct="txt"/><fo:block form602bind="pocet" form602ct="num" form602format="# ##0,00"/>
+<fo:block form602bindref="den" form602ct="out" form602format="d. M. yyyy"/>
+<fo:block form602bind="kod" form602ct="txt" form602chars="[0123456789]" form602maxchars="3"/>
+</fo:flow></fo:page-sequence></fo:root></dsig:Object></dsig:Signature>"""
+
+
+class FieldValuesInTheCheck(unittest.TestCase):
+    """The check names values a field does not accept, as Form Filler's Checker.Check does; the page shows them by the picture."""
+
+    def setUp(self):
+        self.doc = engine.open_document(FIELD_VALUES_FORM.encode())
+
+    def problems(self):
+        return {problem["field"]: problem["message"] for problem in engine.handle(self.doc, "check_form", "")[0]["data"]}
+
+    def test_values_the_fields_do_not_accept(self):
+        self.assertEqual(self.problems(), {
+            "dat": "Hodnota není datum.", "psc": "Hodnota nemá tvar, který formulář vyžaduje.",
+            "pocet": "Hodnota není celé číslo v rozsahu, který pole připouští.", "kod": "Hodnota může mít nejvýše 3 znaky.",
+        })
+
+    def test_good_values_pass(self):
+        for field, value in (("dat", "1990-02-01"), ("psc", "11000"), ("pocet", "12"), ("kod", "123")):
+            engine.handle(self.doc, "store_val", {"field": field, "value": value, "repe": "", "input_id": field})
+        self.assertEqual(self.problems(), {})
+
+    def test_current_date_follows_its_picture(self):
+        engine.handle(self.doc, "recalc_form", "")
+        self.assertEqual(self.doc.get_value("den"), datetime.now().strftime("%d.%m.%Y"))
+
+    def test_the_page_gets_the_pictures_and_a_field_for_a_time(self):
+        page = lxml_html.fromstring(etree.tostring(app.XSLT(etree.ElementTree(etree.fromstring(FIELD_VALUES_FORM)), PATH_TO_JS="'/s/'",
+                                                                 PATH_TO_CSS="'/s/'"), method="html", encoding="unicode"))
+        fields = {element.get("name"): (element.get("class"), element.get("data-format"), element.get("readonly"))
+                  for element in page.xpath("//*[@data-format]")}
+        self.assertEqual(fields, {"dat": ("date-pick", "d.M.yyyy", None), "cas": ("timeInput", "H:mm", None),
+                                  "pocet": ("numberInput", "# ##0,00", None), "den": ("outputelement", "d. M. yyyy", None)})
