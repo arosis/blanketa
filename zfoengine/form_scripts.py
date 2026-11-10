@@ -578,17 +578,17 @@ def run_button_script(document, position, repe, answers, lookups=None):
   return _run(document, element, element.get("form602btnclick"), repe, answers, lookups, {"button": position})
 
 
-def run_field_change_script(document, bind_id, repe, answers, lookups=None):
+def run_field_change_script(document, bind_id, repe, answers, lookups=None, values=()):
   # The same field drawn twice carries the same script twice, it runs once. It does not start other fields' scripts.
+  # Check boxes of one bind each carry their own script: the one that writes the new value runs, or the one that
+  # wrote the old value when it was unchecked. values are the new value and the old one.
   if not isinstance(bind_id, str) or not re.fullmatch(r"[\w.\-]+", bind_id):
     return None
-  fields = document.root.xpath("//*[@form602bind=$bind and @form602onchange]", bind=bind_id)
-  scripts = list(dict.fromkeys(field.get("form602onchange") for field in fields if is_action_script(field.get("form602onchange"))))
-  if not scripts:
+  fields = [field for field in document.root.xpath("//*[@form602bind=$bind and @form602onchange]", bind=bind_id)
+            if is_action_script(field.get("form602onchange"))]
+  if not fields:
     return None
-  if len(scripts) > 1:
-    log.info("Field %s has %d different change scripts, the first runs", bind_id, len(scripts))
-  element = next(field for field in fields if field.get("form602onchange") == scripts[0])
+  element = next((field for value in values for field in fields if field.get("form602on") == value), fields[0])
   if element.get("form602ct") == WHISPERER_FIELD_TYPE:
     _choose_whispered_item(document, element, bind_id, repe)
-  return _run(document, element, scripts[0], repe, answers, lookups, {"field": bind_id})
+  return _run(document, element, element.get("form602onchange"), repe, answers, lookups, {"field": bind_id, "values": list(values)})

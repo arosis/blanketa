@@ -358,6 +358,30 @@ class UnsupportedForms(unittest.TestCase):
         self.assertEqual(app.pdf_info(out.getvalue())["xfa"], "")
 
 
+CHECK_BOX_GROUP_FORM = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#" Id="_1"><dsig:Object Id="_2" MimeType="text/xml">
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:fm="http://software602.cz/forms" xmlns:d="http://software602.cz/sample">
+<fm:formparams><fm:model><fm:instance><d:root><d:podava>1</d:podava><d:pripraveno/></d:root></fm:instance>
+<fm:bind Id="k" nodeset="/d:root"><fm:bind Id="podava" nodeset="d:podava"/><fm:bind Id="pripraveno" nodeset="d:pripraveno"/></fm:bind>
+</fm:model></fm:formparams>
+<fo:page-sequence master-reference="p"><fo:flow flow-name="xsl-region-body"><fo:block>
+<fo:character form602bind="podava" form602ct="chb" form602on="1" character="x"
+ form602onchange="{ GetDocument().GetElement().SetDataTo('pripraveno', 'zadatel ' + GetDocument().GetElement().DataXpath('.')); }"/>
+<fo:character form602bind="podava" form602ct="chb" form602on="2" character="x"
+ form602onchange="{ GetDocument().GetElement().SetDataTo('pripraveno', 'zastupce ' + GetDocument().GetElement().DataXpath('.')); }"/>
+</fo:block></fo:flow></fo:page-sequence></fo:root></dsig:Object></dsig:Signature>"""
+
+
+class ScriptsOfCheckBoxGroups(unittest.TestCase):
+    """Each check box of one bind runs its own change script, as Form Filler runs the script of the box clicked."""
+    def test_the_box_clicked_runs_its_script_when_checked_and_unchecked(self):
+        doc = engine.open_document(CHECK_BOX_GROUP_FORM.encode())
+        for value, prepared in (("2", "zastupce 2"), ("", "zastupce "), ("1", "zadatel 1"), ("", "zadatel ")):
+            with self.subTest(value):
+                answers = engine.handle(doc, "store_val", {"field": "podava", "value": value, "repe": "", "input_id": "podava"})
+                script = next(answer["data"] for answer in answers if str(answer["data"]).startswith("form_script_callback("))
+                self.assertEqual(json.loads(script[len("form_script_callback("):-1])["values"]["pripraveno"], prepared)
+
+
 class ControlsWithoutOwnName(unittest.TestCase):
     """Some forms name a radio button or check box only by its bind; an empty name stopped the page loading its values (#46)."""
     FORM = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#" Id="_1"><dsig:Object Id="_2" MimeType="text/xml">
