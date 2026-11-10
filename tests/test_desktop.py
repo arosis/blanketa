@@ -164,6 +164,14 @@ class DesktopAttachmentSaving(unittest.TestCase):
         self.assertEqual((self.folder / "data.xml").read_bytes(), b"older")
         self.window.evaluate_js.assert_called_with(f"window.zfoAttachmentSaved && zfoAttachmentSaved({json.dumps(str(self.folder))})")
 
+    def test_a_form_closes_only_its_own_window(self):
+        self.bridge.message({"action": "close"})
+        self.window.destroy.assert_called_once_with()
+        self.window.reset_mock()
+        self.window.get_current_url.return_value = "https://evil.example/"
+        self.bridge.message({"action": "close"})
+        self.window.destroy.assert_not_called()
+
     def test_desktop_reports_a_failed_save_on_the_page(self):
         self.window.create_file_dialog.return_value = str(self.folder / "chybi" / "x.pdf")
         self.bridge.message({"action": "saveAttachment", "files": self.files(0), "folder": False})

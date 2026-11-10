@@ -186,6 +186,8 @@ class Bridge:
             self._save_file_from_dialog(window, msg)
         elif action == "saveAttachment":
             self._save_attachments(window, msg)
+        elif action == "close":
+            window.destroy()
 
 
 class FormWindow:

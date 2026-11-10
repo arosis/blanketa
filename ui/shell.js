@@ -563,6 +563,28 @@
     const count = problems.length;
     setStatus(count === 1 ? 'Jednu adresu registr RÚIAN nezná.' : `Registr RÚIAN nezná ${count}\u00a0${count < 5 ? 'adresy' : 'adres'}.`);
   };
+  const offerNavigation = () => {
+    const anchors = [...page.querySelectorAll('[data-anchor]')].filter(anchor => anchor.offsetParent);
+    if (!anchors.length) { setStatus('Formulář nemá části, na které by šlo přejít.'); return; }
+    const dialog = queryOne('[data-navigation]');
+    const list = dialog.querySelector('[data-navigation-list]');
+    list.replaceChildren(...anchors.map(anchor => {
+      const item = document.createElement('button');
+      item.className = 'zfo-btn';
+      item.value = 'go';
+      item.textContent = anchor.dataset.anchor;
+      item.addEventListener('click', () => {
+        anchor.scrollIntoView({block: 'start'});
+        anchor.querySelector('input:not([type="hidden"]), select, textarea')?.focus({preventScroll: true});
+      });
+      return item;
+    }));
+    dialog.showModal();
+  };
+  const closeWindow = () => {
+    if (native) native.postMessage({action: 'close'});
+    else setStatus('Formulář chtěl zavřít okno. V\u00a0prohlížeči kartu zavřete sami.');
+  };
   window.run_form_button = button => send(JSON.stringify({type: 'run_form_script', data: {button: Number(button.dataset.formButton), repe: get_parent_repe(button)}}));
   window.form_script_callback = result => {
     if (result.question) {
@@ -596,6 +618,9 @@
     set_multiswitch_controls();
     result.messages.map(({text, title}) => plainTextOf(title ? `${title}\n\n${text}` : text).trim()).filter(Boolean).forEach(message => alert(message));
     if (result.notices.length) setStatus(result.notices.join(' '));
+    if (result.save) saveXml(result.save.name, pageData.folder, result.save.content);
+    if (result.navigate) offerNavigation();
+    if (result.close) closeWindow();
     queue.then(() => {
       if (result.problems?.length) showCheck(result.problems, result.scripts ?? []);
       else if (result.problems) clearCheck({keepStatus: result.notices.length > 0});
@@ -796,21 +821,24 @@
     setStatusMarkup(`${verb} <b title="${escapeHtml(path)}">${escapeHtml(path.split('/').pop())}</b>${reveal}`);
     queryOne('[data-reveal]')?.addEventListener('click', () => native.postMessage({action: 'reveal', path}));
   };
+  const saveXml = (name, folder, xml) => {
+    if (native) {
+      native.postMessage({action: 'saveFile', name, folder, content: xml});
+      return;
+    }
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(new Blob([xml], {type: 'application/xml'}));
+    link.download = name;
+    link.click();
+    URL.revokeObjectURL(link.href);
+    setStatusMarkup(`Data stažena jako <b>${escapeHtml(name)}</b>`);
+  };
   const exportData = async () => {
     await queue;
     const response = await fetch('/export-data?s=' + SESSION, {method: 'POST'});
     if (!response.ok) { setStatus('Chyba: ' + await response.text()); return; }
     const data = await response.json();
-    if (native) {
-      native.postMessage({action: 'saveFile', name: data.name, folder: data.folder, content: data.xml});
-      return;
-    }
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(new Blob([data.xml], {type: 'application/xml'}));
-    link.download = data.name;
-    link.click();
-    URL.revokeObjectURL(link.href);
-    setStatusMarkup(`Data stažena jako <b>${escapeHtml(data.name)}</b>`);
+    saveXml(data.name, data.folder, data.xml);
   };
   window.zfoDataSaved = path => savedStatus('Data uložena do', path);
   const importData = () => {

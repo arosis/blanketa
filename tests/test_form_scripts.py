@@ -261,6 +261,76 @@ class FormStylesheetChecks(unittest.TestCase):
         self.assertIn("refused", self.click("GetDocument().XSLCheck('Neni');"))
 
 
+EXPORT = stylesheet("XmlExport", "<d:Data><xsl:value-of select='/d:root/d:a'/></d:Data>")
+SAVE_EXPORT = "var p = new DataParam(); p.requiredFormat = VarFXML; p.xslName = 'XmlExport'; GetDocument().SaveData(GetDocument().GetFormData(p), %s);"
+
+
+class WindowFunctions(unittest.TestCase):
+    """The buttons of MPSV forms that save the data, close the form and offer its parts (Uložit, Zavřít, Přejít na…)."""
+
+    def click(self, script, value="Jana"):
+        doc = engine.open_document(form_with_stylesheets(script, (EXPORT,), value))
+        return form_scripts.run_button_script(doc, 0, "", [])
+
+    def test_saved_data_reach_the_page_with_the_name_the_form_gives(self):
+        result = self.click(SAVE_EXPORT % "'12.xml'")
+        self.assertEqual(result["save"]["name"], "12.xml")
+        self.assertIn("<d:Data", result["save"]["content"])
+        self.assertIn(">Jana</d:Data>", result["save"]["content"])
+
+    def test_a_name_that_is_no_plain_xml_file_name_is_refused(self):
+        for name in ("'../12.xml'", "'C:\\\\x.xml'", "'data.pdf'", "''", "'.xml'"):
+            with self.subTest(name):
+                self.assertEqual(self.click(SAVE_EXPORT % name)["refused"], "SaveData")
+
+    def test_one_file_per_click(self):
+        self.assertEqual(self.click(SAVE_EXPORT % "'a.xml'" + SAVE_EXPORT % "'b.xml'")["refused"], "SaveData")
+        self.assertEqual(self.click("GetDocument().SaveData('text', 'a.xml');")["refused"], "SaveData")
+
+    def test_a_part_of_the_data_passes_through_a_stylesheet_into_the_file(self):
+        rename = stylesheet("Prejmenuj", "<ulozeno><xsl:value-of select='/d:sekce/d:c | /d:root/d:a'/></ulozeno>")
+        script = ("var p = new DataParam(); p.dataPartXPath = '%s'; p.requiredFormat = VarFXML; var out = GetDocument().GetFormData(p);"
+                  "GetDocument().TransformData(out, 'Prejmenuj'); GetDocument().SaveData(out, 'ulozeno.xml');")
+        for path, saved in (("", "<ulozeno>Jana</ulozeno>"), ("/d:root/d:sekce", "<ulozeno/>")):
+            with self.subTest(path):
+                doc = engine.open_document(form_with_stylesheets(script % path, (rename,), "Jana"))
+                self.assertIn(saved, form_scripts.run_button_script(doc, 0, "", [])["save"]["content"])
+
+    def test_data_a_script_transforms_never_read_a_file(self):
+        copy = stylesheet("Kopie", "<xsl:copy-of select='/'/>")
+        script = ("var v = new Variant(); v.data = '<!DOCTYPE x [<!ENTITY e SYSTEM \\\"%s\\\">]><x>&e;</x>';"
+                  " GetDocument().TransformData(v, 'Kopie'); GetDocument().SaveData(v, 'x.xml');") % (ROOT / "VERSION").as_uri()
+        doc = engine.open_document(form_with_stylesheets(script, (copy,)))
+        saved = form_scripts.run_button_script(doc, 0, "", [])["save"]["content"]
+        self.assertIn("<x>&e;</x>", saved)
+        self.assertNotIn((ROOT / "VERSION").read_text().strip(), saved)
+
+    def test_a_missing_part_of_the_data_stops_the_script(self):
+        self.assertEqual(self.click("var p = new DataParam(); p.dataPartXPath = '/d:root/d:neni'; GetDocument().GetFormData(p);")["refused"],
+                         "GetFormData")
+
+    def test_the_form_closes_its_window_and_offers_its_parts(self):
+        closing = self.click("if (MessageBox('Zavřít?', '', MB_YESNO) == IDYES) GetDocument().CloseApp(CLOSE_IGNORECHANGES);")
+        self.assertIn("question", closing)
+        doc = engine.open_document(form_with_stylesheets(
+            "if (MessageBox('Zavřít?', '', MB_YESNO) == IDYES) GetDocument().CloseApp(CLOSE_IGNORECHANGES);", (EXPORT,)))
+        self.assertTrue(form_scripts.run_button_script(doc, 0, "", [True])["close"])
+        self.assertNotIn("close", form_scripts.run_button_script(doc, 0, "", [False]))
+        self.assertTrue(self.click("GetDocument().NavigationDlg(0, 0);")["navigate"])
+
+    def test_the_page_knows_the_parts_a_form_names(self):
+        form = """<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format"><fo:page-sequence master-reference="p"><fo:flow flow-name="b">
+<fo:block form602anchor=" A. Žadatel "><fo:block>Jméno</fo:block></fo:block><fo:block form602anchor=""/></fo:flow></fo:page-sequence></fo:root>"""
+        page = etree.tostring(app.XSLT(etree.ElementTree(etree.fromstring(form)), PATH_TO_JS="'/s/'", PATH_TO_CSS="'/s/'"),
+                              method="html", encoding="unicode")
+        self.assertEqual(etree.HTML(page).xpath("//*[@data-anchor]/@data-anchor"), ["A. Žadatel"])
+
+    def test_constants_have_form_fillers_values(self):
+        result = self.click("GetDocument().GetElement().SetDataTo('a', [CLOSE_IGNORECHANGES, PI_BEGINPROGRESS, VarFXML, SM_GET,"
+                            " SHTTP_NODLG, GFD_CUTNAMESPACES].join(','));")
+        self.assertEqual(result["values"], {"a": "1,1,7,2,512,2"})
+
+
 ARES_URL = "https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty/00006947"
 ASK_ARES = ("var p = new SendParam(); p.method = SM_GET; p.flags = SHTTP_NODLG | SHTTP_WEB_SERVERSENDS; p.url = '%s';"
             "var r = GetDocument().SendData(new Variant(VarStr, ' '), p);"

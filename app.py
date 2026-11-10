@@ -255,7 +255,11 @@ def write_pdf_for_printing(session, values):
 
 
 def data_file_folder(session):
-    return str(form_path(session["name"]).parent if SINGLE_FILE else ROOT / "out")
+    return folder_for_data(session["name"])
+
+
+def folder_for_data(name):
+    return str(form_path(name).parent if SINGLE_FILE else ROOT / "out")
 
 
 def data_file_stem(session):
@@ -332,7 +336,7 @@ def render_zfo_page(name, blank=False, data=None, lists_waited_for=False):
     html = etree.tostring(XSLT(etree.ElementTree(doc), PATH_TO_JS="'/static/scripts/'",
                                PATH_TO_CSS="'/static/styles/'"), method="html", encoding="unicode")
     shell = page_with_data(SHELL, {
-        "session": session, "file": form_path(name).name if SINGLE_FILE else name, "empty": False,
+        "session": session, "file": form_path(name).name if SINGLE_FILE else name, "folder": folder_for_data(name), "empty": False,
         "signatures": zfo_signatures(fo), "page": page_geometry(doc), "colors": field_colors(doc),
         "info": {**form_info(name), "missing_lists": bool(unfilled_lists)},
         "blank": blank, "buttons": user_buttons(doc), "codes": binds_of_lists_showing_codes(doc)}, fonts=embedded_fonts(doc))
