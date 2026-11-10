@@ -577,15 +577,25 @@
     notice.hidden = false;
   }
 
+  const UNLABELLED_FIELD = 'Pole bez popisku';
+  const LABELLED_ON_THE_RIGHT = new Set(['checkbox', 'radio']);
+  const nearestText = (cell, step) => {
+    for (let other = cell?.[step]; other; other = other[step]) {
+      if (other.textContent.trim()) return other.textContent;
+    }
+    return '';
+  };
   const labelFor = field => {
     const cell = field.closest('td');
-    for (let previous = cell?.previousElementSibling; previous; previous = previous.previousElementSibling) {
-      if (previous.textContent.trim()) return previous.textContent;
-    }
     const above = cell?.parentElement.previousElementSibling?.cells[[...cell.parentElement.cells].indexOf(cell)];
-    return above?.textContent.trim() ? above.textContent : field.name;
+    const labels = [nearestText(cell, 'previousElementSibling'), above?.textContent ?? ''];
+    if (LABELLED_ON_THE_RIGHT.has(field.type)) labels.unshift(nearestText(cell, 'nextElementSibling'));
+    return labels.find(text => text.trim()) ?? UNLABELLED_FIELD;
   };
-  const shortOneLine = text => text.replace(/\s+/g, ' ').trim().slice(0, 90);
+  const shortOneLine = text => {
+    const line = text.replace(/\s+/g, ' ').trim();
+    return line.length > 90 ? `${line.slice(0, 89)}…` : line;
+  };
   let checkWaiter = null;
   function clearCheckMarks() {
     page.querySelectorAll('.zfo-invalid').forEach(field => field.classList.remove('zfo-invalid'));
