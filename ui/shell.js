@@ -174,17 +174,24 @@
     const [prefix, suffix] = [quotedPrefix, quotedSuffix].map(text => text.replace(/'([^']*)'/g, '$1'));
     return {prefix, suffix, grouped: whole.includes(' '), fewest: decimals.split('0').length - 1, most: decimals.length};
   };
+  // Rounds the decimal digits as written, half up: binary floating point would show 2.675 as 2,67.
+  const roundDecimals = (whole, fraction, places) => {
+    const digits = BigInt(whole + fraction.slice(0, places)) + (fraction[places] >= '5' ? 1n : 0n);
+    const text = digits.toString().padStart(places + 1, '0');
+    return [text.slice(0, text.length - places), text.slice(text.length - places)];
+  };
   // A field shows every digit it holds, an output rounds to the picture as Form Filler prints it.
   const formatNumber = (value, picture, rounded) => {
     const parts = numberPicture(picture);
     const match = /^([-+]?)(\d*)(?:\.(\d*))?$/.exec(value);
     if (!parts || !match || !/\d/.test(value)) return value;
     let [, sign, whole, fraction = ''] = match;
-    if (rounded && fraction.length > parts.most) [whole, fraction = ''] = Math.abs(Number(value)).toFixed(parts.most).split('.');
+    if (rounded && fraction.length > parts.most) [whole, fraction] = roundDecimals(whole, fraction, parts.most);
     fraction = fraction.replace(/0+$/, '').padEnd(parts.fewest, '0');
     whole = (whole.replace(/^0+(?=\d)/, '') || '0');
     if (parts.grouped) whole = whole.replace(/\B(?=(\d{3})+$)/g, '\u00a0');
-    return `${parts.prefix}${sign === '-' ? '-' : ''}${whole}${fraction ? ',' + fraction : ''}${parts.suffix}`;
+    const negative = sign === '-' && /[1-9]/.test(whole + fraction);
+    return `${parts.prefix}${negative ? '-' : ''}${whole}${fraction ? ',' + fraction : ''}${parts.suffix}`;
   };
   const storedNumber = (text, picture) => {
     const parts = numberPicture(picture) ?? {prefix: '', suffix: ''};

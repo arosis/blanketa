@@ -198,6 +198,7 @@ class FieldFormatsOnThePage(unittest.TestCase):
               shownValue(output('d. M. yyyy'), '2026-11-10'), shownValue(output('H:mm:ss'), '7:05'), shownValue(output('attch-size-kB'), 'QUJD'),
               shownValue(element('numberInput', ''), '1.5'), shownValue(element('numberInput', "#0,00 '%%'"), '12'),
               shownValue(money, '00.0'), shownValue(output('# ##0,00'), '00.0')],
+      rounded: ['2.675', '1.005', '9.999', '-0.001', '-1234.565', '.5'].map(value => shownValue(output('# ##0,00'), value)),
       stored: [storedValue(date, '1. 2. 1990'), storedValue(date, '01.02.1990'), storedValue(date, '1990-2-1'), storedValue(date, '31.2.1990'),
                storedValue(time, '8.30'), storedValue(time, '8:30:15'), storedValue(time, '24:00'), storedValue(money, '1 234 567,50'),
                storedValue(money, '-12'), storedValue(money, '12 Kč'), storedValue(element('numberInput', '##0,00 Kč'), '12,5 Kč'),
@@ -215,6 +216,9 @@ class FieldFormatsOnThePage(unittest.TestCase):
     def test_stored_values_are_shown_by_the_picture(self):
         self.assertEqual(self.run_page()["shown"], [
             "1.2.1990", "neco", "8:05", "1\u00a0234\u00a0567,50", "0,125", "0,13", "12,00 Kč", "10. 11. 2026", "7:05:00", "QUJD", "1.5", "12,00 %", "", "0,00"])
+
+    def test_an_output_rounds_the_decimal_digits_as_written(self):
+        self.assertEqual(self.run_page()["rounded"], ["2,68", "1,01", "10,00", "0,00", "-1\u00a0234,57", "0,50"])
 
     def test_typed_text_goes_back_to_the_stored_form(self):
         self.assertEqual(self.run_page()["stored"], [

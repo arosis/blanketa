@@ -72,9 +72,10 @@
     <input type="text" class="date-pick" title="{@form602tooltip}" name="{@form602bind}" data-format="{@form602format}"/>
   </xsl:template>
 
+  <!-- No maxlength: the field shows the number with the spaces and decimals of its picture, while form602maxchars counts
+       the stored value, which the form check measures. -->
   <xsl:template name="num-input">
-    <input type="text" class="numberInput" title="{@form602tooltip}" maxlength="{@form602maxchars}" name="{@form602bind}"
-           data-format="{@form602format}"/>
+    <input type="text" class="numberInput" title="{@form602tooltip}" name="{@form602bind}" data-format="{@form602format}"/>
   </xsl:template>
 
   <!-- zfo-editor draws no field for a time at all. -->

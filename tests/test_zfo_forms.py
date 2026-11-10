@@ -490,7 +490,7 @@ FIELD_VALUES_FORM = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xml
 </fm:model></fm:formparams>
 <fo:page-sequence master-reference="p"><fo:flow flow-name="xsl-region-body">
 <fo:block form602bind="dat" form602ct="dat" form602format="d.M.yyyy"/><fo:block form602bind="cas" form602ct="tim" form602format="H:mm"/>
-<fo:block form602bind="psc" form602ct="txt"/><fo:block form602bind="pocet" form602ct="num" form602format="# ##0,00"/>
+<fo:block form602bind="psc" form602ct="txt"/><fo:block form602bind="pocet" form602ct="num" form602format="# ##0,00" form602maxchars="4"/>
 <fo:block form602bindref="den" form602ct="out" form602format="d. M. yyyy"/>
 <fo:block form602bind="kod" form602ct="txt" form602chars="[0123456789]" form602maxchars="3"/>
 </fo:flow></fo:page-sequence></fo:root></dsig:Object></dsig:Signature>"""
@@ -523,7 +523,7 @@ class FieldValuesInTheCheck(unittest.TestCase):
     def test_the_page_gets_the_pictures_and_a_field_for_a_time(self):
         page = lxml_html.fromstring(etree.tostring(app.XSLT(etree.ElementTree(etree.fromstring(FIELD_VALUES_FORM)), PATH_TO_JS="'/s/'",
                                                                  PATH_TO_CSS="'/s/'"), method="html", encoding="unicode"))
-        fields = {element.get("name"): (element.get("class"), element.get("data-format"), element.get("readonly"))
+        fields = {element.get("name"): (element.get("class"), element.get("data-format"), element.get("readonly") or element.get("maxlength") or None)
                   for element in page.xpath("//*[@data-format]")}
         self.assertEqual(fields, {"dat": ("date-pick", "d.M.yyyy", None), "cas": ("timeInput", "H:mm", None),
                                   "pocet": ("numberInput", "# ##0,00", None), "den": ("outputelement", "d. M. yyyy", None)})
