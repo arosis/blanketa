@@ -35,6 +35,13 @@ class FormScripts(unittest.TestCase):
     def problems(self):
         return engine.handle(self.doc, "check_form", "")[0]
 
+    def test_a_stored_value_leaves_the_status_line_alone(self):
+        answers = [*self.fill("jmeno", "Jana"),
+                   *engine.handle(self.doc, "perform_click", {"command": "SendAppEvent(setdatavalue,jmeno,,Eva)"}),
+                   *engine.handle(self.doc, "perform_click", {"command": "SendAppEvent(setevaldata,jmeno,,'Petr')"})]
+        self.assertEqual([answer for answer in answers if answer["type"] == "gtk"], [])
+        self.assertEqual(self.value("jmeno"), "Petr")
+
     def test_filled_check_follows_every_branch(self):
         engine.handle(self.doc, "recalc_form", "")
         self.assertEqual(self.value("vyplneno"), "1")

@@ -144,9 +144,8 @@ def store_val(document, msg_data):
      res["input_id"] = html_id
      res["repe"] = msg_data["repe"]
      res["calculated"] = calculated_binds    
-     return _construct_web_response("field_changed_ok_callback(%s)" % json.dumps(res)) +\
-            _construct_gtk_info_response(msgs.FIELD_VALUE_STORED.format(stored_val, to_bind), area="message_area") +\
-            script_answer
+     # zfoengine: no status for a stored value; the engine knows the bind, not the label the user sees
+     return _construct_web_response("field_changed_ok_callback(%s)" % json.dumps(res)) + script_answer
    
   else:     
      res = {}

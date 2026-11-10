@@ -253,8 +253,7 @@ class Setevaldata(Event):
       # zfoengine: original indexed the element (bind_el[0]) instead of the list
       zfo_doc.store_value_path(bind_el, value, self.data_xpath)
     
-    return self._create_response_dict(msgs.APP_EVENT_VALUE_SET_TO.format(value, self.bind_id), 
-                                      msg_type=mt.INFO)
+    return self._create_response_dict(None, msg_type=mt.INFO, show=False)
 
 class Setdatavalue(Event):
   def __init__(self, bind, data_xpath, value):
@@ -272,8 +271,7 @@ class Setdatavalue(Event):
       zfo_doc.store_value(self.bind_id, self.value)
     else:
       zfo_doc.store_value_path(bind_el[0], self.value, self.data_xpath)
-    return self._create_response_dict(msgs.APP_EVENT_VALUE_SET_TO.format(self.value, self.bind_id), 
-                                      msg_type=mt.INFO)
+    return self._create_response_dict(None, msg_type=mt.INFO, show=False)
 
 class Gotofield(Event):
   pass
