@@ -167,6 +167,13 @@ class IsdsMessages(unittest.TestCase):
         self.assertTrue(seal["intact"])
         self.assertEqual([(stamp["intact"], stamp["at"]) for stamp in seal["stamps"]], [(True, "2026-03-02T09:30:00+00:00")])
 
+    def test_a_seal_asn1crypto_cannot_read_refuses_the_message(self):
+        message = isds_message.read_message(isds_sample("prijata"))
+        unreadable_name = AttributeError("'ObjectDescriptor' object has no attribute 'native'")
+        with mock.patch.object(isds_message, "_display_name", side_effect=unreadable_name), \
+                self.assertRaisesRegex(ValueError, "damaged seal"):
+            isds_message.describe_seal(message)
+
     def test_unusual_status_is_left_out(self):
         for status in ("²", "٣", "x"):
             with self.subTest(status=status):
