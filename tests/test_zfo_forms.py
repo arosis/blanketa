@@ -68,6 +68,13 @@ class SwitchedParts(unittest.TestCase):
         self.assertEqual(self.shown("", ' starting-state="show"'), ["2"])
         self.assertEqual(self.shown(""), ["1"])
 
+    def test_a_case_without_a_name_shows_only_for_an_empty_value(self):
+        unnamed = SWITCHED_FORM.replace('case-name="1" ', '')
+        def shown(value):
+            return engine.open_document((unnamed % (value, "")).encode()).get_multiswitch_values()["data"][0]
+        self.assertEqual((shown("")["cases"], shown("")["shown"]), (["", "2", "3"], [""]))
+        self.assertEqual(shown("2")["shown"], ["2"])
+
     def test_all_shows_every_case(self):
         self.assertEqual(self.shown("all", ' starting-state="show"'), ["1", "2", "3"])
 

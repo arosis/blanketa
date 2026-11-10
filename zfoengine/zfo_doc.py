@@ -46,15 +46,20 @@ SHOW_ALL_CASES = "all"
 STARTING_CASE = "show"
 
 
+def _case_name(case):
+  # The page names the part of a case without case-name by an empty name, as fo2html.xsl writes it.
+  return case.get("case-name", "")
+
+
 def _shown_cases(value, cases):
   # As Form Filler 4.81 chooses: "all" before any case name, then the case of that name; an empty value shows the case
   # marked to start shown, or the first one (an untouched checkbox switch shows its "off" case).
-  names = [case.get("case-name") for case in cases]
+  names = [_case_name(case) for case in cases]
   if value == SHOW_ALL_CASES:
     return names
   if value:
     return [value] if value in names else []
-  starting = [case.get("case-name") for case in cases if case.get("starting-state") == STARTING_CASE]
+  starting = [_case_name(case) for case in cases if case.get("starting-state") == STARTING_CASE]
   return starting[:1] or names[:1]
 
 
@@ -1098,7 +1103,7 @@ class ZFO_document:
       
       sw["cases"] = []
       for sibling in siblings:
-        case_name = sibling.get("case-name")        
+        case_name = _case_name(sibling)        
         sw["cases"].append(case_name)
       sw["shown"] = _shown_cases(value, siblings)
       res.append(sw)

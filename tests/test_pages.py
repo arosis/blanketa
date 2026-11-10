@@ -75,11 +75,11 @@ class SwitchedPartsOnThePage(unittest.TestCase):
     const window = globalThis;
     let finished = 0;
     const gtk_handler_finished = () => finished++;
-    const parts = Object.fromEntries(['1', '2', '3'].map(value => [`div-krok-${value}`, {tagName: 'DIV', style: {display: ''}}]));
+    const parts = Object.fromEntries(['', '2', '3'].map(value => [`div-krok-${value}`, {tagName: 'DIV', style: {display: ''}}]));
     const elementsNamed = name => parts[name] ? [parts[name]] : [];
     const $ = part => ({show: () => { part.style.display = ''; }, hide: () => { part.style.display = 'none'; }});
     %s
-    window.set_multiswitch_controls_callback({data: [{bindref: 'krok', cases: ['1', '2', '3'], shown: JSON.parse(process.argv[1])}]});
+    window.set_multiswitch_controls_callback({data: [{bindref: 'krok', cases: ['', '2', '3'], shown: JSON.parse(process.argv[1])}]});
     console.log(JSON.stringify({finished, shown: Object.keys(parts).filter(name => parts[name].style.display !== 'none')}));
     """
 
@@ -88,7 +88,7 @@ class SwitchedPartsOnThePage(unittest.TestCase):
         return json.loads(run_in_node(self.SCRIPT % answer, json.dumps(shown)))
 
     def test_only_the_parts_the_engine_names_are_shown(self):
-        for shown, parts in ((["2"], ["div-krok-2"]), ([], []), (["1", "2", "3"], ["div-krok-1", "div-krok-2", "div-krok-3"])):
+        for shown, parts in ((["2"], ["div-krok-2"]), ([], []), ([""], ["div-krok-"]), (["", "2", "3"], ["div-krok-", "div-krok-2", "div-krok-3"])):
             with self.subTest(shown):
                 self.assertEqual(self.shown_after(shown), {"finished": 1, "shown": parts})
 
