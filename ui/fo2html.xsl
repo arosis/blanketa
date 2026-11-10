@@ -66,6 +66,76 @@
     </xsl:if>
   </xsl:template>
 
+  <!-- Dates, times, numbers and outputs carry their picture (form602format) for the page to show the stored value by it.
+       A date can be typed as well as picked: zfo-editor only let it be picked, in the stored form. -->
+  <xsl:template name="date-input">
+    <input type="text" class="date-pick" title="{@form602tooltip}" name="{@form602bind}" data-format="{@form602format}"/>
+  </xsl:template>
+
+  <!-- No maxlength: the field shows the number with the spaces and decimals of its picture, while form602maxchars counts
+       the stored value, which the form check measures. -->
+  <xsl:template name="num-input">
+    <input type="text" class="numberInput" title="{@form602tooltip}" name="{@form602bind}" data-format="{@form602format}"/>
+  </xsl:template>
+
+  <!-- zfo-editor draws no field for a time at all. -->
+  <xsl:template name="time-input">
+    <input type="text" class="timeInput" title="{@form602tooltip}" maxlength="{@form602maxchars}" name="{@form602bind}"
+           data-format="{@form602format}"/>
+  </xsl:template>
+
+  <xsl:template match="fo:table-cell[@form602ct='tim']" mode="display">
+    <td>
+      <xsl:call-template name="add-style-attribute"/>
+      <xsl:call-template name="add-onclick-attribute"/>
+      <xsl:apply-templates select="@*" mode="get-table-attributes"/>
+      <xsl:call-template name="time-input"/>
+    </td>
+  </xsl:template>
+
+  <xsl:template match="fo:block[@form602ct='tim']|fo:block-container[@form602ct='tim']">
+    <div>
+      <xsl:call-template name="add-style-attribute"/>
+      <xsl:call-template name="add-onclick-attribute"/>
+      <xsl:call-template name="time-input"/>
+    </div>
+  </xsl:template>
+
+  <xsl:template match="fo:inline[@form602ct='tim']">
+    <span>
+      <xsl:call-template name="add-style-attribute"/>
+      <xsl:call-template name="add-onclick-attribute"/>
+      <xsl:call-template name="time-input"/>
+    </span>
+  </xsl:template>
+
+  <xsl:template match="fo:block[@form602ct='out']">
+    <div>
+      <xsl:call-template name="add-style-attribute"/>
+      <xsl:call-template name="add-onclick-attribute"/>
+      <xsl:call-template name="output-attributes"/>
+      <xsl:apply-templates mode="check-for-pre"/>
+      <xsl:apply-templates/>
+    </div>
+  </xsl:template>
+
+  <xsl:template match="fo:inline[@form602ct='out']">
+    <span>
+      <xsl:call-template name="add-style-attribute"/>
+      <xsl:call-template name="add-onclick-attribute"/>
+      <xsl:call-template name="output-attributes"/>
+    </span>
+  </xsl:template>
+
+  <xsl:template name="output-attributes">
+    <xsl:attribute name="id"><xsl:value-of select="@form602bindref"/></xsl:attribute>
+    <xsl:attribute name="class">outputelement</xsl:attribute>
+    <xsl:attribute name="name"><xsl:value-of select="@form602bindref"/></xsl:attribute>
+    <xsl:if test="@form602format">
+      <xsl:attribute name="data-format"><xsl:value-of select="@form602format"/></xsl:attribute>
+    </xsl:if>
+  </xsl:template>
+
   <!-- A button with a script names itself by its position: the script stays on the server and runs from there. -->
   <xsl:template name="button-input">
     <button type="button" title="{@form602tooltip}" zfo-app-event="{@form602btnclick}">

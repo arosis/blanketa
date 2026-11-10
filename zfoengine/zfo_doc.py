@@ -37,7 +37,7 @@ log = logging.getLogger("zfo.zfo_doc")
 import base64
 
 from . import evaluate as ev
-from . import js602, msg_types, tools
+from . import field_values, js602, msg_types, tools
 
 XML_NAMESPACE = "http://www.w3.org/XML/1998/namespace"
 
@@ -64,6 +64,28 @@ def _shown_cases(value, cases):
 
 
 UNREADABLE_CONDITION = "podmínka formuláře, kterou nejde vyhodnotit"
+
+XS_URI = "http://www.w3.org/2001/XMLSchema"
+XS = "{%s}" % XS_URI
+
+
+def _xml_schema_name(element, qualified_name):
+  prefix, _, local = qualified_name.rpartition(":")
+  return "xs:" + local if element.nsmap.get(prefix or None) == XS_URI else ""
+
+
+def _schema_type(bind, type_name, simple_types):
+  # A bind's type is an XML Schema type, or a simple type of the form's own schema restricting one, maybe by a pattern.
+  if not type_name:
+    return "", ""
+  built_in = _xml_schema_name(bind, type_name)
+  if built_in:
+    return built_in, ""
+  restriction = simple_types.get(type_name.rpartition(":")[2], etree.Element("none")).find(XS + "restriction")
+  if restriction is None:
+    return "", ""
+  pattern = restriction.find(XS + "pattern")
+  return _xml_schema_name(restriction, restriction.get("base", "")), "" if pattern is None else pattern.get("value", "")
 
 
 class ZFO_document:
@@ -1034,7 +1056,33 @@ class ZFO_document:
           ok, comment = self._evaluate_condition(bind.get("constraint"), (True, ""), ev.eval_constraint, self, bind, None, node=node)
           if not ok:
             problems.append({"field": bind_id, "index": index, "kind": "constraint", "message": comment})
+    reported = {(problem["field"], problem["index"]) for problem in problems}
+    for bind_id, rules in self._field_rules().items():
+      bind = self._find_bind_elem(bind_id)[0]
+      path = self._get_abs_data_path(bind)
+      try:
+        nodes = self._get_data_root().xpath(path, namespaces=self._get_used_ns_prefix(path))
+      except etree.XPathError:
+        continue
+      for index, node in enumerate(nodes if isinstance(nodes, list) else []):
+        message = field_values.value_problem(node if isinstance(node, str) else (node.text or ""), rules)
+        if message and (bind_id, index) not in reported:
+          problems.append({"field": bind_id, "index": index, "kind": "value", "message": message})
     return problems
+
+  def _field_rules(self):
+    # zfoengine: the values each bind accepts (field_values.py), named by the first of its fields
+    simple_types = {simple_type.get("name"): simple_type for simple_type in self.root.iter(XS + "simpleType")}
+    rules = {}
+    for field in self.root.xpath("//*[@form602ct and @form602bind != '']"):
+      bind_id = field.get("form602bind")
+      binds = self._find_bind_elem(bind_id)
+      if bind_id in rules or not len(binds):
+        continue
+      data_type, pattern = _schema_type(binds[0], binds[0].get("type", ""), simple_types)
+      rules[bind_id] = field_values.FieldRules(field.get("form602ct", ""), field.get("form602chars", ""),
+                                               field.get("form602maxchars", ""), data_type, pattern)
+    return rules
 
   def _evaluate_condition(self, condition, otherwise, evaluate, *args, **kwargs):
     # Published forms carry conditions XPath cannot read (an unclosed bracket in MPSV forms): such a condition is left

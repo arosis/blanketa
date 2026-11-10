@@ -31,7 +31,7 @@ from functools import reduce
 
 import lxml.etree as etree
 
-from . import app_events, js602, msg_types, ns, tags, tools
+from . import app_events, field_values, js602, msg_types, ns, tags, tools
 
 log = logging.getLogger("zfo.xpath_ext")
 
@@ -224,7 +224,8 @@ class ExtendedXpathEvaluator:
     return ""
     
   def CurrentDate(self, context, format=None):
-    return datetime.datetime.now().strftime("%Y-%m-%d")
+    today = datetime.date.today()
+    return field_values.format_date(today, str(format).strip()) if format else today.isoformat()
   
   def CurrentTime(self, context, format=None):
     return tools.get_curr_time(False, format) 
