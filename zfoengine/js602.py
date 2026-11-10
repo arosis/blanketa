@@ -2621,6 +2621,12 @@ def evaluate(interpreter, source, data_xpath, current_path="", list_item=None):
   def element_method(this, args):
     return element
 
+  def result(this, args):
+    # Form Filler takes exactly one text and throws otherwise, so the forms pass numbers as `value + ""`.
+    if len(args) != 1 or not isinstance(args[0], str):
+      raise Thrown(interpreter.error("TypeError", "Result expects one text"))
+    results.append(args[0])
+
   element_props = {
     "DataXpath": NativeFunction(ask),
     "GetCurrentDataXPath": NativeFunction(lambda this, args: current_path),
@@ -2635,7 +2641,7 @@ def evaluate(interpreter, source, data_xpath, current_path="", list_item=None):
   })
   interpreter.run(source, {
     "GetDocument": NativeFunction(lambda this, args: document),
-    "Result": NativeFunction(lambda this, args: results.append(to_string(args[0] if args else UNDEFINED))),
+    "Result": NativeFunction(result),
     "DbgLog": NativeFunction(lambda this, args: UNDEFINED),
     "RCCheck": NativeFunction(lambda this, args: _birth_number_valid(to_string(args[0] if args else UNDEFINED))),
   })
