@@ -18,7 +18,8 @@ class SignatureReplacementNotice(unittest.TestCase):
     const queue = Promise.resolve(), document = {getElementsByName: () => []}, calls = [];
     for (const name of ['gtk_handler_start', 'gtk_handler_finished', 'send', 'set_inputs_init_values', 'redrawSections',
                         'calc_repeatable_sections', 'set_readonly_inputs', 'set_multiswitch_controls', 'setStatus', 'alert',
-                        'showCheck', 'focusField']) window[name] = () => calls.push(name);
+                        'focusField']) window[name] = () => calls.push(name);
+    const showCheck = (problems, scripts = []) => calls.push(scripts.length ? 'showCheck saying it is not complete' : 'showCheck');
     const clearCheck = ({keepStatus}) => calls.push(keepStatus ? 'clearCheck keeping the status' : 'clearCheck');
     const plainTextOf = text => text;
     %s
@@ -58,7 +59,9 @@ class SignatureReplacementNotice(unittest.TestCase):
         self.assertIn("clearCheck", calls({}))
         self.assertIn("clearCheck keeping the status", calls({"notices": ["Adresy nebyly ověřeny."]}))
         self.assertFalse({"clearCheck", "showCheck"} & set(calls({"problems": None})))
-        self.assertIn("showCheck", calls({"problems": [{"field": "a", "index": 0, "kind": "form", "message": "F001"}]}))
+        fault = [{"field": "a", "index": 0, "kind": "form", "message": "F001"}]
+        self.assertIn("showCheck", calls({"problems": fault}))
+        self.assertIn("showCheck saying it is not complete", calls({"problems": fault, "scripts": ["podmínka"]}))
 
     def test_script_answer_refreshes_every_copy_of_the_sections(self):
         # result.values names a field only by its bind; the values of the second and further copies come with the refresh.

@@ -22,7 +22,7 @@ import re
 import lxml.etree as etree
 
 from . import evaluate as ev
-from . import form_stylesheets, js602, ns
+from . import form_stylesheets, js602, ns, zfo_doc
 
 log = logging.getLogger("zfo.form_scripts")
 
@@ -57,6 +57,7 @@ ARES_REGISTERS = {register: f"https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/
                   for register in ("ekonomicke-subjekty", "ekonomicke-subjekty-res")}
 ARES_SUBJECT_URL = re.compile(r"https://ares\.gov\.cz/ekonomicke-subjekty-v-be/rest/(ekonomicke-subjekty(?:-res)?)/([0-9]{8})")
 CLOSED_ARES_URL = re.compile(r"https?://wwwinfo\.mfcr\.cz/cgi-bin/ares/.*", re.S)
+INCOMPLETE_CHECK_NOTICE = "Některou podmínku formuláře Blanketa neumí vyhodnotit, kontrola formuláře proto není úplná."
 CLOSED_ARES_NOTICE = "Formulář se ptá staré služby ARES, která už nefunguje. Údaje firmy vyplňte ručně."
 HTTP_OK = 200
 HTTP_NOT_FOUND = 404
@@ -168,6 +169,7 @@ class FormActionHost:
     self.messages = []
     self.notices = []
     self.problems = None
+    self.check_is_incomplete = False
     self.stylesheet_runs = 0
     self.focus_bind = None
     self.has_section_changes = False
@@ -311,7 +313,12 @@ class FormActionHost:
       self.focus_bind = fields[0].get("form602bind")
 
   def check_data(self):
+    left_out_before = self.document.conditions_left_out
     self.problems = self.document.find_form_problems()
+    if self.document.conditions_left_out > left_out_before:
+      self.check_is_incomplete = True
+      if INCOMPLETE_CHECK_NOTICE not in self.notices:
+        self.notices.append(INCOMPLETE_CHECK_NOTICE)
     return not self.problems
 
   def form_data(self, stylesheet_name):
@@ -493,6 +500,8 @@ def _result_of_finished_run(document, host, values_before, data_before):
     document.is_changed = True
   result = {"values": changed_values, "changed": data_changed, "messages": host.messages, "notices": host.notices,
             "focus": host.focus_bind, "problems": host.problems}
+  if host.check_is_incomplete:
+    result["scripts"] = [zfo_doc.UNREADABLE_CONDITION]
   if host.addresses is not None:
     document.addresses_to_check = _addresses_to_ask(document, host.addresses)
     result["addresses"] = [address_text(address) for address in document.addresses_to_check]

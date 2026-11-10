@@ -462,7 +462,7 @@
     result.messages.map(({text, title}) => plainTextOf(title ? `${title}\n\n${text}` : text).trim()).filter(Boolean).forEach(message => alert(message));
     if (result.notices.length) setStatus(result.notices.join(' '));
     queue.then(() => {
-      if (result.problems?.length) showCheck(result.problems);
+      if (result.problems?.length) showCheck(result.problems, result.scripts ?? []);
       else if (result.problems) clearCheck({keepStatus: result.notices.length > 0});
       if (result.focus) focusField(result.focus, Boolean(result.sections));
       if (result.addresses?.length) checkAddresses(result.addresses);

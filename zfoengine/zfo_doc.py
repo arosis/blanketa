@@ -58,6 +58,9 @@ def _shown_cases(value, cases):
   return starting[:1] or names[:1]
 
 
+UNREADABLE_CONDITION = "podmínka formuláře, kterou nejde vyhodnotit"
+
+
 class ZFO_document:
   
   def __init__(self, parsed_content, prefix_map, file_name, comes_from_zip):
@@ -69,6 +72,7 @@ class ZFO_document:
     # zfoengine: scripts of this form, see script_interpreter()
     self.interpreter = None
     self.script_problems = set()
+    self.conditions_left_out = 0
     self.runaway_scripts = 0
     self.script_running = False
     self.addresses_to_check = []
@@ -1029,16 +1033,27 @@ class ZFO_document:
         value = node if isinstance(node, str) else (node.text or "")
         required = bind.get("required")
         if required is not None and not str(value).strip():
-          is_required = True if required == "" else \
-            ev.eval_expression_node(self, required, node, self._get_used_ns_prefix(required))
+          is_required = required == "" or self._evaluate_condition(
+            required, False, ev.eval_expression_node, self, required, node, self._get_used_ns_prefix(required))
           if is_required:
             problems.append({"field": bind_id, "index": index, "kind": "required", "message": ""})
             continue
         if bind.get("constraint"):
-          ok, comment = ev.eval_constraint(self, bind, None, node=node)
+          ok, comment = self._evaluate_condition(bind.get("constraint"), (True, ""), ev.eval_constraint, self, bind, None, node=node)
           if not ok:
             problems.append({"field": bind_id, "index": index, "kind": "constraint", "message": comment})
     return problems
+
+  def _evaluate_condition(self, condition, otherwise, evaluate, *args, **kwargs):
+    # Published forms carry conditions XPath cannot read (an unclosed bracket in MPSV forms): such a condition is left
+    # out and the check says it is not complete, instead of the whole check failing.
+    try:
+      return evaluate(*args, **kwargs)
+    except etree.XPathError as error:
+      log.info("Condition left out of the check: %s (%s)", condition, error)
+      self.conditions_left_out += 1
+      self.script_problems.add(UNREADABLE_CONDITION)
+      return otherwise
 
   def get_multiswitch_values(self):
     '''

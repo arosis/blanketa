@@ -29,6 +29,7 @@ import app
 import barcode
 import zfo_verify
 from zfoengine import api as engine
+from zfoengine import form_scripts
 
 ITF_BY_PATTERN = {pattern: digit for digit, pattern in barcode.ITF_DIGIT_PATTERNS.items()}
 
@@ -69,6 +70,48 @@ class SwitchedParts(unittest.TestCase):
 
     def test_all_shows_every_case(self):
         self.assertEqual(self.shown("all", ' starting-state="show"'), ["1", "2", "3"])
+
+
+FORM_WITH_CONDITIONS = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#" Id="_1"><dsig:Object Id="_2" MimeType="text/xml">
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:fm="http://software602.cz/forms" xmlns:d="http://software602.cz/sample">
+<fm:formparams><fm:model><fm:instance><d:root><d:krok>3</d:krok><d:priloha/><d:jmeno/><d:psc>abc</d:psc></d:root></fm:instance>
+<fm:bind Id="k" nodeset="/d:root"><fm:bind Id="krok" nodeset="d:krok"/>
+<fm:bind Id="priloha" nodeset="d:priloha" required="((/d:root/d:krok = '3' and /d:root/d:jmeno = '')"/>
+<fm:bind Id="jmeno" nodeset="d:jmeno" required="/d:root/d:krok = '3'"/>
+<fm:bind Id="psc" nodeset="d:psc" constraint="%s" constraintcomment="PSČ má pět číslic."/></fm:bind></fm:model></fm:formparams>
+<fo:inline form602ct="btn" form602bind="krok" form602btnclick="{ GetDocument().CheckData(); }"><![CDATA[Pokračovat]]></fo:inline>
+</fo:root></dsig:Object></dsig:Signature>"""
+
+
+class UnreadableConditions(unittest.TestCase):
+    """A condition of a published form that XPath cannot read is left out of the check, which goes on with the rest."""
+    def check(self, constraint):
+        doc = engine.open_document((FORM_WITH_CONDITIONS % constraint).encode())
+        answer = engine.handle(doc, "check_form", "")[0]
+        return [problem["field"] for problem in answer["data"]], answer["scripts"]
+
+    def test_the_other_fields_are_checked_and_the_check_says_it_is_not_complete(self):
+        self.assertEqual(self.check("string-length(.) = 5"), (["jmeno", "psc"], ["podmínka formuláře, kterou nejde vyhodnotit"]))
+
+    def test_an_unreadable_constraint_is_left_out_too(self):
+        self.assertEqual(self.check("string-length(. = 5"), (["jmeno"], ["podmínka formuláře, kterou nejde vyhodnotit"]))
+
+    def test_a_check_the_form_runs_itself_says_it_is_not_complete(self):
+        for constraint, fields in (("string-length(.) = 5", ["jmeno", "psc"]), ("true()", ["jmeno"])):
+            with self.subTest(constraint):
+                doc = engine.open_document((FORM_WITH_CONDITIONS % constraint).encode())
+                with self.assertLogs("zfo.zfo_doc", "INFO") as logs:
+                    result = form_scripts.run_button_script(doc, 0, "", [])
+                self.assertEqual([problem["field"] for problem in result["problems"]], fields)
+                self.assertEqual(result["scripts"], ["podmínka formuláře, kterou nejde vyhodnotit"])
+                self.assertEqual(result["notices"], [form_scripts.INCOMPLETE_CHECK_NOTICE])
+                self.assertIn("((/d:root/d:krok = '3'", logs.output[0])
+
+    def test_a_check_with_readable_conditions_says_nothing_more(self):
+        form = (FORM_WITH_CONDITIONS % "true()").replace("required=\"((", "required=\"(")
+        result = form_scripts.run_button_script(engine.open_document(form.encode()), 0, "", [])
+        self.assertNotIn("scripts", result)
+        self.assertEqual(result["notices"], [])
 
 
 class Barcodes(unittest.TestCase):
