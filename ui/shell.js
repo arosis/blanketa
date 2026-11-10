@@ -580,7 +580,7 @@
   const UNLABELLED_FIELD = 'Pole bez popisku';
   const LABELLED_ON_THE_RIGHT = new Set(['checkbox', 'radio']);
   const nearestText = (cell, step) => {
-    for (let other = cell?.[step]; other; other = other[step]) {
+    for (let other = cell?.[step]; other && !other.querySelector('input, select, textarea'); other = other[step]) {
       if (other.textContent.trim()) return other.textContent;
     }
     return '';
@@ -590,12 +590,13 @@
     const above = cell?.parentElement.previousElementSibling?.cells[[...cell.parentElement.cells].indexOf(cell)];
     const labels = [nearestText(cell, 'previousElementSibling'), above?.textContent ?? ''];
     if (LABELLED_ON_THE_RIGHT.has(field.type)) labels.unshift(nearestText(cell, 'nextElementSibling'));
-    return labels.find(text => text.trim()) ?? UNLABELLED_FIELD;
+    return labels.find(text => text.trim()) ?? '';
   };
   const shortOneLine = text => {
     const line = text.replace(/\s+/g, ' ').trim();
     return line.length > 90 ? `${line.slice(0, 89)}…` : line;
   };
+  const fieldHeading = field => shortOneLine(labelFor(field)) || UNLABELLED_FIELD;
   let checkWaiter = null;
   function clearCheckMarks() {
     page.querySelectorAll('.zfo-invalid').forEach(field => field.classList.remove('zfo-invalid'));
@@ -627,8 +628,8 @@
     for (const problem of found) {
       const item = document.createElement('button');
       item.className = 'zfo-check-item';
-      const label = problem.fieldElement ? labelFor(problem.fieldElement) : 'Kontrola formuláře';
-      item.innerHTML = `${escapeHtml(shortOneLine(label))}<small>${problem.kind === 'required' ? 'Povinná položka není vyplněna'
+      const label = problem.fieldElement ? fieldHeading(problem.fieldElement) : 'Kontrola formuláře';
+      item.innerHTML = `${escapeHtml(label)}<small>${problem.kind === 'required' ? 'Povinná položka není vyplněna'
         : escapeHtml(problem.message || 'Hodnota nesplňuje podmínku formuláře')}</small>`;
       if (problem.element) item.addEventListener('click', () => { problem.element.scrollIntoView({block: 'center'}); problem.element.focus(); });
       list.append(item);
@@ -653,7 +654,7 @@
     const field = event.target.closest('input, select, textarea');
     if (!field) return;
     const text = field.title.trim();
-    helpText.innerHTML = `<b>${escapeHtml(shortOneLine(labelFor(field)))}</b>`
+    helpText.innerHTML = `<b>${escapeHtml(fieldHeading(field))}</b>`
       + (text ? escapeHtml(text) : '<span class="zfo-muted">Pole nemá nápovědu.</span>');
   });
 
@@ -833,7 +834,8 @@
       element.value = value;
       $(element).trigger('change');
     }
-    setStatus(`Obnovena výchozí hodnota pole ${shortOneLine(labelFor(element))}`);
+    const label = shortOneLine(labelFor(element));
+    setStatus(label ? `Obnovena výchozí hodnota pole ${label}` : 'Obnovena výchozí hodnota pole');
   }
 
   const findBar = queryOne('.zfo-find');
