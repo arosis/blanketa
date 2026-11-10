@@ -94,6 +94,57 @@ class SwitchedPartsOnThePage(unittest.TestCase):
 
 
 @needs_node
+class FieldLabelsOnThePage(unittest.TestCase):
+    """Runs the field labels of ui/shell.js that head the help and the check: the text the user sees at the field."""
+    SCRIPT = """
+    const FIELD = null;
+    const row = (...texts) => {
+      const element = {cells: []};
+      element.cells = texts.map(text => ({textContent: text ?? '', querySelector: () => text === FIELD ? {} : null, parentElement: element}));
+      element.cells.forEach((cell, index) => {
+        cell.previousElementSibling = element.cells[index - 1] ?? null;
+        cell.nextElementSibling = element.cells[index + 1] ?? null;
+      });
+      return element;
+    };
+    const table = rows => { rows.forEach((element, index) => { element.previousElementSibling = rows[index - 1] ?? null; }); return rows; };
+    const field = (type, cell) => ({type, name: 'Data.Zadatel.ZadostPodava.ZadostPodava', closest: () => cell});
+    %s
+    const [heading, boxes] = table([row('Žádost podává', '', ''), row('', '', 'zástupce žadatele')]);
+    const [left] = table([row('Požaduji', '', 'nepožaduji uvést symbol')]);
+    const [units] = table([row('Částka', '', 'Kč')]);
+    const [titled, bare] = table([row('', 'Datum narození'), row('', '')]);
+    const [alone] = table([row('', '')]);
+    const [pair] = table([row(FIELD, '', FIELD, 'ne')]);
+    console.log(JSON.stringify([
+      fieldHeading(field('checkbox', boxes.cells[1])), fieldHeading(field('checkbox', left.cells[1])),
+      fieldHeading(field('radio', left.cells[1])), fieldHeading(field('text', units.cells[1])), fieldHeading(field('text', bare.cells[1])),
+      fieldHeading(field('checkbox', alone.cells[1])), fieldHeading(field('text', null)), labelFor(field('text', null)),
+      fieldHeading(field('checkbox', pair.cells[0])), shortOneLine('a'.repeat(100)).length, shortOneLine('  krátký\\n popisek '),
+    ]));
+    """
+
+    def labels(self):
+        code = re.search(r"  const UNLABELLED_FIELD = .*?\n  const fieldHeading = .*?;\n", ui_source("shell.js"), re.S).group(0)
+        return json.loads(run_in_node(self.SCRIPT % code))
+
+    def test_a_check_box_is_labelled_by_the_text_to_its_right(self):
+        self.assertEqual(self.labels()[:3], ["zástupce žadatele", "nepožaduji uvést symbol", "nepožaduji uvést symbol"])
+
+    def test_other_fields_are_labelled_from_the_left_then_from_above(self):
+        self.assertEqual(self.labels()[3:5], ["Částka", "Datum narození"])
+
+    def test_a_field_without_any_label_never_shows_its_internal_name(self):
+        self.assertEqual(self.labels()[5:8], ["Pole bez popisku", "Pole bez popisku", ""])
+
+    def test_the_label_of_another_field_is_not_taken(self):
+        self.assertEqual(self.labels()[8], "Pole bez popisku")
+
+    def test_a_long_label_is_shortened_with_an_ellipsis(self):
+        self.assertEqual(self.labels()[9:], [90, "krátký popisek"])
+
+
+@needs_node
 class CheckBoxGroupsOnThePage(unittest.TestCase):
     """Runs the check boxes of ui/shell.html: boxes of one bind with their own values make one choice in each copy."""
     SCRIPT = """
