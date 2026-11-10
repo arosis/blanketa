@@ -21,6 +21,9 @@ import app
 import isds_message
 import zfo_verify
 
+# An attribute 1.2.3.4 whose value is an ObjectDescriptor "TEST": asn1crypto has no Python value for that type.
+ATTRIBUTE_WITH_OBJECT_DESCRIPTOR = bytes.fromhex("300d 0603 2a0304 3106 0704 54455354")
+
 
 class IsdsMessages(unittest.TestCase):
     def test_received_message_fields(self):
@@ -156,6 +159,13 @@ class IsdsMessages(unittest.TestCase):
         seal = isds_message.describe_seal(isds_message.read_message(info.dump(force=True)))
         self.assertTrue(seal["intact"])
         self.assertFalse(seal["stamps"][0]["intact"])
+
+    def test_an_unsigned_attribute_without_a_python_value_leaves_the_stamp_readable(self):
+        info = cms.ContentInfo.load(isds_sample("prijata"))
+        info["content"]["signer_infos"][0]["unsigned_attrs"].append(cms.CMSAttribute.load(ATTRIBUTE_WITH_OBJECT_DESCRIPTOR))
+        seal = isds_message.describe_seal(isds_message.read_message(info.dump()))
+        self.assertTrue(seal["intact"])
+        self.assertEqual([(stamp["intact"], stamp["at"]) for stamp in seal["stamps"]], [(True, "2026-03-02T09:30:00+00:00")])
 
     def test_unusual_status_is_left_out(self):
         for status in ("²", "٣", "x"):
