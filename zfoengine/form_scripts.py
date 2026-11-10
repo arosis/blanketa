@@ -429,13 +429,6 @@ def _page_values(document):
   return values
 
 
-def _value_for_page(document, bind_id, value):
-  on_value = document._get_checkbox_on_value(bind_id)
-  if on_value is None:
-    return value
-  return "on" if value == on_value else "off"
-
-
 def _section_tree(document, sections):
   tree = {}
   for name, copies in sections.items():
@@ -493,7 +486,7 @@ def _result_of_finished_run(document, host, values_before, data_before):
   if host.has_section_changes:
     document.recalc_form()
   values_after = _page_values(document)
-  changed_values = {bind_id: _value_for_page(document, bind_id, value) for bind_id, value in values_after.items()
+  changed_values = {bind_id: value for bind_id, value in values_after.items()
                     if values_before.get(bind_id) != value}
   data_changed = serialized_data(document) != data_before
   if data_changed:

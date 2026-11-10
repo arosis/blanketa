@@ -383,11 +383,20 @@ class ControlsWithoutOwnName(unittest.TestCase):
         self.assertEqual([(box.get("id"), box.get("name")) for box in boxes], [("chb", "chb"), ("old", "old")])
         self.assertEqual([(radio.get("id"), radio.get("name")) for radio in self.inputs("radio")[:2]], [("rad-a", "rad"), ("rad-b", "rad")])
 
+    def test_a_check_box_carries_the_values_it_writes(self):
+        self.assertEqual([(box.get("value"), box.get("data-off")) for box in self.inputs("checkbox")], [("1", "0"), ("1", "0")])
+
+    def test_the_value_of_a_check_box_is_stored_as_the_page_sends_it(self):
+        doc = engine.open_document(self.FORM.encode())
+        for value in ("0", "", "1"):
+            engine.handle(doc, "store_val", {"field": "chb", "value": value, "repe": "", "input_id": "chb"})
+            self.assertEqual(doc.get_value("chb"), value)
+
     def test_page_gets_values_of_controls_named_by_bind(self):
         doc = engine.open_document(self.FORM.encode())
         answer = engine.handle(doc, "get_init_values", {"chb": {"type": "check", "bind": "chb"}, "rad": {"type": "radio", "bind": "rad"}})
         values = json.loads(answer[0]["data"][len("set_inputs_init_values_callback("):-1])
-        self.assertEqual((values["chb"]["value"], values["rad"]["value"]), ("on", "b"))
+        self.assertEqual((values["chb"]["value"], values["rad"]["value"]), ("1", "b"))
 
     def test_control_without_any_name_does_not_reach_the_page(self):
         # The page builds the selector "#" from an empty key, and that stops it before it reaches the other fields.
@@ -441,4 +450,4 @@ class DataChangesOutsideFields(unittest.TestCase):
 
     def test_script_value_in_a_further_copy_reaches_that_copy_on_the_page(self):
         engine.handle(self.doc, "run_form_script", {"button": 0, "repe": self.SECOND_COPY})
-        self.assertEqual(self.sections_on_page(), [{"b": "", "c": "off"}, {"b": "druha", "c": "on"}])
+        self.assertEqual(self.sections_on_page(), [{"b": "", "c": "ne"}, {"b": "druha", "c": "ano"}])
