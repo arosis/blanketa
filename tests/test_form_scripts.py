@@ -483,9 +483,9 @@ GROUP_OF_ITEMS = '<d:b/><d:skupina><d:polozka kod=""><d:hodnota/><d:popis>vydan�
 class PartsAScriptMakes(unittest.TestCase):
     """Smazat údaje and Odeslat of MPSV forms load a group the script itself wrote, with as many items as it needs."""
 
-    def data_after(self, *contents, path="/d:root/d:skupina"):
+    def data_after(self, *contents, path="/d:root/d:skupina", published=GROUP_OF_ITEMS):
         loads = "".join("var v = new Variant(); v.data = '%s'; GetDocument().LoadFormDataPart(v, '%s');" % (content, path) for content in contents)
-        doc = engine.open_document(form_with_stylesheets(loads, ()).replace(b"<d:b/>", GROUP_OF_ITEMS))
+        doc = engine.open_document(form_with_stylesheets(loads, ()).replace(b"<d:b/>", published))
         result = form_scripts.run_button_script(doc, 0, "", [])
         group = doc._get_data_root().getroot().find("d:skupina", NS)
         return result, [(item.get("kod"), item.findtext("d:hodnota", None, NS), item.findtext("d:popis", None, NS)) for item in group]
@@ -498,6 +498,19 @@ class PartsAScriptMakes(unittest.TestCase):
     def test_a_later_load_starts_from_the_published_part_again(self):
         result, items = self.data_after("<skupina><polozka/><polozka/><polozka/></skupina>", "<skupina><polozka><hodnota>jediná</hodnota></polozka></skupina>")
         self.assertEqual(items, [("", "jediná", "vydaný")])
+
+    def test_a_group_has_as_many_items_as_the_script_wrote(self):
+        published_twice = GROUP_OF_ITEMS.replace(b"</d:polozka>", '</d:polozka><d:polozka kod=""><d:hodnota/><d:popis>druhý</d:popis></d:polozka>'.encode())
+        result, items = self.data_after("<skupina><polozka><hodnota>jediná</hodnota></polozka></skupina>", published=published_twice)
+        self.assertEqual(items, [("", "jediná", "vydaný")])
+        result, items = self.data_after("<skupina/>", published=published_twice)
+        self.assertEqual([description for _, _, description in items], ["vydaný", "druhý"])
+
+    def test_an_empty_element_clears_what_the_form_published_and_a_missing_one_keeps_it(self):
+        result, items = self.data_after("<skupina><polozka><popis/></polozka></skupina>")
+        self.assertEqual(items, [("", "", "")])
+        result, items = self.data_after("<skupina><polozka><hodnota>h</hodnota></polozka></skupina>")
+        self.assertEqual(items, [("", "h", "vydaný")])
 
     def test_nothing_the_form_does_not_have_gets_into_the_data(self):
         result, items = self.data_after('<skupina cizi="x"><polozka cizi="x"><hodnota>h</hodnota><cizi>x</cizi></polozka><cizi><polozka/></cizi></skupina>')

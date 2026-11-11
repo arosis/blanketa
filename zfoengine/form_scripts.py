@@ -319,9 +319,9 @@ class FormActionHost:
       raise js602.Unsupported("document.LoadFormDataPart")
     return found[0]
 
-  def _replace_with_published(self, tree, path, published):
+  def _replace_part(self, tree, path, part):
     current = self._only_data_element(tree, path)
-    current.getparent().replace(current, copy.deepcopy(published))
+    current.getparent().replace(current, copy.deepcopy(part))
 
   def load_data_part(self, content, path):
     # Forms clear a part of their data by loading it empty, set the number of its items by loading as many empty ones,
@@ -339,7 +339,7 @@ class FormActionHost:
     self._charge_section_change()
     filled = copy.deepcopy(published)
     self._fill_published_with(filled, loaded)
-    self._replace_with_published(document._get_data_root(), path, filled)
+    self._replace_part(document._get_data_root(), path, filled)
     try:
       document.computing_data_tree = document._create_computing_data_tree(document._get_data_root())
     except IndexError as error:  # a numeric field of the form has no place in the loaded data
@@ -371,6 +371,9 @@ class FormActionHost:
         copies[-1].addnext(copy.deepcopy(first_of_each_name[tag]))
         copies = published.findall(tag)
       self._fill_published_with(copies[position], child)
+    for tag, written in filled_copies.items():
+      for published_beyond_the_written in published.findall(tag)[written:]:
+        published.remove(published_beyond_the_written)
 
   def uploaded_file_data(self):
     if self.uploaded_file is None:
