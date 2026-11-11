@@ -50,7 +50,9 @@ WHISPERER_FIELD_TYPE = "acm"
 WHISPERER_LIST_ATTRIBUTE = "blanketa-list"
 DATA_ROOT_PATH = "/*"
 SCRIPT_DATA_PARSER = etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False)
-SAVED_DATA_NAME = re.compile(r"[^\\/:*?\"<>|\x00-\x1f.][^\\/:*?\"<>|\x00-\x1f]{0,200}\.xml", re.I)
+PLAIN_FILE_NAME = r"[^\\/:*?\"<>|\x00-\x1f.][^\\/:*?\"<>|\x00-\x1f]{0,200}"
+SAVED_DATA_NAME = re.compile(PLAIN_FILE_NAME + r"\.xml", re.I)
+PRINTED_FORM_NAME = re.compile(PLAIN_FILE_NAME + r"\.pdf", re.I)
 XML_LANG_ATTRIBUTE = "{http://www.w3.org/XML/1998/namespace}lang"
 FO_NAMESPACES = {"fo": ns.FO_URI, "fm": ns.FM_URI}
 TRAILING_POSITION = re.compile(r"^(.*)\[(\d+)\]$", re.S)
@@ -60,6 +62,7 @@ ARES_REGISTERS = {register: f"https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/
 ARES_SUBJECT_URL = re.compile(r"https://ares\.gov\.cz/ekonomicke-subjekty-v-be/rest/(ekonomicke-subjekty(?:-res)?)/([0-9]{8})")
 CLOSED_ARES_URL = re.compile(r"https?://wwwinfo\.mfcr\.cz/cgi-bin/ares/.*", re.S)
 INCOMPLETE_CHECK_NOTICE = "Některou podmínku formuláře Blanketa neumí vyhodnotit, kontrola formuláře proto není úplná."
+PDF_FROM_PRINT_NOTICE = "Formulář chtěl uložit PDF. V\u00a0dialogu tisku zvolte uložení do PDF."
 CLOSED_ARES_NOTICE = "Formulář se ptá staré služby ARES, která už nefunguje. Údaje firmy vyplňte ručně."
 HTTP_OK = 200
 HTTP_NOT_FOUND = 404
@@ -178,6 +181,7 @@ class FormActionHost:
     self.addresses = None
     self.file_to_save = None
     self.closes_window = False
+    self.prints_form = False
     self.offers_navigation = False
 
   def _current_path(self):
@@ -432,6 +436,16 @@ class FormActionHost:
     self._charge_write(content)
     self.file_to_save = {"name": name, "content": content}
 
+  def print_form(self):
+    self.prints_form = True
+
+  def save_printed_form(self, name):
+    if not PRINTED_FORM_NAME.fullmatch(name):
+      raise js602.Unsupported("SaveData")
+    self.prints_form = True
+    if PDF_FROM_PRINT_NOTICE not in self.notices:
+      self.notices.append(PDF_FROM_PRINT_NOTICE)
+
   def close_window(self):
     self.closes_window = True
 
@@ -536,6 +550,8 @@ def _result_of_finished_run(document, host, values_before, data_before):
     result["scripts"] = [zfo_doc.UNREADABLE_CONDITION]
   if host.file_to_save is not None:
     result["save"] = host.file_to_save
+  if host.prints_form:
+    result["print"] = True
   if host.closes_window:
     result["close"] = True
   if host.offers_navigation:

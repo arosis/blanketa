@@ -22,6 +22,7 @@ class SignatureReplacementNotice(unittest.TestCase):
     const showCheck = (problems, scripts = []) => calls.push(scripts.length ? 'showCheck saying it is not complete' : 'showCheck');
     const clearCheck = ({keepStatus}) => calls.push(keepStatus ? 'clearCheck keeping the status' : 'clearCheck');
     const plainTextOf = text => text;
+    const print = () => calls.push('print');
     %s
     eval(process.argv[1]);
     queue.then(() => console.log(JSON.stringify({notices, calls})));
@@ -62,6 +63,11 @@ class SignatureReplacementNotice(unittest.TestCase):
         fault = [{"field": "a", "index": 0, "kind": "form", "message": "F001"}]
         self.assertIn("showCheck", calls({"problems": fault}))
         self.assertIn("showCheck saying it is not complete", calls({"problems": fault, "scripts": ["podmínka"]}))
+
+    def test_a_form_that_shows_itself_as_pdf_prints_the_page(self):
+        calls = lambda answer: self.page_after(f"form_script_callback({json.dumps({**self.ANSWER, **answer})})")["calls"]
+        self.assertIn("print", calls({"print": True}))
+        self.assertNotIn("print", calls({}))
 
     def test_script_answer_refreshes_every_copy_of_the_sections(self):
         # result.values names a field only by its bind; the values of the second and further copies come with the refresh.
