@@ -439,7 +439,12 @@ class FormActionHost:
     return answer["body"]
 
   def document_on_the_web(self, method, url):
-    return published_document(url) if method == js602.SM_GET else None
+    address = published_document(url) if method == js602.SM_GET else None
+    if address is not None:
+      self.lookups_asked += 1
+      if self.lookups_asked > MAX_LOOKUPS_PER_RUN:
+        raise js602.Unsupported("SendData")
+    return address
 
   def show_document_on_the_web(self, url):
     if not self.is_started_by_button:

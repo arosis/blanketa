@@ -410,6 +410,12 @@ class DocumentsOnTheWeb(unittest.TestCase):
                 self.assertEqual(self.click(url)["refused"], "SendData")
         self.assertEqual(self.click(method="SM_POST")["refused"], "SendData")
 
+    def test_a_script_asks_for_no_more_documents_than_for_register_lookups(self):
+        ask = "var p = new SendParam(); p.url = 'documents/1/2/n.pdf'; p.method = SM_GET; for (var i = 0; i < %d; i++) GetDocument().SendData(new Variant(), p);"
+        click = lambda times: form_scripts.run_button_script(engine.open_document(form_with_stylesheets(ask % times, ())), 0, "", [])
+        self.assertNotIn("refused", click(form_scripts.MAX_LOOKUPS_PER_RUN))
+        self.assertEqual(click(form_scripts.MAX_LOOKUPS_PER_RUN + 1)["refused"], "SendData")
+
     def test_the_document_is_only_shown(self):
         for then, stop in (("doc.GetElement().SetDataTo('a', response.data.data);", "dokument z webu.data"),
                            ("doc.OpenAux(response.data);", "document.OpenAux"),

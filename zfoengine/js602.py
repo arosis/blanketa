@@ -83,8 +83,7 @@ class NativeFunction:
 
 
 class HostObject(ScriptObject):
-  # An object of the 602 application: asking it for anything else than what is offered stops the script, and so does
-  # replacing one of its functions or adding to it. A value it offers can be set.
+  # An object of the 602 application: asking it for anything else than what is offered stops the script.
   __slots__ = ("name",)
   def __init__(self, name, props):
     super().__init__(props)
@@ -97,6 +96,10 @@ class _FormCopy(ScriptObject):
 
 class _PrintedForm(ScriptObject):
   __slots__ = ()
+
+
+def _offers_value_to_set(host_object, name):
+  return name in host_object.props and not isinstance(host_object.props[name], NativeFunction)
 
 
 class Date:
@@ -1028,7 +1031,7 @@ class Interpreter:
       target.last_index = to_number(value)
     elif kind is HostObject:
       name = to_string(key)
-      if name not in target.props or isinstance(target.props[name], NativeFunction):
+      if not _offers_value_to_set(target, name):
         raise Unsupported(f"{target.name}.{name}")
       target.props[name] = value
     elif kind in (ScriptObject, Function, NativeFunction, Date, Regex):

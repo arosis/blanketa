@@ -74,6 +74,21 @@ class SignatureReplacementNotice(unittest.TestCase):
         calls = lambda answer: self.page_after(f"form_script_callback({json.dumps({**self.ANSWER, **answer})})")["calls"]
         self.assertIn("offerDocument https://mpsv.gov.cz/n.pdf", calls({"open": {"url": "https://mpsv.gov.cz/n.pdf", "question": "Otevřít?"}}))
 
+    def test_the_offered_document_opens_only_when_the_user_agrees(self):
+        offer = re.search(r"const offerDocument = .*?\n  \};", ui_source("shell.js"), re.S).group(0)
+        script = """const window = globalThis, seen = [];
+        const setStatus = text => seen.push(`status ${text}`);
+        window.zfoOpenUrl = url => seen.push(`open ${url}`);
+        %s
+        for (const answer of [true, false]) {
+          globalThis.confirm = question => { seen.push(`confirm ${question}`); return answer; };
+          offerDocument({url: 'https://mpsv.gov.cz/n.pdf', question: 'Otevřít?'});
+        }
+        console.log(JSON.stringify(seen));""" % offer
+        self.assertEqual(json.loads(run_in_node(script, "")), [
+            "confirm Otevřít?", "open https://mpsv.gov.cz/n.pdf",
+            "confirm Otevřít?", "status Dokument se neotevřel, otevření jste nepotvrdili."])
+
     def test_script_answer_refreshes_every_copy_of_the_sections(self):
         # result.values names a field only by its bind; the values of the second and further copies come with the refresh.
         self.assertIn("calc_repeatable_sections", self.page_after(f"form_script_callback({json.dumps(self.ANSWER)})")["calls"])
