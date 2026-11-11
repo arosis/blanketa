@@ -226,7 +226,8 @@ Na čem se zastavují tlačítka stažených veřejných formulářů (první za
 | `Base64ToVariant` | 192 | uložit odeslanou žádost a data z portálu | že to Blanketa neumí |
 | `SendData` na jinou adresu | 186 | stáhnout tiskopis nebo potvrzení ze serveru úřadu | že spojení se serverem úřadu Blanketa formulářům nedovolí a jak formulář podat |
 | `CleanForm` | 90 | vytisknout prázdný formulář | že z tlačítka se tiskne jen vyplněný formulář |
-| `GetUploadedFileData` bez souboru XML, `SetBinData` | 80 | přidat nebo odebrat přílohu | že přílohy ve formuláři Blanketa zatím neumí |
+| `GetUploadedFileData`, `SetBinData` | 48 | přidat nebo odebrat přílohu | u odebrání, že přílohy ve formuláři Blanketa zatím neumí; tlačítko pro přidání stránka nenabízí |
+| `GetUploadedFileData` u „Nahrát uložená data (XML)“ | 32 | nahrát soubor s daty | nic: v aplikaci tlačítko funguje, jen zkouška neumí vybrat soubor |
 | `SetData` | 39 | odebrat přílohu nebo smazat údaje zápisem, který Blanketa neprovede | název funkce |
 | `SetSubformResult`, `OpenSubform` | 35 | otevřít nebo zavřít podformulář | že podformuláře Blanketa neumí |
 | `ChooseCertEx` | 26 | podepsat data z formuláře | že formulář se v Blanketě podepisuje tlačítkem Podepsat a uložit |
