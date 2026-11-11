@@ -77,7 +77,7 @@ Podpisová knihovna Form Filleru umí XAdES ve verzích 1.1.1 (`http://uri.etsi.
 - **Výpočty:** `calculate` a `constraint` jsou XPath, nebo blok JavaScriptu 602 ve složených závorkách, který předá výsledek funkcí `Result`. Bloky provádí `zfoengine/js602.py`, funkce sdílené formulářem jsou ve `form:script`. Oficiální popis tohoto jazyka se nepodařilo najít. Form Filler ho provádí enginem V8, jde tedy o běžný JavaScript s funkcemi aplikace (oddíl 9). `Result` přijme právě jeden argument typu řetězec, jinak skript skončí výjimkou. Když ho skript zavolá víckrát, platí poslední hodnota, a skript po něm běží dál. Před každým výpočtem se výsledek vynuluje. Blanketa se chová stejně: jiný počet nebo typ argumentů vyhodí `TypeError`, který skript může zachytit. Když ho nezachytí, výpočet nic nezapíše a Blanketa ohlásí chybu skriptu. Veřejné formuláře proto čísla převádějí samy (`hodnota + ""`): v 159 stažených formulářích dostalo všech 18 836 volání `Result` při otevření a přepočtu právě jeden text. Funkce z `form:script` běží ve stejném globálním kontextu jako výpočty, takže vlastní funkce formuláře `RegExp` ve Form Filleru vestavěný konstruktor nejspíš přepíše. Blanketa v takovém případě pro `new RegExp` dál používá vestavěný konstruktor, protože ho formuláře jedné rodiny používají vedle vlastní funkce. Jak to dopadne ve Form Filleru, ověřené není.
 - **Zaškrtávátka:** `fo:character` s `form602ct="chb"` zapíše do pole `form602on`, když je zaškrtnuté, a `form602off`, když není. Bez `form602off` zapíše prázdnou hodnotu: skripty formulářů MPSV se na odškrtnutí ptají podmínkou `DataXpath(".") != ""`. Na jedno pole bývá navázáno víc zaškrtávátek, každé s jiným `form602on` a bez `form602off` (např. „Žádost podává“ ve formuláři MPSV 12). Taková skupina je výběr jedné možnosti: zaškrtnuté je jen zaškrtávátko, jehož hodnota je v poli, a odškrtnutí pole vyprázdní. Má je 115 ze 159 stažených veřejných formulářů. Jak Form Filler zapisuje odškrtnutí bez `form602off`, je odvozené ze skriptů formulářů, spuštěním ověřené není.
 - **Skripty tlačítek a změn polí:** `form602btnclick` a `form602onchange` jsou bloky JavaScriptu 602, které běží v `zfoengine/form_scripts.py` jako celek: když se skript zastaví, data se vrátí. Kroky průvodce jsou `multi-switch` řízený hodnotou v datech. Opakovanou sekci některé formuláře značí jen `form602ct="rep"` a `form602bind` bez `form602repe`. Form Filler při otevření doplní jazyk do `/d:root/@xml:lang` a formuláře podle něj vybírají texty dialogů.
-- **Funkce skriptů tlačítek:** ze 159 stažených veřejných formulářů jich 155 má tlačítka se skriptem, dohromady 6 865, a 5 749 z nich Blanketa provede celé. Ostatní se zastaví na funkcích, které Blanketa nezná nebo neprovede (stav k listopadu 2026): PDF formuláře jako příloha k odeslání a k potvrzení e-mailem (432, `VariantToBase64`), odeslaná žádost a data z portálu (192, `Base64ToVariant`), `SendData` na adresy úřadů (186, tiskopisy a potvrzení stahované ze serveru), tisk prázdného formuláře (90), přílohy (`GetUploadedFileData` 56 včetně nahrání dat, které zkouška neumí, `SetData` 39, `SetBinData` 24), podformuláře (`SetSubformResult`, `OpenSubform`) a podpis (`ChooseCertEx`). Blanketa zná:
+- **Funkce skriptů tlačítek:** ze 159 stažených veřejných formulářů jich 155 má tlačítka se skriptem, dohromady 6 865, a 5 749 z nich Blanketa provede celé. Ostatní se zastaví na funkcích, které Blanketa nezná nebo neprovede (stav k listopadu 2026): PDF formuláře jako příloha k odeslání a k potvrzení e-mailem (432, `VariantToBase64`), odeslaná žádost a data z portálu (192, `Base64ToVariant`), `SendData` na adresy úřadů (186, tiskopisy a potvrzení stahované ze serveru), tisk prázdného formuláře (90), přílohy (`GetUploadedFileData` 56 včetně nahrání dat, které zkouška neumí, `SetData` 39, `SetBinData` 24), podformuláře (`SetSubformResult`, `OpenSubform`) a podpis (`ChooseCertEx`). Úplný seznam nabízených funkcí a přehled zastavení je v oddílu 10. Blanketa zná:
   - `NavigationDlg` ukáže seznam částí formuláře, které jsou právě vidět, a přejde na vybranou. Části jsou bloky s atributem `form602anchor` (ve formuláři MPSV 12 „A. Žadatel“ až „Elektronické přílohy“). Že dialog Form Filleru nabízí právě je, je odvozené z formulářů, spuštěním ověřené není.
   - `SaveData(data, název)` uloží text z `GetFormData` přes dialog pro uložení, s názvem, který dal formulář (formuláře MPSV `typ-formuláře.xml`), ve složce formuláře. Přijme jen prostý název souboru s příponou `.xml` a jeden soubor na jedno stisknutí, jinak skript zastaví. Soubor se uloží, až skript doběhne.
   - Tisk vyplněného formuláře („Vytisknout / Uložit (PDF)“, „Stáhnout vyplněnou žádost (PDF)“ ve formulářích MPSV): skript si vezme formulář sám (`GetFormData` s `requiredFormat = VarFFo`; formuláře přidávají příznak `GFD_ORIGINAL`, Blanketa ho nevyžaduje), otevře ho jako pomocný dokument (`OpenAux`), nahraje do něj data (`LoadFormData`), nechá si z něj vyrobit PDF (`GetFormData` s `VarFPdf`) a to ukáže (`ShowData`) nebo uloží (`SaveData` s názvem `.pdf`). Blanketa pomocný dokument nevytváří ani PDF sama nevyrábí: tuto posloupnost pozná a spustí vlastní tisk otevřeného formuláře, kde uživatel zvolí tiskárnu nebo uložení do PDF. Výstup je tedy formulář, jak ho Blanketa ukazuje, ne tisková sestava Form Filleru. Formuláře s více tiskovými stránkami ukazují ve Form Filleru PDF po jedné a před každou další se ptají; Blanketa tiskne jednou, a na otázky položené po vyžádání tisku proto sama odpoví Ne. Tisk si může vyžádat jen skript tlačítka, skript změny pole se na něm zastaví. Cokoli jiného skript zastaví: prázdný formulář (`CleanForm`), pomocný dokument z jiných dat (například stažených přes `SendData`), PDF jako příloha (`VariantToBase64`).
@@ -178,6 +178,62 @@ Funkce kontrolují počet a typ argumentů a při chybě vyhodí `SyntaxError`
 - bez položek `item` vrátí `true`.
 
 **Vzhled.** Jádro zná pevný seznam vlastností XSL-FO (včetně `border-*-radius`, `keep-*`, `break-*`, `page-break-*` a vlastností vodítek `leader-*`) a 75 atributů `form602*`/`lk602*`, mimo jiné `form602minval`, `form602maxval`, `form602maxchars`, `form602datestyle`, `form602default`, `form602tooltip` a `form602btnlook`. Výchozí písmo Tahoma používá okno aplikace; jádro samo zná Arial, Times New Roman a Lucida Sans Unicode. Další pravidla z oddílu 5 (šířka tabulek, barva okrajů, padding) jsou v kreslicím kódu a statickým rozborem ověřená nejsou.
+
+## 10. Funkce skriptů tlačítek a jejich stav
+
+Skripty tlačítek a změn polí dostanou vedle běžného JavaScriptu jen funkce z této tabulky. Volání čehokoli jiného skript zastaví, data se vrátí do stavu před stisknutím a uživatel se dozví, co se nestalo. Stav k listopadu 2026; podrobnosti k jednotlivým funkcím jsou v oddílu 4.
+
+| Objekt | Funkce | Co dělá v Blanketě |
+|---|---|---|
+| globální | `GetDocument()` | objekt dokumentu |
+| globální | `MessageBox(text, titulek, příznaky)` | zpráva, nebo otázka Ano/Ne (`MB_YESNO`) |
+| globální | `EvalXPath(data, výraz)` | hodnota z XML v proměnné |
+| globální | `RCCheck(text)` | kontrola rodného čísla |
+| globální | `GetNamedParam(název)`, `SetNamedParam(název, hodnota)` | pojmenované parametry formuláře |
+| globální | `GetCustomItem(název)` | vždy prázdný text; hodnoty dodává portál úřadu |
+| globální | `DbgLog(…)` | nic |
+| globální | `new Variant()`, `new DataParam()`, `new SendParam()` | objekty pro předávání dat a parametrů |
+| globální | konstanty `MB_*`, `ID*`, `PI_*`, `Var*`, `GFD_*`, `SM_*`, `SR_*`, `SHTTP_*`, `CLOSE_*` | hodnoty podle Form Filleru |
+| dokument | `GetElement()` | prvek, ze kterého skript běží |
+| dokument | `CheckData()` | kontrola formuláře, výsledek v panelu kontroly |
+| dokument | `XSLCheck(šablona, režim)` | kontrola šablonou formuláře |
+| dokument | `GetFormData(parametry)` | data formuláře, jejich část, výstup šablony, nebo formulář sám pro tisk |
+| dokument | `TransformData(data, šablona)` | převod XML šablonou formuláře |
+| dokument | `LoadFormDataPart(data, cesta)` | nahradí část dat, sloučeně s tím, jak ji formulář vydal |
+| dokument | `SaveData(data, název)` | XML uloží přes dialog; PDF formuláře spustí tisk |
+| dokument | `SendData(data, parametry)` | jen dotaz do ARES podle IČO a nápověda MPSV, obojí po souhlasu uživatele |
+| dokument | `OpenAux(data)` | jen kopie formuláře pro tisk |
+| dokument | `ShowData(data)` | tisk otevřeného formuláře, nebo nabídka dokumentu z webu |
+| dokument | `NavigationDlg()` | dialog „Přejít na“ s částmi formuláře |
+| dokument | `CloseApp()` | zavře okno formuláře |
+| dokument | `SetProgressInfo(…)` | nic |
+| prvek | `DataXpath(výraz)` | hodnota z dat formuláře; prázdný výraz dá prázdný text |
+| prvek | `GetCurrentDataXPath()` | cesta k datům prvku |
+| prvek | `GetListItemData(…)` | položka číselníku formuláře |
+| prvek | `GetAttribute(název, cesta)` | atribut prvku formuláře |
+| prvek | `SetData(cesta, vazba, hodnota)`, `SetDataTo(vazba, hodnota)` | zápis do pole |
+| prvek | `InsertSection(cesta)`, `RemoveSection(cesta)` | přidá a odebere kopii opakované sekce |
+| prvek | `ActivateField(cesta)`, `ActivateFieldEx(cesta)` | přesune kurzor na pole |
+| prvek | `GetUploadedFileData()` | text souboru XML, který uživatel k tomuto stisknutí vybral |
+| pomocný dokument | `LoadFormData(data)`, `GetFormData(parametry)` | jen jako kroky tisku vyplněného formuláře |
+| pomocný dokument | `CleanForm()` | zastaví skript: prázdný formulář Blanketa z tlačítka netiskne |
+
+Na čem se zastavují tlačítka stažených veřejných formulářů (první zastavení každého tlačítka, 6 865 tlačítek ve 155 formulářích):
+
+| Kde se skript zastaví | Tlačítek | Co formulář chtěl | Co se dozví uživatel |
+|---|---|---|---|
+| `VariantToBase64` | 432 | přiložit své PDF k odeslání nebo k potvrzení e-mailem | že to Blanketa neumí a formulář má uložit a podat e-mailem nebo datovou schránkou |
+| `Base64ToVariant` | 192 | uložit odeslanou žádost a data z portálu | že to Blanketa neumí |
+| `SendData` na jinou adresu | 186 | stáhnout tiskopis nebo potvrzení ze serveru úřadu | že spojení se serverem úřadu Blanketa formulářům nedovolí a jak formulář podat |
+| `CleanForm` | 90 | vytisknout prázdný formulář | že z tlačítka se tiskne jen vyplněný formulář |
+| `GetUploadedFileData`, `SetBinData` | 48 | přidat nebo odebrat přílohu | u odebrání, že přílohy ve formuláři Blanketa zatím neumí; tlačítko pro přidání stránka nenabízí |
+| `GetUploadedFileData` u „Nahrát uložená data (XML)“ | 32 | nahrát soubor s daty | nic: v aplikaci tlačítko funguje, jen zkouška neumí vybrat soubor |
+| `SetData` | 39 | odebrat přílohu nebo smazat údaje zápisem, který Blanketa neprovede | název funkce |
+| `SetSubformResult`, `OpenSubform` | 35 | otevřít nebo zavřít podformulář | že podformuláře Blanketa neumí |
+| `ChooseCertEx` | 26 | podepsat data z formuláře | že formulář se v Blanketě podepisuje tlačítkem Podepsat a uložit |
+| ostatní | 36 | různé; většinou chyba nebo chybějící funkce ve skriptu formuláře | název funkce nebo důvod |
+
+Skriptová knihovna Form Filleru (`JSInterpret.dll`) registruje 331 názvů funkcí, objektů a jejich vlastností. Ty, které v první tabulce nejsou, Blanketa skriptům nenabízí. Funkce použitelné ve výrazech XPath (výpočty a podmínky polí) jsou jiná sada a popisuje je oddíl 4.
 
 ## Pomocné programy
 
