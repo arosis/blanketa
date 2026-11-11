@@ -15,6 +15,12 @@
       page.append(node);
     }
   }
+  const BUTTON_OF_THE_FORM = 'button[zfo-app-event]:not(.zfo-picture-button, [zfo-app-event*="addsect"], [zfo-app-event*="delsect"])';
+  const drawsWholeFrame = style => ['Top', 'Right', 'Bottom', 'Left']
+    .every(side => style[`border${side}Style`] !== 'none' && parseFloat(style[`border${side}Width`]) > 0);
+  for (const button of page.querySelectorAll(BUTTON_OF_THE_FORM)) {
+    if (drawsWholeFrame(getComputedStyle(button.parentElement))) button.parentElement.classList.add('zfo-button-frame');
+  }
   document.body.classList.add('zfo-app');
   document.title = '';
   queryOne('[data-file]').textContent = FILE;
