@@ -606,19 +606,23 @@
   const SIGNING_BY_THE_FORM_REFUSED = 'Formulář chtěl sám podepsat svá data. V\u00a0Blanketě formulář podepíšete tlačítkem Podepsat a\u00a0uložit.';
   const REFUSAL_EXPLANATIONS = new Map([
     ['SendData', SERVER_OF_THE_OFFICE_REFUSED],
-    ['document.SendDataToEPortal', SERVER_OF_THE_OFFICE_REFUSED],
+    ['SendDataToEPortal', SERVER_OF_THE_OFFICE_REFUSED],
     ['VariantToBase64', 'Formulář chtěl k\u00a0podání přiložit soubor nebo své PDF, což Blanketa neumí. Formulář uložte a\u00a0podejte e-mailem nebo datovou schránkou; PDF získáte tiskem do PDF.'],
     ['Base64ToVariant', 'Formulář chtěl uložit soubor ze svých dat, například odeslanou žádost z\u00a0portálu úřadu. To Blanketa neumí.'],
-    ['element.GetUploadedFileData', ATTACHMENTS_REFUSED],
-    ['element.SetBinData', ATTACHMENTS_REFUSED],
-    ['element.CheckBinData', ATTACHMENTS_REFUSED],
-    ['document.OpenSubform', SUBFORMS_REFUSED],
-    ['document.SetSubformResult', SUBFORMS_REFUSED],
+    ['GetUploadedFileData', ATTACHMENTS_REFUSED],
+    ['SetBinData', ATTACHMENTS_REFUSED],
+    ['CheckBinData', ATTACHMENTS_REFUSED],
+    ['OpenSubform', SUBFORMS_REFUSED],
+    ['SetSubformResult', SUBFORMS_REFUSED],
     ['ChooseCert', SIGNING_BY_THE_FORM_REFUSED],
     ['ChooseCertEx', SIGNING_BY_THE_FORM_REFUSED],
+    ['SignData', SIGNING_BY_THE_FORM_REFUSED],
+    ['PrepareSignature', SIGNING_BY_THE_FORM_REFUSED],
+    ['FinalizeSignature', SIGNING_BY_THE_FORM_REFUSED],
     ['tisk prázdného formuláře', 'Z\u00a0tohoto tlačítka Blanketa vytiskne jen vyplněný formulář, prázdný ne.'],
   ]);
-  const refusalText = refused => `${REFUSAL_EXPLANATIONS.get(refused) ?? `Tuto akci formuláře Blanketa neumí provést (${refused}).`} Data zůstala beze změny.`;
+  const functionOfRefusal = refused => refused.replace(/^(?:document|element)\./, '');
+  const refusalText = refused => `${REFUSAL_EXPLANATIONS.get(functionOfRefusal(refused)) ?? `Tuto akci formuláře Blanketa neumí provést (${refused}).`} Data zůstala beze změny.`;
   const offerDocument = ({url, question}) => {
     if (confirm(question)) window.zfoOpenUrl(url);
     else setStatus('Dokument se neotevřel, otevření jste nepotvrdili.');
