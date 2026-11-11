@@ -177,7 +177,7 @@ def run_form_script(document, msg_data):
   if "field" in msg_data:
     values = [value for value in msg_data.get("values") or [] if isinstance(value, str)]
     return _field_change_script_answer(document, msg_data["field"], repe, answers, lookups, values)
-  return _script_answer(form_scripts.run_button_script(document, int(msg_data["button"]), repe, answers, lookups))
+  return _script_answer(form_scripts.run_button_script(document, int(msg_data["button"]), repe, answers, lookups, msg_data.get("upload")))
 
 def delete_attachment(document, msg_data):
   '''

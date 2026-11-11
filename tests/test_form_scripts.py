@@ -200,6 +200,25 @@ class SystemBinds(unittest.TestCase):
         self.assertEqual(self.doc.get_value("seznam"), "PrijemcePodani")
         self.assertEqual(self.doc.get_value("email"), "ulozeny@example.cz")
 
+    def test_a_published_form_has_nothing_stored_so_what_depends_on_them_is_calculated_once_its_lists_are_there(self):
+        engine.calculate_what_a_published_form_derives_from_system_binds(self.doc)
+        self.assertEqual(self.doc.get_value("email"), "PrijemcePodani@example.cz")
+
+    def test_a_filled_form_keeps_what_was_stored_with_it(self):
+        filled = FORM_WITH_SYSTEM_BIND.replace("</dsig:Object></dsig:Signature>", "</dsig:Object><dsig:Object>"
+                                               '<d:root xmlns:d="http://software602.cz/sample"><d:seznam>PrijemcePodani</d:seznam>'
+                                               "<d:email>vyplneny@example.cz</d:email></d:root></dsig:Object></dsig:Signature>")
+        doc = engine.open_document(filled.encode())
+        engine.calculate_what_a_published_form_derives_from_system_binds(doc)
+        self.assertEqual(doc.get_value("email"), "vyplneny@example.cz")
+
+    def test_binds_that_depend_on_each_other_do_not_keep_a_published_form_from_opening(self):
+        circular = FORM_WITH_SYSTEM_BIND.replace("<d:seznam/>", "<d:seznam/><d:kruh/>").replace('depends="seznam"', 'depends="seznam|kruh"').replace(
+            "</fm:bind>\n</fm:model>", '<fm:bind Id="kruh" nodeset="d:kruh" depends="email" calculate="/d:root/d:email"/></fm:bind>\n</fm:model>')
+        doc = engine.open_document(circular.encode())
+        engine.calculate_what_a_published_form_derives_from_system_binds(doc)
+        self.assertEqual(doc.get_value("seznam"), "PrijemcePodani")
+
     def test_recalculation_calculates_them_and_what_depends_on_them(self):
         engine.handle(self.doc, "recalc_form", "")
         self.assertEqual(self.doc.get_value("email"), "PrijemcePodani@example.cz")
@@ -373,6 +392,89 @@ class WindowFunctions(unittest.TestCase):
         result = self.click("GetDocument().GetElement().SetDataTo('a', [CLOSE_IGNORECHANGES, PI_BEGINPROGRESS, VarFXML, SM_GET,"
                             " SHTTP_NODLG, GFD_CUTNAMESPACES].join(','));")
         self.assertEqual(result["values"], {"a": "1,1,7,2,512,2"})
+
+
+LOAD_SECTION = ("var doc = GetDocument(); var data = doc.GetElement().GetUploadedFileData();"
+                "if (EvalXPath(data, \"/*[local-name()='sekce']/@pro\") == 'vzorek') doc.LoadFormDataPart(data, '/d:root/d:sekce');"
+                "else MessageBox('Data nepatří k formuláři.', '');")
+SAVED_SECTION = '<d:sekce xmlns:d="http://software602.cz/sample" pro="vzorek"><d:c>ze souboru</d:c></d:sekce>'
+
+
+class FilesTheUserChooses(unittest.TestCase):
+    """The Nahrát uložená data (XML) button of MPSV forms loads a file the user chooses back into the data."""
+
+    def click(self, uploaded_file=SAVED_SECTION, script=LOAD_SECTION, answers=()):
+        doc = engine.open_document(form_with_stylesheets(script, ()))
+        return doc, form_scripts.run_button_script(doc, 0, "", list(answers), None, uploaded_file)
+
+    def test_the_chosen_file_fills_the_part_of_the_data_the_form_names(self):
+        doc, result = self.click()
+        self.assertEqual(result["values"], {"c": "ze souboru"})
+        self.assertEqual(doc.get_value("c", "sekce-rep-0"), "ze souboru")
+        self.assertTrue(result["changed"])
+        self.assertIn("sections", result)
+
+    def test_the_form_judges_the_file_before_loading_it(self):
+        doc, result = self.click(SAVED_SECTION.replace("vzorek", "jiny"))
+        self.assertEqual(result["messages"], [{"text": "Data nepatří k formuláři.", "title": ""}])
+        self.assertFalse(result["changed"])
+
+    def test_without_a_chosen_file_the_script_stops(self):
+        for uploaded_file in (None, 5, "x" * (form_scripts.MAX_UPLOADED_CHARACTERS + 1)):
+            with self.subTest(str(uploaded_file)[:5]):
+                self.assertEqual(self.click(uploaded_file)[1]["refused"], "element.GetUploadedFileData")
+
+    def test_data_that_come_from_no_chosen_file_are_not_loaded(self):
+        made_up = "var v = new Variant(); v.data = '%s'; GetDocument().LoadFormDataPart(v, '/d:root/d:sekce');" % SAVED_SECTION
+        self.assertEqual(self.click(None, made_up)[1]["refused"], "document.LoadFormDataPart")
+
+    def test_a_file_that_does_not_fit_the_part_changes_nothing(self):
+        for uploaded_file in ('<x:sekce xmlns:x="urn:jiny" pro="vzorek"><x:c>jiný jmenný prostor</x:c></x:sekce>', '<sekce pro="vzorek"><c>bez jmenného prostoru</c></sekce>',
+                              '<d:sekce xmlns:d="http://software602.cz/sample" pro="vzorek"><d:c>', "není XML"):
+            with self.subTest(uploaded_file[:20]):
+                doc, result = self.click(uploaded_file)
+                self.assertIn(result["refused"], ("document.LoadFormDataPart", "EvalXPath"))
+                self.assertFalse(doc.get_value("c", "sekce-rep-0"))
+
+    def test_a_part_missing_in_the_file_stays_as_the_form_published_it(self):
+        doc, result = self.click('<d:sekce xmlns:d="http://software602.cz/sample" pro="vzorek"/>')
+        self.assertNotIn("refused", result)
+        doc.store_value("c", "dopsáno", "sekce-rep-0")
+        self.assertEqual(doc.get_value("c", "sekce-rep-0"), "dopsáno")
+
+    def test_an_empty_number_of_the_file_counts_as_zero_in_the_forms_sums(self):
+        form = form_with_stylesheets(LOAD_SECTION, ()).replace(b"<d:sekce><d:c/></d:sekce>", b"<d:sekce><d:c/><d:n1/><d:n2/></d:sekce><d:soucet/>")
+        form = form.replace(b'<fm:bind Id="c" nodeset="d:c"/></fm:bind>',
+                            b'<fm:bind Id="c" nodeset="d:c"/><fm:bind Id="n1" nodeset="d:n1"/><fm:bind Id="n2" nodeset="d:n2"/></fm:bind>'
+                            b'<fm:bind Id="soucet" nodeset="d:soucet" depends="n1|n2" calculate="/d:root/d:sekce/d:n1 + /d:root/d:sekce/d:n2"/>')
+        form = form.replace(b'<fo:inline form602ct="txt" form602bind="c"/></fo:block>',
+                            b'<fo:inline form602ct="txt" form602bind="c"/><fo:inline form602ct="num" form602bind="n1"/>'
+                            b'<fo:inline form602ct="num" form602bind="n2"/></fo:block><fo:inline form602ct="num" form602bind="soucet"/>')
+        doc = engine.open_document(form)
+        form_scripts.run_button_script(doc, 0, "", [], None, SAVED_SECTION.replace("<d:c>ze souboru</d:c>", "<d:c/><d:n1>5</d:n1><d:n2/>"))
+        doc.store_value("n1", "6", "sekce-rep-0")
+        self.assertEqual(doc.get_value("soucet"), "6")
+
+    def test_the_chosen_file_reads_no_other_file(self):
+        hostile = ('<!DOCTYPE d [<!ENTITY e SYSTEM "%s">]>' % (ROOT / "VERSION").as_uri()) + SAVED_SECTION.replace("ze souboru", "&e;")
+        doc, result = self.click(hostile)
+        self.assertNotIn((ROOT / "VERSION").read_text().strip(), json.dumps(result))
+
+    def test_a_question_of_the_form_keeps_the_chosen_file(self):
+        asking = "if (MessageBox('Nahrát?', '', MB_YESNO) == IDYES) {" + LOAD_SECTION + "}"
+        doc, result = self.click(script=asking)
+        self.assertEqual(result["question"]["retry"]["upload"], SAVED_SECTION)
+        doc, result = self.click(script=asking, answers=[True])
+        self.assertEqual(result["values"], {"c": "ze souboru"})
+
+    def test_the_page_offers_a_file_only_where_the_form_asks_for_xml(self):
+        form = """<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format"><fo:page-sequence master-reference="p"><fo:flow flow-name="b"><fo:block>
+<fo:inline form602ct="bib" form602webaccept=".xml" blanketa-button="3">Nahrát uložená data (XML)</fo:inline>
+<fo:inline form602ct="bib" form602webaccept=".pdf,.xml" blanketa-button="4">Nahrát soubor</fo:inline></fo:block></fo:flow></fo:page-sequence></fo:root>"""
+        page = etree.HTML(etree.tostring(app.XSLT(etree.ElementTree(etree.fromstring(form)), PATH_TO_JS="'/s/'", PATH_TO_CSS="'/s/'"),
+                                         method="html", encoding="unicode"))
+        self.assertEqual(page.xpath("//button[@data-form-upload]/@data-form-button"), ["3"])
+        self.assertEqual(page.xpath("//button[@data-form-upload]/@data-form-upload"), [".xml"])
 
 
 SHOW_HELP = ("var doc = GetDocument(); var p = new SendParam(); p.url = '%s'; p.method = %s;"

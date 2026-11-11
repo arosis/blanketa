@@ -89,6 +89,31 @@ class SignatureReplacementNotice(unittest.TestCase):
             "confirm Otevřít?", "open https://mpsv.gov.cz/n.pdf",
             "confirm Otevřít?", "status Dokument se neotevřel, otevření jste nepotvrdili."])
 
+    def test_a_file_button_runs_its_script_with_the_text_of_the_chosen_file(self):
+        page = ui_source("shell.js")
+        parts = [re.search(pattern, page, re.S).group(0) for pattern in (
+            r"const MAX_UPLOADED_BYTES = .*?;\n", r"const chooseFile = .*?\n  \};", r"window\.run_form_button = .*?\n  \};")]
+        script = """const window = globalThis, sent = [], statuses = [];
+        const send = message => sent.push(JSON.parse(message).data), setStatus = text => statuses.push(text), get_parent_repe = () => '';
+        let chosen, size = 7, texts_read = 0;
+        const document = {createElement: () => ({addEventListener(name, listener) { this.listener = listener; },
+                                                 click() { this.files = [{size, text: async () => { texts_read++; return chosen; }}]; return this.listener(); }})};
+        %s
+        (async () => {
+          window.run_form_button({dataset: {formButton: '2'}});
+          chosen = '<Data/>';
+          await window.run_form_button({dataset: {formButton: '3', formUpload: '.xml'}});
+          await new Promise(resolve => setTimeout(resolve, 10));
+          size = MAX_UPLOADED_BYTES + 1;
+          window.run_form_button({dataset: {formButton: '3', formUpload: '.xml'}});
+          await new Promise(resolve => setTimeout(resolve, 50));
+          console.log(JSON.stringify({sent, statuses, texts_read}));
+        })();""" % "\n".join(parts)
+        result = json.loads(run_in_node(script, ""))
+        self.assertEqual(result["sent"], [{"button": 2, "repe": ""}, {"button": 3, "repe": "", "upload": "<Data/>"}])
+        self.assertEqual(result["statuses"], ["Soubor je příliš velký, formulář ho nenačte."])
+        self.assertEqual(result["texts_read"], 1)
+
     def test_script_answer_refreshes_every_copy_of_the_sections(self):
         # result.values names a field only by its bind; the values of the second and further copies come with the refresh.
         self.assertIn("calc_repeatable_sections", self.page_after(f"form_script_callback({json.dumps(self.ANSWER)})")["calls"])

@@ -1187,7 +1187,7 @@ class ZFO_document:
                                )
     return res
   
-  def recalc_form(self, only=None):
+  def recalc_form(self, only=None, starting_at=None):
     '''
     Go through binds, for each evaluate calculate attribute.
     Starts with binds that do not depend on any other bind
@@ -1244,7 +1244,7 @@ class ZFO_document:
           recalculate(self._get_dependent_binds(bind.get("Id")))
         log.debug("{0} recalculated".format(bind.get("Id")))
     
-    roots = self._get_binds_with_no_dependents() if only is None else only
+    roots = only if only is not None else starting_at if starting_at is not None else self._get_binds_with_no_dependents()
     # maybe keep track of calculated binds? Now, there is each bind
     # as many times how many dependents it has.
     recalculate(roots)
@@ -1254,6 +1254,16 @@ class ZFO_document:
     # zfoengine: on opening only these: what depends on them was stored with them, and the form's downloaded lists, which
     # some of those binds read, are not there yet
     return self.recalc_form(only=self._get_system_binds())
+
+  def calculate_what_a_published_form_derives_from_system_binds(self):
+    # zfoengine: a form nobody filled in has nothing stored with its system binds
+    if self._find_filled_data_object() is not None:
+      return {}
+    try:
+      return self.recalc_form(starting_at=self._get_system_binds())
+    except RecursionError:
+      log.info("Binds of the form depend on each other, what depends on its system binds stays as published")
+      return {}
     
   
   def calculate_values(self, bind_id, repe_data):

@@ -133,6 +133,11 @@ def data_element(doc):
     return copy.deepcopy(doc._get_data_root().getroot())
 
 
+def calculate_what_a_published_form_derives_from_system_binds(doc):
+  with _LOCK:
+    return doc.calculate_what_a_published_form_derives_from_system_binds()
+
+
 def data_text(doc, path):
   '''
   The text the form's data has at path (an XPath with the form's own prefixes), "" when there is none.

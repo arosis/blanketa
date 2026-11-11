@@ -50,6 +50,11 @@ def _script_answer(res):
   return str(res)
 
 
+def text_of_script_answer(found):
+  answer = _script_answer(found)
+  return "" if answer is None else js602.to_string(answer)
+
+
 def script_data_query(zfo_doc, path=None, node=None):
   def ask(expression):
     # MPSV forms ask for the path of a prefilled person even when the form has none, and go on in Form Filler.

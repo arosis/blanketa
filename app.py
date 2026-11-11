@@ -328,6 +328,7 @@ def render_zfo_page(name, blank=False, data=None, lists_waited_for=False):
     session = new_session({"name": name, "doc": engine_doc})
     lists = codelists.load(names, folder, wait_seconds=0 if lists_waited_for else None)
     codelists.fill(engine_doc.root, lists, data_text)
+    engine.calculate_what_a_published_form_derives_from_system_binds(engine_doc)
     unfilled_lists = codelists.fill(doc, lists, data_text)
     form_scripts.name_buttons_for_page(doc)
     form_scripts.name_repeating_sections_by_bind(doc)
