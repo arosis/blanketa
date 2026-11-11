@@ -96,6 +96,13 @@ class FormScripts(unittest.TestCase):
         self.assertNotIn(b"tmp", etree.tostring(doc._get_data_root().getroot()))
         self.assertTrue(doc.script_problems)
 
+    def test_empty_expression_answers_nothing_and_the_script_goes_on(self):
+        form = FORM_WITH_ATTRIBUTE % '{ Result("dál" + GetDocument().GetElement().DataXpath("") + GetDocument().GetElement().DataXpath("  ")); }'
+        doc = engine.open_document(form.encode())
+        engine.handle(doc, "recalc_form", "")
+        self.assertEqual(doc._get_data_root().getroot()[0].get("a"), "dál")
+        self.assertFalse(doc.script_problems)
+
     def test_result_that_form_filler_refuses_changes_nothing_and_is_reported(self):
         doc = engine.open_document((FORM_WITH_ATTRIBUTE % '{ Result(1); }').encode())
         engine.handle(doc, "recalc_form", "")
