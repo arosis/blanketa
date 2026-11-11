@@ -159,7 +159,7 @@ def _repe_text(repetitions):
 
 
 class FormActionHost:
-  def __init__(self, document, element, repe, answers, lookups):
+  def __init__(self, document, element, repe, answers, lookups, is_started_by_button):
     self.document = document
     self.lookups = lookups
     self.lookups_asked = 0
@@ -182,6 +182,7 @@ class FormActionHost:
     self.file_to_save = None
     self.closes_window = False
     self.prints_form = False
+    self.is_started_by_button = is_started_by_button
     self.offers_navigation = False
 
   def _current_path(self):
@@ -437,12 +438,14 @@ class FormActionHost:
     self.file_to_save = {"name": name, "content": content}
 
   def print_form(self):
+    if not self.is_started_by_button:
+      raise js602.Unsupported("tisk bez stisku tlačítka")
     self.prints_form = True
 
   def save_printed_form(self, name):
     if not PRINTED_FORM_NAME.fullmatch(name):
       raise js602.Unsupported("SaveData")
-    self.prints_form = True
+    self.print_form()
     if PDF_FROM_PRINT_NOTICE not in self.notices:
       self.notices.append(PDF_FROM_PRINT_NOTICE)
 
@@ -454,6 +457,8 @@ class FormActionHost:
 
   def show_message(self, text, title, flags):
     if int(flags) & int(js602.MB_YESNO):
+      if self.prints_form:  # MPSV forms ask before each further page of their PDF; the print dialog shows the whole form once
+        return js602.IDNO
       self.questions += 1
       if self.questions > MAX_QUESTIONS_PER_RUN:
         raise js602.Unsupported("MessageBox")
@@ -582,7 +587,7 @@ def _run(document, element, script, repe, answers, lookups, retry):
   values_before = _page_values(document)
   data_before = serialized_data(document)
   lookups = _usable_lookups(lookups)
-  host = FormActionHost(document, element, repe, answers, lookups)
+  host = FormActionHost(document, element, repe, answers, lookups, is_started_by_button="button" in retry)
   was_script_running = document.script_running
   document.script_running = True
   outcome = None

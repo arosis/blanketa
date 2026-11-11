@@ -6,6 +6,7 @@ import time
 import unittest
 import zipfile
 from pathlib import Path
+from xml.sax.saxutils import quoteattr
 
 from lxml import etree
 from support import NS, ROOT, form_with_stylesheets, needs_node, run_in_node, stylesheet
@@ -338,6 +339,18 @@ class WindowFunctions(unittest.TestCase):
         self.assertTrue(result["print"])
         self.assertEqual(result["notices"], [form_scripts.PDF_FROM_PRINT_NOTICE])
         self.assertNotIn("save", result)
+
+    def test_the_form_is_printed_once_whatever_the_form_asks_about_further_pages(self):
+        result = self.click(PRINT_COPY % "" + "doc.ShowData(pdf); if (MessageBox('Další stránka?', '', MB_YESNO) == IDYES)"
+                            " { doc.ShowData(pdf); doc.GetElement().SetDataTo('a', 'další'); }")
+        self.assertTrue(result["print"])
+        self.assertEqual(result["values"], {})
+
+    def test_a_changed_field_prints_nothing(self):
+        script = quoteattr("{" + PRINT_COPY % "" + "doc.ShowData(pdf);}").encode()
+        form = form_with_stylesheets("", (EXPORT,)).replace(b'form602bind="a"/>', b'form602bind="a" form602onchange=' + script + b"/>")
+        result = form_scripts.run_field_change_script(engine.open_document(form), "a", "", [])
+        self.assertEqual(result["refused"], "tisk bez stisku tlačítka")
 
     def test_only_the_filled_copy_of_the_form_itself_is_printed(self):
         for script, stop in ((PRINT_COPY % "aux.CleanForm();" + "doc.ShowData(pdf);", "tisk prázdného formuláře"),

@@ -2713,8 +2713,8 @@ def run_form_action(interpreter, source, host):
     return to_number(interpreter.get(parameters, name)) if isinstance(parameters, ScriptObject) else 0.0
 
   def form_data(parameters=UNDEFINED, *_):
-    names_no_data = not parameter(parameters, "xslName") and not parameter(parameters, "dataPartXPath")
-    if names_no_data and number_parameter(parameters, "requiredFormat") == FORMAT_OF_FORM:
+    asks_for_whole_form = not parameter(parameters, "xslName") and not parameter(parameters, "dataPartXPath")
+    if asks_for_whole_form and number_parameter(parameters, "requiredFormat") == FORMAT_OF_FORM:
       return _FormCopy()
     return ScriptObject({"data": host.form_data(parameter(parameters, "xslName"), parameter(parameters, "dataPartXPath"))})
 
@@ -2736,13 +2736,13 @@ def run_form_action(interpreter, source, host):
       raise Unsupported("document.OpenAux")
     is_filled = []
 
-    def fill(data=UNDEFINED, *_):
+    def note_loaded_data(data=UNDEFINED, *_):
       if not isinstance(data, ScriptObject) or not isinstance(interpreter.get(data, "data"), str):
         raise Unsupported("LoadFormData")
       is_filled.append(True)
       return UNDEFINED
 
-    def empty(*_):
+    def refuse_empty_print(*_):
       raise Unsupported("tisk prázdného formuláře")
 
     def as_pdf(parameters=UNDEFINED, *_):
@@ -2750,7 +2750,7 @@ def run_form_action(interpreter, source, host):
         raise Unsupported("GetFormData")
       return _PrintedForm()
 
-    return HostObject("auxDocument", {"LoadFormData": native(fill), "CleanForm": native(empty), "GetFormData": native(as_pdf)})
+    return HostObject("auxDocument", {"LoadFormData": native(note_loaded_data), "CleanForm": native(refuse_empty_print), "GetFormData": native(as_pdf)})
 
   def show_data(data=UNDEFINED, *_):
     if not isinstance(data, _PrintedForm):
