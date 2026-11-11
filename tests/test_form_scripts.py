@@ -424,12 +424,12 @@ class FilesTheUserChooses(unittest.TestCase):
             with self.subTest(str(uploaded_file)[:5]):
                 self.assertEqual(self.click(uploaded_file)[1]["refused"], "element.GetUploadedFileData")
 
-    def test_data_that_come_from_no_chosen_file_are_not_loaded(self):
-        made_up = "var v = new Variant(); v.data = '%s'; GetDocument().LoadFormDataPart(v, '/d:root/d:sekce');" % SAVED_SECTION
-        self.assertEqual(self.click(None, made_up)[1]["refused"], "document.LoadFormDataPart")
+    def test_a_file_without_a_namespace_fills_the_part_too(self):
+        doc, result = self.click('<sekce pro="vzorek"><c>bez jmenného prostoru</c></sekce>')
+        self.assertEqual(doc.get_value("c", "sekce-rep-0"), "bez jmenného prostoru")
 
     def test_a_file_that_does_not_fit_the_part_changes_nothing(self):
-        for uploaded_file in ('<x:sekce xmlns:x="urn:jiny" pro="vzorek"><x:c>jiný jmenný prostor</x:c></x:sekce>', '<sekce pro="vzorek"><c>bez jmenného prostoru</c></sekce>',
+        for uploaded_file in ('<x:sekce xmlns:x="urn:jiny" pro="vzorek"><x:c>jiný jmenný prostor</x:c></x:sekce>',
                               '<d:sekce xmlns:d="http://software602.cz/sample" pro="vzorek"><d:c>', "není XML"):
             with self.subTest(uploaded_file[:20]):
                 doc, result = self.click(uploaded_file)
@@ -475,6 +475,46 @@ class FilesTheUserChooses(unittest.TestCase):
                                          method="html", encoding="unicode"))
         self.assertEqual(page.xpath("//button[@data-form-upload]/@data-form-button"), ["3"])
         self.assertEqual(page.xpath("//button[@data-form-upload]/@data-form-upload"), [".xml"])
+
+
+GROUP_OF_ITEMS = '<d:b/><d:skupina><d:polozka kod=""><d:hodnota/><d:popis>vydaný</d:popis></d:polozka></d:skupina>'.encode()
+
+
+class PartsAScriptMakes(unittest.TestCase):
+    """Smazat údaje and Odeslat of MPSV forms load a group the script itself wrote, with as many items as it needs."""
+
+    def data_after(self, *contents, path="/d:root/d:skupina"):
+        loads = "".join("var v = new Variant(); v.data = '%s'; GetDocument().LoadFormDataPart(v, '%s');" % (content, path) for content in contents)
+        doc = engine.open_document(form_with_stylesheets(loads, ()).replace(b"<d:b/>", GROUP_OF_ITEMS))
+        result = form_scripts.run_button_script(doc, 0, "", [])
+        group = doc._get_data_root().getroot().find("d:skupina", NS)
+        return result, [(item.get("kod"), item.findtext("d:hodnota", None, NS), item.findtext("d:popis", None, NS)) for item in group]
+
+    def test_every_item_the_script_wrote_is_a_copy_of_the_published_one(self):
+        result, items = self.data_after('<skupina><polozka kod="1"><hodnota>první</hodnota></polozka><polozka></polozka><polozka><popis>třetí</popis></polozka></skupina>')
+        self.assertNotIn("refused", result)
+        self.assertEqual(items, [("1", "první", "vydaný"), ("", "", "vydaný"), ("", "", "třetí")])
+
+    def test_a_later_load_starts_from_the_published_part_again(self):
+        result, items = self.data_after("<skupina><polozka/><polozka/><polozka/></skupina>", "<skupina><polozka><hodnota>jediná</hodnota></polozka></skupina>")
+        self.assertEqual(items, [("", "jediná", "vydaný")])
+
+    def test_nothing_the_form_does_not_have_gets_into_the_data(self):
+        result, items = self.data_after('<skupina cizi="x"><polozka cizi="x"><hodnota>h</hodnota><cizi>x</cizi></polozka><cizi><polozka/></cizi></skupina>')
+        self.assertEqual(items, [("", "h", "vydaný")])
+        self.assertNotIn("cizi", json.dumps(result))
+
+    def test_what_is_no_part_of_the_form_is_not_loaded(self):
+        for content, path in (("<jina/>", "/d:root/d:skupina"), ('<x:skupina xmlns:x="urn:jiny"/>', "/d:root/d:skupina"), ("<!DOCTYPE x><skupina/>", "/d:root/d:skupina"),
+                              ("<skupina>", "/d:root/d:skupina"), ("text", "/d:root/d:skupina"), ("<root/>", "/d:root"), ("<skupina/>", "/d:root/d:neni")):
+            with self.subTest(content=content, path=path):
+                self.assertEqual(self.data_after(content, path=path)[0]["refused"], "document.LoadFormDataPart")
+
+    def test_the_items_a_script_makes_count_among_its_writes(self):
+        months = "<skupina>" + "<polozka/>" * 300 + "</skupina>"
+        self.assertEqual(len(self.data_after(months)[1]), 300)
+        too_many = "<skupina>" + "<polozka/>" * (form_scripts.MAX_WRITES_PER_RUN + 2) + "</skupina>"
+        self.assertEqual(self.data_after(too_many)[0]["refused"], "skript nedoběhl")
 
 
 SHOW_HELP = ("var doc = GetDocument(); var p = new SendParam(); p.url = '%s'; p.method = %s;"

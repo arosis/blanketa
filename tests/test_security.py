@@ -396,9 +396,20 @@ class HostileFormScripts(unittest.TestCase):
         self.assertFalse(doc.get_value("b"))
         self.assertIn("sekce", result["sections"])
 
-    def test_only_an_empty_part_of_the_same_name_loads(self):
-        for content, path in (("<sekce><b>cizi</b></sekce>", "/d:root/d:sekce"), ("<sekce b='cizi'/>", "/d:root/d:sekce"),
-                              ("<jina></jina>", "/d:root/d:sekce"), ("cizi", "/d:root/d:sekce"), ("<!DOCTYPE x><sekce/>", "/d:root/d:sekce"),
+    def test_a_loaded_part_brings_nothing_the_form_does_not_have_there(self):
+        for content in ("<sekce b='cizi'/>", "<sekce><cizi>cizi</cizi></sekce>", "<sekce><b><cizi>cizi</cizi></b></sekce>"):
+            with self.subTest(content=content):
+                doc = form_running(load_part(content, "/d:root/d:sekce"))
+                self.assertNotIn("refused", click(doc))
+                self.assertNotIn(b"cizi", etree.tostring(doc._get_data_root()))
+
+    def test_a_loaded_part_sets_what_the_script_could_write_field_by_field(self):
+        doc = form_running(load_part("<sekce><b>ze skriptu</b></sekce>", "/d:root/d:sekce"))
+        self.assertNotIn("refused", click(doc))
+        self.assertEqual(doc.get_value("b"), "ze skriptu")
+
+    def test_only_a_part_of_the_same_name_loads(self):
+        for content, path in (("<jina></jina>", "/d:root/d:sekce"), ("cizi", "/d:root/d:sekce"), ("<!DOCTYPE x><sekce/>", "/d:root/d:sekce"),
                               ("<sekce></sekce>", "/d:root/d:neni"), ("<sekce></sekce>", "/d:root/d:sekce/text()"), ("<sekce></sekce>", "(((")):
             with self.subTest(content=content, path=path):
                 doc = form_running(WRITE + load_part(content, path))
