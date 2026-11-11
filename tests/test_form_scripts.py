@@ -10,7 +10,15 @@ from pathlib import Path
 from xml.sax.saxutils import quoteattr
 
 from lxml import etree
-from support import NS, ROOT, form_with_stylesheets, needs_node, run_in_node, stylesheet, ui_source
+from support import (
+    NS,
+    ROOT,
+    form_with_stylesheets,
+    needs_node,
+    run_in_node,
+    stylesheet,
+    ui_source,
+)
 
 import app
 import zfo_verify
