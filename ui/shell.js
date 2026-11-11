@@ -600,6 +600,10 @@
     (field ?? anchor).focus({preventScroll: true});
     anchor.scrollIntoView({block: 'start'});
   };
+  const offerDocument = ({url, question}) => {
+    if (confirm(question)) window.zfoOpenUrl(url);
+    else setStatus('Dokument se neotevřel, otevření jste nepotvrdili.');
+  };
   const closeWindow = () => {
     if (native) native.postMessage({action: 'close'});
     else setStatus('Formulář chtěl zavřít okno. V\u00a0prohlížeči kartu zavřete sami.');
@@ -639,6 +643,7 @@
     if (result.notices.length) setStatus(result.notices.join(' '));
     if (result.save) saveXml(result.save.name, pageData.folder, result.save.content);
     if (result.navigate) offerNavigation();
+    if (result.open) offerDocument(result.open);
     if (result.print) print();
     if (result.close) closeWindow();
     queue.then(() => {

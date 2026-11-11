@@ -98,6 +98,10 @@ class _PrintedForm(ScriptObject):
   __slots__ = ()
 
 
+def _offers_value_to_set(host_object, name):
+  return name in host_object.props and not isinstance(host_object.props[name], NativeFunction)
+
+
 class Date:
   __slots__ = ("ms", "props")
   def __init__(self, milliseconds):
@@ -1026,7 +1030,10 @@ class Interpreter:
     elif kind is Regex and to_string(key) == "lastIndex":
       target.last_index = to_number(value)
     elif kind is HostObject:
-      raise Unsupported(f"{target.name}.{to_string(key)}")
+      name = to_string(key)
+      if not _offers_value_to_set(target, name):
+        raise Unsupported(f"{target.name}.{name}")
+      target.props[name] = value
     elif kind in (ScriptObject, Function, NativeFunction, Date, Regex):
       target.props[to_string(key)] = value
     elif target is UNDEFINED or target is None:
@@ -2684,6 +2691,7 @@ def run_form_action(interpreter, source, host):
   # nested in it.
   run_level = interpreter.runs_in_progress + 1
   is_finished = []
+  documents_on_the_web = []
 
   def native(function):
     def guarded(this, args):
@@ -2728,7 +2736,13 @@ def run_form_action(interpreter, source, host):
   def send_data(_data=UNDEFINED, parameters=UNDEFINED, *_):
     if not isinstance(parameters, ScriptObject):
       raise Unsupported("SendData")
-    body = host.send_data(to_number(interpreter.get(parameters, "method")), text(interpreter.get(parameters, "url")))
+    method, url = to_number(interpreter.get(parameters, "method")), text(interpreter.get(parameters, "url"))
+    address = host.document_on_the_web(method, url)
+    if address is not None:
+      document_on_the_web = HostObject("dokument z webu", {"format": FORMAT_OF_PDF})
+      documents_on_the_web.append((document_on_the_web, address))
+      return ScriptObject({"code": SR_OK, "data": document_on_the_web})
+    body = host.send_data(method, url)
     return ScriptObject({"code": SR_OK, "data": ScriptObject({"data": body})})
 
   def open_copy_for_print(copy=UNDEFINED, *_):
@@ -2753,6 +2767,10 @@ def run_form_action(interpreter, source, host):
     return HostObject("auxDocument", {"LoadFormData": native(note_loaded_data), "CleanForm": native(refuse_empty_print), "GetFormData": native(as_pdf)})
 
   def show_data(data=UNDEFINED, *_):
+    address = next((address for document_on_the_web, address in documents_on_the_web if document_on_the_web is data), None)
+    if address is not None:
+      host.show_document_on_the_web(address)
+      return UNDEFINED
     if not isinstance(data, _PrintedForm):
       raise Unsupported("ShowData")
     host.print_form()

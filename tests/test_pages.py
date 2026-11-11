@@ -23,6 +23,7 @@ class SignatureReplacementNotice(unittest.TestCase):
     const clearCheck = ({keepStatus}) => calls.push(keepStatus ? 'clearCheck keeping the status' : 'clearCheck');
     const plainTextOf = text => text;
     const print = () => calls.push('print');
+    const offerDocument = ({url}) => calls.push(`offerDocument ${url}`);
     %s
     eval(process.argv[1]);
     queue.then(() => console.log(JSON.stringify({notices, calls})));
@@ -68,6 +69,25 @@ class SignatureReplacementNotice(unittest.TestCase):
         calls = lambda answer: self.page_after(f"form_script_callback({json.dumps({**self.ANSWER, **answer})})")["calls"]
         self.assertIn("print", calls({"print": True}))
         self.assertNotIn("print", calls({}))
+
+    def test_a_form_that_shows_a_document_on_the_web_offers_it(self):
+        calls = lambda answer: self.page_after(f"form_script_callback({json.dumps({**self.ANSWER, **answer})})")["calls"]
+        self.assertIn("offerDocument https://mpsv.gov.cz/n.pdf", calls({"open": {"url": "https://mpsv.gov.cz/n.pdf", "question": "Otevřít?"}}))
+
+    def test_the_offered_document_opens_only_when_the_user_agrees(self):
+        offer = re.search(r"const offerDocument = .*?\n  \};", ui_source("shell.js"), re.S).group(0)
+        script = """const window = globalThis, seen = [];
+        const setStatus = text => seen.push(`status ${text}`);
+        window.zfoOpenUrl = url => seen.push(`open ${url}`);
+        %s
+        for (const answer of [true, false]) {
+          globalThis.confirm = question => { seen.push(`confirm ${question}`); return answer; };
+          offerDocument({url: 'https://mpsv.gov.cz/n.pdf', question: 'Otevřít?'});
+        }
+        console.log(JSON.stringify(seen));""" % offer
+        self.assertEqual(json.loads(run_in_node(script, "")), [
+            "confirm Otevřít?", "open https://mpsv.gov.cz/n.pdf",
+            "confirm Otevřít?", "status Dokument se neotevřel, otevření jste nepotvrdili."])
 
     def test_script_answer_refreshes_every_copy_of_the_sections(self):
         # result.values names a field only by its bind; the values of the second and further copies come with the refresh.
