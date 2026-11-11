@@ -1259,7 +1259,11 @@ class ZFO_document:
     # zfoengine: a form nobody filled in has nothing stored with its system binds
     if self._find_filled_data_object() is not None:
       return {}
-    return self.recalc_form(starting_at=self._get_system_binds())
+    try:
+      return self.recalc_form(starting_at=self._get_system_binds())
+    except RecursionError:
+      log.info("Binds of the form depend on each other, what depends on its system binds stays as published")
+      return {}
     
   
   def calculate_values(self, bind_id, repe_data):

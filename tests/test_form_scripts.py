@@ -212,6 +212,13 @@ class SystemBinds(unittest.TestCase):
         engine.calculate_what_a_published_form_derives_from_system_binds(doc)
         self.assertEqual(doc.get_value("email"), "vyplneny@example.cz")
 
+    def test_binds_that_depend_on_each_other_do_not_keep_a_published_form_from_opening(self):
+        circular = FORM_WITH_SYSTEM_BIND.replace("<d:seznam/>", "<d:seznam/><d:kruh/>").replace('depends="seznam"', 'depends="seznam|kruh"').replace(
+            "</fm:bind>\n</fm:model>", '<fm:bind Id="kruh" nodeset="d:kruh" depends="email" calculate="/d:root/d:email"/></fm:bind>\n</fm:model>')
+        doc = engine.open_document(circular.encode())
+        engine.calculate_what_a_published_form_derives_from_system_binds(doc)
+        self.assertEqual(doc.get_value("seznam"), "PrijemcePodani")
+
     def test_recalculation_calculates_them_and_what_depends_on_them(self):
         engine.handle(self.doc, "recalc_form", "")
         self.assertEqual(self.doc.get_value("email"), "PrijemcePodani@example.cz")
@@ -428,6 +435,25 @@ class FilesTheUserChooses(unittest.TestCase):
                 doc, result = self.click(uploaded_file)
                 self.assertIn(result["refused"], ("document.LoadFormDataPart", "EvalXPath"))
                 self.assertFalse(doc.get_value("c", "sekce-rep-0"))
+
+    def test_a_part_missing_in_the_file_stays_as_the_form_published_it(self):
+        doc, result = self.click('<d:sekce xmlns:d="http://software602.cz/sample" pro="vzorek"/>')
+        self.assertNotIn("refused", result)
+        doc.store_value("c", "dopsáno", "sekce-rep-0")
+        self.assertEqual(doc.get_value("c", "sekce-rep-0"), "dopsáno")
+
+    def test_an_empty_number_of_the_file_counts_as_zero_in_the_forms_sums(self):
+        form = form_with_stylesheets(LOAD_SECTION, ()).replace(b"<d:sekce><d:c/></d:sekce>", b"<d:sekce><d:c/><d:n1/><d:n2/></d:sekce><d:soucet/>")
+        form = form.replace(b'<fm:bind Id="c" nodeset="d:c"/></fm:bind>',
+                            b'<fm:bind Id="c" nodeset="d:c"/><fm:bind Id="n1" nodeset="d:n1"/><fm:bind Id="n2" nodeset="d:n2"/></fm:bind>'
+                            b'<fm:bind Id="soucet" nodeset="d:soucet" depends="n1|n2" calculate="/d:root/d:sekce/d:n1 + /d:root/d:sekce/d:n2"/>')
+        form = form.replace(b'<fo:inline form602ct="txt" form602bind="c"/></fo:block>',
+                            b'<fo:inline form602ct="txt" form602bind="c"/><fo:inline form602ct="num" form602bind="n1"/>'
+                            b'<fo:inline form602ct="num" form602bind="n2"/></fo:block><fo:inline form602ct="num" form602bind="soucet"/>')
+        doc = engine.open_document(form)
+        form_scripts.run_button_script(doc, 0, "", [], None, SAVED_SECTION.replace("<d:c>ze souboru</d:c>", "<d:c/><d:n1>5</d:n1><d:n2/>"))
+        doc.store_value("n1", "6", "sekce-rep-0")
+        self.assertEqual(doc.get_value("soucet"), "6")
 
     def test_the_chosen_file_reads_no_other_file(self):
         hostile = ('<!DOCTYPE d [<!ENTITY e SYSTEM "%s">]>' % (ROOT / "VERSION").as_uri()) + SAVED_SECTION.replace("ze souboru", "&e;")

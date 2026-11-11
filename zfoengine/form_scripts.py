@@ -331,7 +331,10 @@ class FormActionHost:
     document = self.document
     self._charge_section_change()
     self._replace_with_published(document._get_data_root(), path, loaded)
-    self._replace_with_published(document._get_computable_data_root(), path, loaded)
+    try:
+      document.computing_data_tree = document._create_computing_data_tree(document._get_data_root())
+    except IndexError as error:  # a numeric field of the form has no place in the loaded data
+      raise js602.Unsupported("document.LoadFormDataPart") from error
 
   def _published_part_named_as(self, name, path):
     published = self._only_data_element(self.document.original_model, path)
@@ -345,10 +348,13 @@ class FormActionHost:
       loaded = etree.fromstring(content.encode(), SCRIPT_DATA_PARSER)
     except (etree.LxmlError, ValueError) as error:
       raise js602.Unsupported("document.LoadFormDataPart") from error
-    current = self._only_data_element(self.document._get_data_root(), path)
-    if loaded.tag != current.tag or current.getparent() is None:
+    document = self.document
+    published = self._only_data_element(document.original_model, path)
+    if loaded.tag != published.tag or published.getparent() is None:
       raise js602.Unsupported("document.LoadFormDataPart")
-    return loaded
+    filled = copy.deepcopy(published)
+    document._update_model_with_data(filled, loaded)
+    return filled
 
   def uploaded_file_data(self):
     if self.uploaded_file is None:

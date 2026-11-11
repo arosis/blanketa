@@ -608,25 +608,22 @@
     if (native) native.postMessage({action: 'close'});
     else setStatus('Formulář chtěl zavřít okno. V\u00a0prohlížeči kartu zavřete sami.');
   };
-  const MAX_UPLOADED_CHARACTERS = 16_000_000;
-  const chooseTextFile = (accept, use) => {
+  const MAX_UPLOADED_BYTES = 16_000_000;
+  const chooseFile = (accept, use) => {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = accept;
-    input.addEventListener('change', async () => {
-      const file = input.files[0];
-      if (!file) return;
-      const text = await file.text();
-      if (text.length > MAX_UPLOADED_CHARACTERS) setStatus('Soubor je příliš velký, formulář ho nenačte.');
-      else use(text);
-    });
+    input.addEventListener('change', () => input.files[0] && use(input.files[0]));
     input.click();
   };
   window.run_form_button = button => {
     const run = upload => send(JSON.stringify({type: 'run_form_script', data: {
       button: Number(button.dataset.formButton), repe: get_parent_repe(button), ...(upload === undefined ? {} : {upload})}}));
     if (button.dataset.formUpload === undefined) run();
-    else chooseTextFile(button.dataset.formUpload, run);
+    else chooseFile(button.dataset.formUpload, async file => {
+      if (file.size > MAX_UPLOADED_BYTES) setStatus('Soubor je příliš velký, formulář ho nenačte.');
+      else run(await file.text());
+    });
   };
   window.form_script_callback = result => {
     if (result.question) {
@@ -885,22 +882,14 @@
     saveXml(data.name, data.folder, data.xml);
   };
   window.zfoDataSaved = path => savedStatus('Data uložena do', path);
-  const importData = () => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.xml,text/xml,application/xml';
-    input.addEventListener('change', async () => {
-      const file = input.files[0];
-      if (!file) return;
-      const response = await fetch('/import-data?s=' + SESSION, {method: 'POST', body: await file.text()});
-      if (!response.ok) { setStatus('Import se nepodařil: ' + await response.text()); return; }
-      const url = new URL(location.href);
-      url.searchParams.delete('blank');
-      url.searchParams.set('import', (await response.json()).import);
-      location.href = url;
-    });
-    input.click();
-  };
+  const importData = () => chooseFile('.xml,text/xml,application/xml', async file => {
+    const response = await fetch('/import-data?s=' + SESSION, {method: 'POST', body: await file.text()});
+    if (!response.ok) { setStatus('Import se nepodařil: ' + await response.text()); return; }
+    const url = new URL(location.href);
+    url.searchParams.delete('blank');
+    url.searchParams.set('import', (await response.json()).import);
+    location.href = url;
+  });
 
   const splitArgs = text => {
     const parts = [];
