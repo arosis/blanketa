@@ -608,7 +608,26 @@
     if (native) native.postMessage({action: 'close'});
     else setStatus('Formulář chtěl zavřít okno. V\u00a0prohlížeči kartu zavřete sami.');
   };
-  window.run_form_button = button => send(JSON.stringify({type: 'run_form_script', data: {button: Number(button.dataset.formButton), repe: get_parent_repe(button)}}));
+  const MAX_UPLOADED_CHARACTERS = 16_000_000;
+  const chooseTextFile = (accept, use) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = accept;
+    input.addEventListener('change', async () => {
+      const file = input.files[0];
+      if (!file) return;
+      const text = await file.text();
+      if (text.length > MAX_UPLOADED_CHARACTERS) setStatus('Soubor je příliš velký, formulář ho nenačte.');
+      else use(text);
+    });
+    input.click();
+  };
+  window.run_form_button = button => {
+    const run = upload => send(JSON.stringify({type: 'run_form_script', data: {
+      button: Number(button.dataset.formButton), repe: get_parent_repe(button), ...(upload === undefined ? {} : {upload})}}));
+    if (button.dataset.formUpload === undefined) run();
+    else chooseTextFile(button.dataset.formUpload, run);
+  };
   window.form_script_callback = result => {
     if (result.question) {
       const {text, title, retry} = result.question;

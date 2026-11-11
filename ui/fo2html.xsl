@@ -165,6 +165,18 @@
     </button>
   </xsl:template>
 
+  <!-- A file button (form602ct="bib") hands its script a file the user chooses. The page reads the file as text, so it
+       offers the choice only where the form asks for XML; other file buttons stay plain text and their script stops. -->
+  <xsl:template match="fo:inline[@form602ct='bib'][@blanketa-button][@form602webaccept='.xml']">
+    <div>
+      <xsl:call-template name="add-style-attribute"/>
+      <button type="button" title="{@form602tooltip}" onclick="run_form_button(this)" data-form-button="{@blanketa-button}"
+              data-form-upload="{@form602webaccept}">
+        <xsl:apply-templates/>
+      </button>
+    </div>
+  </xsl:template>
+
   <xsl:template match="fo:instream-foreign-object[@blanketa-button]">
     <button type="button" class="zfo-picture-button" title="{@form602tooltip}" zfo-app-event="{@form602btnclick}"
             onclick="run_form_button(this)" data-form-button="{@blanketa-button}">

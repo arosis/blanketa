@@ -2786,13 +2786,20 @@ def run_form_action(interpreter, source, host):
     host.save_data(content, text(name))
     return UNDEFINED
 
+  def xpath_in_data(data=UNDEFINED, expression=UNDEFINED, *_):
+    content = interpreter.get(data, "data") if isinstance(data, ScriptObject) else UNDEFINED
+    if not isinstance(content, str):
+      raise Unsupported("EvalXPath")
+    return host.xpath_in_text(content, text(expression))
+
   def load_form_data_part(part=UNDEFINED, path=UNDEFINED):
     content = interpreter.get(part, "data") if isinstance(part, ScriptObject) else UNDEFINED
-    host.load_empty_data_part(text(content), text(path))
+    host.load_data_part(text(content), text(path))
     return UNDEFINED
 
   element = HostObject("element", {
     "DataXpath": native(data_xpath),
+    "GetUploadedFileData": native(lambda *_: ScriptObject({"data": host.uploaded_file_data()})),
     "GetCurrentDataXPath": native(host.current_path),
     "GetListItemData": native(lambda *args: host.list_item(*(to_string(arg) for arg in args))),
     "GetAttribute": native(lambda name=UNDEFINED, path=UNDEFINED: host.attribute(text(name), text(path))),
@@ -2824,6 +2831,7 @@ def run_form_action(interpreter, source, host):
     "GetDocument": native(lambda *_: document),
     "MessageBox": native(message_box),
     "DbgLog": native(lambda *_: UNDEFINED),
+    "EvalXPath": native(xpath_in_data),
     "RCCheck": native(lambda value=UNDEFINED, *_: _birth_number_valid(text(value))),
     "GetNamedParam": native(lambda name=UNDEFINED, *_: named_parameters.get(text(name), "")),
     "SetNamedParam": native(lambda name=UNDEFINED, value=UNDEFINED, *_: host.set_named_parameter(text(name), text(value)) or UNDEFINED),

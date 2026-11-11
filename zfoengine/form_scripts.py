@@ -33,6 +33,7 @@ MAX_MESSAGES_PER_RUN = 5
 MAX_QUESTIONS_PER_RUN = 8
 MAX_NAMED_PARAMETERS = 1_000
 MAX_LOOKUPS_PER_RUN = 3
+MAX_UPLOADED_CHARACTERS = 16_000_000
 MAX_STYLESHEET_RUNS_PER_RUN = 50  # a stylesheet's own work spends no budget; MPSV forms run 7 per click
 # Lists of the addresses a form would send to MPSV's own service, in the two generations of MPSV forms. The form gets an
 # empty list: Blanketa checks the addresses itself in RÚIAN (ruian.py), after the user agrees.
@@ -172,7 +173,7 @@ def _repe_text(repetitions):
 
 
 class FormActionHost:
-  def __init__(self, document, element, repe, answers, lookups, is_started_by_button):
+  def __init__(self, document, element, repe, answers, lookups, is_started_by_button, uploaded_file=None):
     self.document = document
     self.lookups = lookups
     self.lookups_asked = 0
@@ -197,6 +198,7 @@ class FormActionHost:
     self.prints_form = False
     self.document_to_open = None
     self.is_started_by_button = is_started_by_button
+    self.uploaded_file = uploaded_file
     self.offers_navigation = False
 
   def _current_path(self):
@@ -317,16 +319,49 @@ class FormActionHost:
     current = self._only_data_element(tree, path)
     current.getparent().replace(current, copy.deepcopy(published))
 
-  def load_empty_data_part(self, content, path):
-    # Forms clear a part of their data by loading it empty. Any other content would come from a file or the network.
-    empty_element = EMPTY_ELEMENT.fullmatch(content)
-    document = self.document
-    published = self._only_data_element(document.original_model, path)
-    if not empty_element or empty_element.group(1) != etree.QName(published).localname or published.getparent() is None:
+  def load_data_part(self, content, path):
+    # Forms clear a part of their data by loading it empty, and fill it from a file the user chose for this click.
+    # Any other content would come from the network.
+    if EMPTY_ELEMENT.fullmatch(content):
+      loaded = self._published_part_named_as(EMPTY_ELEMENT.fullmatch(content).group(1), path)
+    elif self.uploaded_file is not None:
+      loaded = self._part_of_the_chosen_file(content, path)
+    else:
       raise js602.Unsupported("document.LoadFormDataPart")
+    document = self.document
     self._charge_section_change()
-    self._replace_with_published(document._get_data_root(), path, published)
-    self._replace_with_published(document._get_computable_data_root(), path, published)
+    self._replace_with_published(document._get_data_root(), path, loaded)
+    self._replace_with_published(document._get_computable_data_root(), path, loaded)
+
+  def _published_part_named_as(self, name, path):
+    published = self._only_data_element(self.document.original_model, path)
+    if name != etree.QName(published).localname or published.getparent() is None:
+      raise js602.Unsupported("document.LoadFormDataPart")
+    return published
+
+  def _part_of_the_chosen_file(self, content, path):
+    self._charge_write(content)
+    try:
+      loaded = etree.fromstring(content.encode(), SCRIPT_DATA_PARSER)
+    except (etree.LxmlError, ValueError) as error:
+      raise js602.Unsupported("document.LoadFormDataPart") from error
+    current = self._only_data_element(self.document._get_data_root(), path)
+    if loaded.tag != current.tag or current.getparent() is None:
+      raise js602.Unsupported("document.LoadFormDataPart")
+    return loaded
+
+  def uploaded_file_data(self):
+    if self.uploaded_file is None:
+      raise js602.Unsupported("element.GetUploadedFileData")
+    return self.uploaded_file
+
+  def xpath_in_text(self, content, expression):
+    try:
+      found = etree.fromstring(content.encode(), SCRIPT_DATA_PARSER).getroottree().xpath(
+        expression, namespaces=self.document._get_used_ns_prefix(expression))
+    except (etree.LxmlError, ValueError, TypeError) as error:
+      raise js602.Unsupported("EvalXPath") from error
+    return ev.text_of_script_answer(found)
 
   def activate_field(self, path):
     found = self._form_elements(path)
@@ -610,7 +645,7 @@ def _use_czech_for_form_texts(document):
     root.set(XML_LANG_ATTRIBUTE, "cs")
 
 
-def _run(document, element, script, repe, answers, lookups, retry):
+def _run(document, element, script, repe, answers, lookups, retry, uploaded_file=None):
   _use_czech_for_form_texts(document)
   saved_data = copy.deepcopy(document._get_data_root())
   saved_computing_data = copy.deepcopy(document._get_computable_data_root())
@@ -618,7 +653,7 @@ def _run(document, element, script, repe, answers, lookups, retry):
   values_before = _page_values(document)
   data_before = serialized_data(document)
   lookups = _usable_lookups(lookups)
-  host = FormActionHost(document, element, repe, answers, lookups, is_started_by_button="button" in retry)
+  host = FormActionHost(document, element, repe, answers, lookups, is_started_by_button="button" in retry, uploaded_file=uploaded_file)
   was_script_running = document.script_running
   document.script_running = True
   outcome = None
@@ -667,12 +702,15 @@ def _choose_whispered_item(document, element, bind_id, repe):
   document.script_named_parameters.update({"ACIItemId": str(chosen[0]) if chosen else "", "ACIText": typed})
 
 
-def run_button_script(document, position, repe, answers, lookups=None):
+def run_button_script(document, position, repe, answers, lookups=None, uploaded_file=None):
   buttons = button_elements(document.root)
   if not 0 <= position < len(buttons):
     return None
   element = buttons[position]
-  return _run(document, element, element.get("form602btnclick"), repe, answers, lookups, {"button": position})
+  if not isinstance(uploaded_file, str) or len(uploaded_file) > MAX_UPLOADED_CHARACTERS:
+    uploaded_file = None
+  retry = {"button": position} if uploaded_file is None else {"button": position, "upload": uploaded_file}
+  return _run(document, element, element.get("form602btnclick"), repe, answers, lookups, retry, uploaded_file)
 
 
 def run_field_change_script(document, bind_id, repe, answers, lookups=None, values=()):
