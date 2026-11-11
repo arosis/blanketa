@@ -235,15 +235,15 @@
   }
   .zfo-page td:has(*):has(+ td > button[zfo-app-event*="addsect"]) { border-right: 0.75pt solid #000 !important; }
   /* A form draws its button itself: the border and the background come inline on the cell or block around it, as in
-     Form Filler. The browser's own button look inside would be a second frame. */
-  .zfo-page [style*="border"] > button[zfo-app-event]:not(.zfo-picture-button, [zfo-app-event*="addsect"], [zfo-app-event*="delsect"]) {
-    -webkit-appearance: none; appearance: none; display: block; box-sizing: border-box; width: 100%; height: 100%;
-    margin: 0; padding: 0 4px; border: 0; border-radius: 0; background: none;
+     Form Filler. The browser's own button look inside would be a second frame; the whole frame takes the click. */
+  .zfo-page .zfo-button-frame { position: relative; }
+  .zfo-page .zfo-button-frame > button {
+    -webkit-appearance: none; appearance: none; display: block; box-sizing: border-box; width: 100%;
+    margin: 0; padding: 0; border: 0; border-radius: 0; background: none;
     font: inherit; color: inherit; text-align: inherit; cursor: pointer;
   }
-  .zfo-page [style*="border"] > button[zfo-app-event]:not(.zfo-picture-button, [zfo-app-event*="addsect"], [zfo-app-event*="delsect"]):hover {
-    background: rgba(0, 0, 0, .06);
-  }
+  .zfo-page .zfo-button-frame > button::after { content: ''; position: absolute; inset: 0; }
+  .zfo-page .zfo-button-frame > button:hover::after { background: rgba(0, 0, 0, .06); }
   /* A date field and its picker button share one line, as in Form Filler: the button is a small calendar icon. */
   .zfo-page td:has(> .ui-datepicker-trigger) { white-space: nowrap; }
   .zfo-page td > input.date-pick { width: calc(100% - 20px) !important; vertical-align: top; }
