@@ -57,7 +57,6 @@ PRINTED_FORM_NAME = re.compile(PLAIN_FILE_NAME + r"\.pdf", re.I)
 XML_LANG_ATTRIBUTE = "{http://www.w3.org/XML/1998/namespace}lang"
 FO_NAMESPACES = {"fo": ns.FO_URI, "fm": ns.FM_URI}
 TRAILING_POSITION = re.compile(r"^(.*)\[(\d+)\]$", re.S)
-EMPTY_ELEMENT = re.compile(r"<([\w.\-]+)\s*(?:/>|></\1\s*>)")
 ARES_REGISTERS = {register: f"https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/{register}/"
                   for register in ("ekonomicke-subjekty", "ekonomicke-subjekty-res")}
 ARES_SUBJECT_URL = re.compile(r"https://ares\.gov\.cz/ekonomicke-subjekty-v-be/rest/(ekonomicke-subjekty(?:-res)?)/([0-9]{8})")
@@ -91,6 +90,11 @@ def published_document(url):
 def _question_before_opening(url):
   return (f"Formulář chce zobrazit dokument z\u00a0webu Ministerstva práce a\u00a0sociálních věcí:\n\n{url}\n\n"
           "Blanketa ho otevře v\u00a0prohlížeči. Z\u00a0formuláře nic neodejde.\n\nOtevřít?")
+
+
+def _names_the_same(loaded, published):
+  loaded_name, published_name = etree.QName(loaded), etree.QName(published)
+  return loaded_name.localname == published_name.localname and loaded_name.namespace in (None, published_name.namespace)
 
 
 def _lookup_failure(lookup, status):
@@ -315,46 +319,61 @@ class FormActionHost:
       raise js602.Unsupported("document.LoadFormDataPart")
     return found[0]
 
-  def _replace_with_published(self, tree, path, published):
+  def _replace_part(self, tree, path, part):
     current = self._only_data_element(tree, path)
-    current.getparent().replace(current, copy.deepcopy(published))
+    current.getparent().replace(current, copy.deepcopy(part))
 
   def load_data_part(self, content, path):
-    # Forms clear a part of their data by loading it empty, and fill it from a file the user chose for this click.
-    # Any other content would come from the network.
-    if EMPTY_ELEMENT.fullmatch(content):
-      loaded = self._published_part_named_as(EMPTY_ELEMENT.fullmatch(content).group(1), path)
-    elif self.uploaded_file is not None:
-      loaded = self._part_of_the_chosen_file(content, path)
-    else:
-      raise js602.Unsupported("document.LoadFormDataPart")
+    # Forms clear a part of their data by loading it empty, set the number of its items by loading as many empty ones,
+    # and fill it from a file the user chose. Whatever they load lands in the part as the form published it.
     document = self.document
-    self._charge_section_change()
-    self._replace_with_published(document._get_data_root(), path, loaded)
-    try:
-      document.computing_data_tree = document._create_computing_data_tree(document._get_data_root())
-    except IndexError as error:  # a numeric field of the form has no place in the loaded data
-      raise js602.Unsupported("document.LoadFormDataPart") from error
-
-  def _published_part_named_as(self, name, path):
-    published = self._only_data_element(self.document.original_model, path)
-    if name != etree.QName(published).localname or published.getparent() is None:
-      raise js602.Unsupported("document.LoadFormDataPart")
-    return published
-
-  def _part_of_the_chosen_file(self, content, path):
+    published = self._only_data_element(document.original_model, path)
     self._charge_write(content)
     try:
       loaded = etree.fromstring(content.encode(), SCRIPT_DATA_PARSER)
     except (etree.LxmlError, ValueError) as error:
       raise js602.Unsupported("document.LoadFormDataPart") from error
-    document = self.document
-    published = self._only_data_element(document.original_model, path)
-    if loaded.tag != published.tag or published.getparent() is None:
+    is_whole_document = published.getparent() is None
+    if is_whole_document or loaded.getroottree().docinfo.doctype or not _names_the_same(loaded, published):
       raise js602.Unsupported("document.LoadFormDataPart")
+    self._charge_section_change()
     filled = copy.deepcopy(published)
-    document._update_model_with_data(filled, loaded)
-    return filled
+    self._fill_published_with(filled, loaded)
+    self._replace_part(document._get_data_root(), path, filled)
+    try:
+      document.computing_data_tree = document._create_computing_data_tree(document._get_data_root())
+    except IndexError as error:  # a numeric field of the form has no place in the loaded data
+      raise js602.Unsupported("document.LoadFormDataPart") from error
+
+  def _fill_published_with(self, published, loaded):
+    for name, value in loaded.attrib.items():
+      if name in published.attrib:
+        published.set(name, value)
+    loaded_children = [child for child in loaded if isinstance(child.tag, str)]
+    if not loaded_children:
+      if len(published) == 0:
+        published.text = loaded.text
+      return
+    first_of_each_name = {child.tag: copy.deepcopy(child) for child in reversed(published) if isinstance(child.tag, str)}
+    text_of_first = {}
+    filled_copies = {}
+    for child in loaded_children:
+      tag = next((tag for tag, first in first_of_each_name.items() if _names_the_same(child, first)), None)
+      if tag is None:
+        continue
+      copies = published.findall(tag)
+      position = filled_copies.get(tag, 0)
+      filled_copies[tag] = position + 1
+      if position == len(copies):
+        if tag not in text_of_first:
+          text_of_first[tag] = etree.tostring(first_of_each_name[tag], encoding="unicode")
+        self._charge_write(text_of_first[tag])
+        copies[-1].addnext(copy.deepcopy(first_of_each_name[tag]))
+        copies = published.findall(tag)
+      self._fill_published_with(copies[position], child)
+    for tag, written in filled_copies.items():
+      for published_beyond_the_written in published.findall(tag)[written:]:
+        published.remove(published_beyond_the_written)
 
   def uploaded_file_data(self):
     if self.uploaded_file is None:
