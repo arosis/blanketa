@@ -600,6 +600,25 @@
     (field ?? anchor).focus({preventScroll: true});
     anchor.scrollIntoView({block: 'start'});
   };
+  const SERVER_OF_THE_OFFICE_REFUSED = 'Formulář chtěl poslat nebo stáhnout data ze serveru úřadu, což Blanketa formulářům nedovolí. Formulář uložte a\u00a0podejte e-mailem, datovou schránkou nebo na portálu úřadu.';
+  const ATTACHMENTS_REFUSED = 'Přílohy ve formuláři Blanketa zatím neumí. Pošlete je úřadu zvlášť, spolu s\u00a0formulářem.';
+  const SUBFORMS_REFUSED = 'Formulář chtěl otevřít nebo zavřít podformulář, což Blanketa neumí.';
+  const SIGNING_BY_THE_FORM_REFUSED = 'Formulář chtěl sám podepsat svá data. V\u00a0Blanketě formulář podepíšete tlačítkem Podepsat a\u00a0uložit.';
+  const REFUSAL_EXPLANATIONS = new Map([
+    ['SendData', SERVER_OF_THE_OFFICE_REFUSED],
+    ['document.SendDataToEPortal', SERVER_OF_THE_OFFICE_REFUSED],
+    ['VariantToBase64', 'Formulář chtěl k\u00a0podání přiložit soubor nebo své PDF, což Blanketa neumí. Formulář uložte a\u00a0podejte e-mailem nebo datovou schránkou; PDF získáte tiskem do PDF.'],
+    ['Base64ToVariant', 'Formulář chtěl uložit soubor ze svých dat, například odeslanou žádost z\u00a0portálu úřadu. To Blanketa neumí.'],
+    ['element.GetUploadedFileData', ATTACHMENTS_REFUSED],
+    ['element.SetBinData', ATTACHMENTS_REFUSED],
+    ['element.CheckBinData', ATTACHMENTS_REFUSED],
+    ['document.OpenSubform', SUBFORMS_REFUSED],
+    ['document.SetSubformResult', SUBFORMS_REFUSED],
+    ['ChooseCert', SIGNING_BY_THE_FORM_REFUSED],
+    ['ChooseCertEx', SIGNING_BY_THE_FORM_REFUSED],
+    ['tisk prázdného formuláře', 'Z\u00a0tohoto tlačítka Blanketa vytiskne jen vyplněný formulář, prázdný ne.'],
+  ]);
+  const refusalText = refused => `${REFUSAL_EXPLANATIONS.get(refused) ?? `Tuto akci formuláře Blanketa neumí provést (${refused}).`} Data zůstala beze změny.`;
   const offerDocument = ({url, question}) => {
     if (confirm(question)) window.zfoOpenUrl(url);
     else setStatus('Dokument se neotevřel, otevření jste nepotvrdili.');
@@ -642,7 +661,7 @@
       return;
     }
     if (result.refused) {
-      setStatus(`Tuto akci formuláře Blanketa neumí provést (${result.refused}), data zůstala beze změny.`);
+      setStatus(refusalText(result.refused));
       return;
     }
     if (result.changed) noteChange();

@@ -114,6 +114,24 @@ class SignatureReplacementNotice(unittest.TestCase):
         self.assertEqual(result["statuses"], ["Soubor je příliš velký, formulář ho nenačte."])
         self.assertEqual(result["texts_read"], 1)
 
+    def test_a_stopped_button_says_what_did_not_happen_and_what_to_do(self):
+        page = ui_source("shell.js")
+        parts = [re.search(pattern, page, re.S).group(0) for pattern in (
+            r"const SERVER_OF_THE_OFFICE_REFUSED = .*?;\n", r"const ATTACHMENTS_REFUSED = .*?;\n", r"const SUBFORMS_REFUSED = .*?;\n",
+            r"const SIGNING_BY_THE_FORM_REFUSED = .*?;\n", r"const REFUSAL_EXPLANATIONS = .*?\n  \]\);", r"const refusalText = .*?;\n")]
+        script = "%s\nconsole.log(JSON.stringify(process.argv.slice(1).map(refusalText)));" % "\n".join(parts)
+        send, sign, attach, unknown, inherited = json.loads(run_in_node(
+            script, "SendData", "ChooseCertEx", "element.SetBinData", "document.Neznama", "constructor"))
+        self.assertIn("ze serveru úřadu", send)
+        self.assertIn("datovou schránkou", send)
+        self.assertIn("Podepsat a\u00a0uložit", sign)
+        self.assertIn("Přílohy", attach)
+        self.assertEqual(unknown, "Tuto akci formuláře Blanketa neumí provést (document.Neznama). Data zůstala beze změny.")
+        self.assertEqual(inherited, "Tuto akci formuláře Blanketa neumí provést (constructor). Data zůstala beze změny.")
+        for text in (send, sign, attach):
+            self.assertTrue(text.endswith(" Data zůstala beze změny."))
+            self.assertNotIn("Tuto akci", text)
+
     def test_script_answer_refreshes_every_copy_of_the_sections(self):
         # result.values names a field only by its bind; the values of the second and further copies come with the refresh.
         self.assertIn("calc_repeatable_sections", self.page_after(f"form_script_callback({json.dumps(self.ANSWER)})")["calls"])
