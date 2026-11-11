@@ -439,3 +439,29 @@ class RevocationVerdict(unittest.TestCase):
     def test_without_a_stamp_the_signers_claim_decides(self):
         self.assertEqual(self.verdict(None, None, self.BEFORE), (False, True, False))
         self.assertEqual(self.verdict(None, None, self.AFTER), (False, True, True))
+
+
+@needs_node
+class ButtonFramesOnThePage(unittest.TestCase):
+    """Runs the test of ui/shell.html that tells whether the form itself draws a frame around its button."""
+
+    SCRIPT = """
+    %s
+    const sides = (styles, widths) => Object.fromEntries(['Top', 'Right', 'Bottom', 'Left'].flatMap((side, index) =>
+      [[`border${side}Style`, styles[index]], [`border${side}Width`, widths[index]]]));
+    const all = (style, width) => sides(Array(4).fill(style), Array(4).fill(width));
+    console.log(JSON.stringify([
+      drawsWholeFrame(all('solid', '1px')), drawsWholeFrame(all('none', '0px')), drawsWholeFrame(all('solid', '0px')),
+      drawsWholeFrame(sides(['none', 'none', 'solid', 'none'], ['0px', '0px', '1px', '0px'])),
+    ]));
+    """
+
+    def frames(self):
+        code = re.search(r"  const drawsWholeFrame = .*?;\n", ui_source("shell.js"), re.S).group(0)
+        return json.loads(run_in_node(self.SCRIPT % code))
+
+    def test_a_border_on_all_four_sides_is_a_frame(self):
+        self.assertEqual(self.frames()[0], True)
+
+    def test_no_border_a_border_without_width_or_a_single_line_is_no_frame(self):
+        self.assertEqual(self.frames()[1:], [False, False, False])
