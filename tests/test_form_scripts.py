@@ -1,6 +1,7 @@
 """602 JavaScript in forms: the scripts offices publish, zfoengine/js602.py, and the same expressions in Node.js."""
 import json
 import os
+import re
 import tempfile
 import time
 import unittest
@@ -9,7 +10,15 @@ from pathlib import Path
 from xml.sax.saxutils import quoteattr
 
 from lxml import etree
-from support import NS, ROOT, form_with_stylesheets, needs_node, run_in_node, stylesheet
+from support import (
+    NS,
+    ROOT,
+    form_with_stylesheets,
+    needs_node,
+    run_in_node,
+    stylesheet,
+    ui_source,
+)
 
 import app
 import zfo_verify
@@ -475,6 +484,20 @@ class FilesTheUserChooses(unittest.TestCase):
                                          method="html", encoding="unicode"))
         self.assertEqual(page.xpath("//button[@data-form-upload]/@data-form-button"), ["3"])
         self.assertEqual(page.xpath("//button[@data-form-upload]/@data-form-upload"), [".xml"])
+
+    def test_no_button_of_a_form_is_printed(self):
+        form = """<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format"><fo:page-sequence master-reference="p"><fo:flow flow-name="b"><fo:block>
+<fo:inline form602ct="bib" form602webaccept=".xml" blanketa-button="3">Nahrát uložená data (XML)</fo:inline>
+<fo:inline form602ct="btn" form602btnclick="{ Ulozit(); }" blanketa-button="4">Uložit data (XML)</fo:inline>
+<fo:inline form602ct="btn" form602btnclick="checkdata()">Zkontrolovat</fo:inline></fo:block></fo:flow></fo:page-sequence></fo:root>"""
+        page = etree.HTML(etree.tostring(app.XSLT(etree.ElementTree(etree.fromstring(form)), PATH_TO_JS="'/s/'", PATH_TO_CSS="'/s/'"),
+                                         method="html", encoding="unicode"))
+        hidden_on_print = re.search(r"\.zfo-page button\[[^{]*\{ visibility: hidden; \}", ui_source("shell.html")).group(0)
+        marks = re.findall(r"button\[([\w-]+)\]", hidden_on_print)
+        buttons = page.xpath("//button")
+        self.assertEqual(len(buttons), 3)
+        for button in buttons:
+            self.assertTrue(any(mark in button.attrib for mark in marks), etree.tostring(button, encoding="unicode"))
 
 
 GROUP_OF_ITEMS = '<d:b/><d:skupina><d:polozka kod=""><d:hodnota/><d:popis>vydaný</d:popis></d:polozka></d:skupina>'.encode()
