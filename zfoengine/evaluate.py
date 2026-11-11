@@ -52,6 +52,9 @@ def _script_answer(res):
 
 def script_data_query(zfo_doc, path=None, node=None):
   def ask(expression):
+    # MPSV forms ask for the path of a prefilled person even when the form has none, and go on in Form Filler.
+    if not expression.strip():
+      return ""
     try:
       if node is None:
         return _script_answer(eval_expression_path(zfo_doc, expression, path))
