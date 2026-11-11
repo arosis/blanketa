@@ -135,7 +135,7 @@ class SignatureReplacementNotice(unittest.TestCase):
                                     "document.SetSubformResult", "document.OpenSubform", "ChooseCertEx", "tisk prázdného formuláře")
         signing_through_the_document = ("document.ChooseCert", "document.SignData", "document.PrepareSignature", "document.FinalizeSignature")
         for name, text in zip(stops_of_published_forms + signing_through_the_document,
-                              json.loads(run_in_node(script, *stops_of_published_forms, *signing_through_the_document))):
+                              json.loads(run_in_node(script, *stops_of_published_forms, *signing_through_the_document)), strict=True):
             with self.subTest(name):
                 self.assertNotIn("Tuto akci", text)
         self.assertEqual(json.loads(run_in_node(script, "document.ChooseCert", "ChooseCertEx")), [sign, sign])
