@@ -65,6 +65,8 @@ INCOMPLETE_CHECK_NOTICE = "Některou podmínku formuláře Blanketa neumí vyhod
 PDF_FROM_PRINT_NOTICE = "Formulář chtěl uložit PDF. V\u00a0dialogu tisku zvolte uložení do PDF."
 CLOSED_ARES_NOTICE = "Formulář se ptá staré služby ARES, která už nefunguje. Údaje firmy vyplňte ručně."
 HTTP_OK = 200
+MPSV_WEB = "https://mpsv.gov.cz/"
+MPSV_DOCUMENT_PATH = re.compile(r"documents/[0-9]{1,12}/[0-9]{1,12}/[A-Za-z0-9_\-]{1,100}\.pdf")
 HTTP_NOT_FOUND = 404
 
 
@@ -77,6 +79,17 @@ def known_lookup(url):
   return {"url": url, "register": register, "number": number,
           "question": f"Formulář chce doplnit údaje firmy z\u00a0registru ARES.\n\nBlanketa pošle IČO {number} Ministerstvu financí (ares.gov.cz). "
                       "Nic jiného z\u00a0formuláře neodejde.\n\nPoslat?"}
+
+
+def published_document(url):
+  # MPSV forms name their help by a path under an address their portal supplies; a downloaded form has no such address.
+  path = url.removeprefix(MPSV_WEB)
+  return MPSV_WEB + path if MPSV_DOCUMENT_PATH.fullmatch(path) else None
+
+
+def _question_before_opening(url):
+  return (f"Formulář chce zobrazit dokument z\u00a0webu Ministerstva práce a\u00a0sociálních věcí:\n\n{url}\n\n"
+          "Blanketa ho otevře v\u00a0prohlížeči. Z\u00a0formuláře nic neodejde.\n\nOtevřít?")
 
 
 def _lookup_failure(lookup, status):
@@ -182,6 +195,7 @@ class FormActionHost:
     self.file_to_save = None
     self.closes_window = False
     self.prints_form = False
+    self.document_to_open = None
     self.is_started_by_button = is_started_by_button
     self.offers_navigation = False
 
@@ -424,6 +438,16 @@ class FormActionHost:
     self._charge_write(answer["body"])
     return answer["body"]
 
+  def document_on_the_web(self, method, url):
+    return published_document(url) if method == js602.SM_GET else None
+
+  def show_document_on_the_web(self, url):
+    if not self.is_started_by_button:
+      raise js602.Unsupported("dokument z webu bez stisku tlačítka")
+    if self.document_to_open is not None:
+      raise js602.Unsupported("ShowData")
+    self.document_to_open = url
+
   def set_named_parameter(self, name, value):
     if name not in self.named_parameters and len(self.named_parameters) >= MAX_NAMED_PARAMETERS:
       raise js602.Exhausted("parametry")
@@ -555,6 +579,8 @@ def _result_of_finished_run(document, host, values_before, data_before):
     result["scripts"] = [zfo_doc.UNREADABLE_CONDITION]
   if host.file_to_save is not None:
     result["save"] = host.file_to_save
+  if host.document_to_open is not None:
+    result["open"] = {"url": host.document_to_open, "question": _question_before_opening(host.document_to_open)}
   if host.prints_form:
     result["print"] = True
   if host.closes_window:

@@ -23,6 +23,7 @@ class SignatureReplacementNotice(unittest.TestCase):
     const clearCheck = ({keepStatus}) => calls.push(keepStatus ? 'clearCheck keeping the status' : 'clearCheck');
     const plainTextOf = text => text;
     const print = () => calls.push('print');
+    const offerDocument = ({url}) => calls.push(`offerDocument ${url}`);
     %s
     eval(process.argv[1]);
     queue.then(() => console.log(JSON.stringify({notices, calls})));
@@ -68,6 +69,10 @@ class SignatureReplacementNotice(unittest.TestCase):
         calls = lambda answer: self.page_after(f"form_script_callback({json.dumps({**self.ANSWER, **answer})})")["calls"]
         self.assertIn("print", calls({"print": True}))
         self.assertNotIn("print", calls({}))
+
+    def test_a_form_that_shows_a_document_on_the_web_offers_it(self):
+        calls = lambda answer: self.page_after(f"form_script_callback({json.dumps({**self.ANSWER, **answer})})")["calls"]
+        self.assertIn("offerDocument https://mpsv.gov.cz/n.pdf", calls({"open": {"url": "https://mpsv.gov.cz/n.pdf", "question": "Otevřít?"}}))
 
     def test_script_answer_refreshes_every_copy_of_the_sections(self):
         # result.values names a field only by its bind; the values of the second and further copies come with the refresh.

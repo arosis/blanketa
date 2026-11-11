@@ -375,6 +375,58 @@ class WindowFunctions(unittest.TestCase):
         self.assertEqual(result["values"], {"a": "1,1,7,2,512,2"})
 
 
+SHOW_HELP = ("var doc = GetDocument(); var p = new SendParam(); p.url = '%s'; p.method = %s;"
+             "var response = doc.SendData(new Variant(VarStr, ' '), p);"
+             "if (response && response.code == SR_OK && response.data.format != VarFUndef) doc.ShowData(response.data);"
+             "else MessageBox('Nápovědu se nepodařilo načíst.', '');")
+HELP_ON_THE_WEB = "https://mpsv.gov.cz/documents/20142/36042/napoveda_formulare.pdf"
+
+
+class DocumentsOnTheWeb(unittest.TestCase):
+    """The Nápověda button of MPSV forms shows a PDF the ministry publishes; Blanketa offers to open it in the browser."""
+
+    def click(self, url="documents/20142/36042/napoveda_formulare.pdf", method="SM_GET", then=""):
+        doc = engine.open_document(form_with_stylesheets(SHOW_HELP % (url, method) + then, ()))
+        return form_scripts.run_button_script(doc, 0, "", [])
+
+    def test_the_help_of_mpsv_forms_is_offered_at_the_ministrys_address(self):
+        for url in ("documents/20142/36042/napoveda_formulare.pdf", HELP_ON_THE_WEB):
+            with self.subTest(url):
+                result = self.click(url)
+                self.assertEqual(result["open"]["url"], HELP_ON_THE_WEB)
+                self.assertIn("mpsv.gov.cz", result["open"]["question"])
+                self.assertEqual(result["messages"], [])
+
+    def test_newer_forms_mark_the_document_as_pdf_before_showing_it(self):
+        marked = SHOW_HELP.replace("doc.ShowData(response.data);", "{ var data = response.data; data.format = VarFPdf; doc.ShowData(data); }")
+        doc = engine.open_document(form_with_stylesheets(marked % ("documents/20142/36042/napoveda_formulare.pdf", "SM_GET"), ()))
+        self.assertEqual(form_scripts.run_button_script(doc, 0, "", [])["open"]["url"], HELP_ON_THE_WEB)
+
+    def test_no_other_address_is_offered(self):
+        for url in ("https://example.com/documents/1/2/napoveda.pdf", "documents/1/2/../../o/rest/formulare/362_tisk",
+                    "documents/1/2/napoveda.pdf?jmeno=Jana", "o/rest/formulare/362_tisk", "http://mpsv.gov.cz/documents/1/2/n.pdf",
+                    "https://mpsv.gov.cz/documents/1/2/n.exe"):
+            with self.subTest(url):
+                self.assertEqual(self.click(url)["refused"], "SendData")
+        self.assertEqual(self.click(method="SM_POST")["refused"], "SendData")
+
+    def test_the_document_is_only_shown(self):
+        for then, stop in (("doc.GetElement().SetDataTo('a', response.data.data);", "dokument z webu.data"),
+                           ("doc.OpenAux(response.data);", "document.OpenAux"),
+                           ("response.data.adresa = 'https://example.com';", "dokument z webu.adresa"),
+                           ("doc.ShowData = function () {};", "document.ShowData"),
+                           ("doc.SaveData(response.data, 'napoveda.xml');", "dokument z webu.data"),
+                           ("doc.ShowData(response.data);", "ShowData")):
+            with self.subTest(then):
+                self.assertEqual(self.click(then=then)["refused"], stop)
+
+    def test_a_changed_field_opens_nothing(self):
+        script = quoteattr("{" + SHOW_HELP % ("documents/1/2/napoveda.pdf", "SM_GET") + "}").encode()
+        form = form_with_stylesheets("", ()).replace(b'form602bind="a"/>', b'form602bind="a" form602onchange=' + script + b"/>")
+        result = form_scripts.run_field_change_script(engine.open_document(form), "a", "", [])
+        self.assertEqual(result["refused"], "dokument z webu bez stisku tlačítka")
+
+
 ARES_URL = "https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty/00006947"
 ASK_ARES = ("var p = new SendParam(); p.method = SM_GET; p.flags = SHTTP_NODLG | SHTTP_WEB_SERVERSENDS; p.url = '%s';"
             "var r = GetDocument().SendData(new Variant(VarStr, ' '), p);"
