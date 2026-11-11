@@ -90,6 +90,14 @@ class HostObject(ScriptObject):
     self.name = name
 
 
+class _FormCopy(ScriptObject):
+  __slots__ = ()
+
+
+class _PrintedForm(ScriptObject):
+  __slots__ = ()
+
+
 class Date:
   __slots__ = ("ms", "props")
   def __init__(self, milliseconds):
@@ -2662,6 +2670,8 @@ _FORM_ACTION_CONSTANTS = {
   "CLOSE_IGNORECHANGES": 1.0, "CLOSE_CLOSEAPPIFLAST": 16.0,
 }
 MB_YESNO = _FORM_ACTION_CONSTANTS["MB_YESNO"]
+FORMAT_OF_FORM = _FORM_ACTION_CONSTANTS["VarFFo"]
+FORMAT_OF_PDF = _FORM_ACTION_CONSTANTS["VarFPdf"]
 IDOK, IDYES, IDNO = _FORM_ACTION_CONSTANTS["IDOK"], _FORM_ACTION_CONSTANTS["IDYES"], _FORM_ACTION_CONSTANTS["IDNO"]
 SM_GET, SR_OK = _FORM_ACTION_CONSTANTS["SM_GET"], _FORM_ACTION_CONSTANTS["SR_OK"]
 
@@ -2699,7 +2709,13 @@ def run_form_action(interpreter, source, host):
     value = interpreter.get(parameters, name) if isinstance(parameters, ScriptObject) else UNDEFINED
     return "" if value is UNDEFINED else text(value)
 
+  def number_parameter(parameters, name):
+    return to_number(interpreter.get(parameters, name)) if isinstance(parameters, ScriptObject) else 0.0
+
   def form_data(parameters=UNDEFINED, *_):
+    asks_for_whole_form = not parameter(parameters, "xslName") and not parameter(parameters, "dataPartXPath")
+    if asks_for_whole_form and number_parameter(parameters, "requiredFormat") == FORMAT_OF_FORM:
+      return _FormCopy()
     return ScriptObject({"data": host.form_data(parameter(parameters, "xslName"), parameter(parameters, "dataPartXPath"))})
 
   def transform_data(data=UNDEFINED, xsl_name=UNDEFINED, *_):
@@ -2715,7 +2731,37 @@ def run_form_action(interpreter, source, host):
     body = host.send_data(to_number(interpreter.get(parameters, "method")), text(interpreter.get(parameters, "url")))
     return ScriptObject({"code": SR_OK, "data": ScriptObject({"data": body})})
 
+  def open_copy_for_print(copy=UNDEFINED, *_):
+    if not isinstance(copy, _FormCopy):
+      raise Unsupported("document.OpenAux")
+    is_filled = []
+
+    def note_loaded_data(data=UNDEFINED, *_):
+      if not isinstance(data, ScriptObject) or not isinstance(interpreter.get(data, "data"), str):
+        raise Unsupported("LoadFormData")
+      is_filled.append(True)
+      return UNDEFINED
+
+    def refuse_empty_print(*_):
+      raise Unsupported("tisk prázdného formuláře")
+
+    def as_pdf(parameters=UNDEFINED, *_):
+      if not is_filled or parameter(parameters, "xslName") or number_parameter(parameters, "requiredFormat") != FORMAT_OF_PDF:
+        raise Unsupported("GetFormData")
+      return _PrintedForm()
+
+    return HostObject("auxDocument", {"LoadFormData": native(note_loaded_data), "CleanForm": native(refuse_empty_print), "GetFormData": native(as_pdf)})
+
+  def show_data(data=UNDEFINED, *_):
+    if not isinstance(data, _PrintedForm):
+      raise Unsupported("ShowData")
+    host.print_form()
+    return UNDEFINED
+
   def save_data(data=UNDEFINED, name=UNDEFINED, *_):
+    if isinstance(data, _PrintedForm):
+      host.save_printed_form(text(name))
+      return UNDEFINED
     content = interpreter.get(data, "data") if isinstance(data, ScriptObject) else UNDEFINED
     if not isinstance(content, str):
       raise Unsupported("SaveData")
@@ -2749,6 +2795,8 @@ def run_form_action(interpreter, source, host):
     "XSLCheck": native(lambda name=UNDEFINED, mode=UNDEFINED, *_: host.xsl_check(text(name), "" if mode is UNDEFINED else text(mode))),
     "TransformData": native(transform_data),
     "SaveData": native(save_data),
+    "OpenAux": native(open_copy_for_print),
+    "ShowData": native(show_data),
     "CloseApp": native(lambda *_: host.close_window() or UNDEFINED),
     "NavigationDlg": native(lambda *_: host.offer_navigation() or UNDEFINED),
   })

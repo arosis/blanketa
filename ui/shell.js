@@ -639,6 +639,7 @@
     if (result.notices.length) setStatus(result.notices.join(' '));
     if (result.save) saveXml(result.save.name, pageData.folder, result.save.content);
     if (result.navigate) offerNavigation();
+    if (result.print) print();
     if (result.close) closeWindow();
     queue.then(() => {
       if (result.problems?.length) showCheck(result.problems, result.scripts ?? []);

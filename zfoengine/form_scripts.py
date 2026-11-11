@@ -50,7 +50,9 @@ WHISPERER_FIELD_TYPE = "acm"
 WHISPERER_LIST_ATTRIBUTE = "blanketa-list"
 DATA_ROOT_PATH = "/*"
 SCRIPT_DATA_PARSER = etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False)
-SAVED_DATA_NAME = re.compile(r"[^\\/:*?\"<>|\x00-\x1f.][^\\/:*?\"<>|\x00-\x1f]{0,200}\.xml", re.I)
+PLAIN_FILE_NAME = r"[^\\/:*?\"<>|\x00-\x1f.][^\\/:*?\"<>|\x00-\x1f]{0,200}"
+SAVED_DATA_NAME = re.compile(PLAIN_FILE_NAME + r"\.xml", re.I)
+PRINTED_FORM_NAME = re.compile(PLAIN_FILE_NAME + r"\.pdf", re.I)
 XML_LANG_ATTRIBUTE = "{http://www.w3.org/XML/1998/namespace}lang"
 FO_NAMESPACES = {"fo": ns.FO_URI, "fm": ns.FM_URI}
 TRAILING_POSITION = re.compile(r"^(.*)\[(\d+)\]$", re.S)
@@ -60,6 +62,7 @@ ARES_REGISTERS = {register: f"https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/
 ARES_SUBJECT_URL = re.compile(r"https://ares\.gov\.cz/ekonomicke-subjekty-v-be/rest/(ekonomicke-subjekty(?:-res)?)/([0-9]{8})")
 CLOSED_ARES_URL = re.compile(r"https?://wwwinfo\.mfcr\.cz/cgi-bin/ares/.*", re.S)
 INCOMPLETE_CHECK_NOTICE = "Některou podmínku formuláře Blanketa neumí vyhodnotit, kontrola formuláře proto není úplná."
+PDF_FROM_PRINT_NOTICE = "Formulář chtěl uložit PDF. V\u00a0dialogu tisku zvolte uložení do PDF."
 CLOSED_ARES_NOTICE = "Formulář se ptá staré služby ARES, která už nefunguje. Údaje firmy vyplňte ručně."
 HTTP_OK = 200
 HTTP_NOT_FOUND = 404
@@ -156,7 +159,7 @@ def _repe_text(repetitions):
 
 
 class FormActionHost:
-  def __init__(self, document, element, repe, answers, lookups):
+  def __init__(self, document, element, repe, answers, lookups, is_started_by_button):
     self.document = document
     self.lookups = lookups
     self.lookups_asked = 0
@@ -178,6 +181,8 @@ class FormActionHost:
     self.addresses = None
     self.file_to_save = None
     self.closes_window = False
+    self.prints_form = False
+    self.is_started_by_button = is_started_by_button
     self.offers_navigation = False
 
   def _current_path(self):
@@ -432,6 +437,18 @@ class FormActionHost:
     self._charge_write(content)
     self.file_to_save = {"name": name, "content": content}
 
+  def print_form(self):
+    if not self.is_started_by_button:
+      raise js602.Unsupported("tisk bez stisku tlačítka")
+    self.prints_form = True
+
+  def save_printed_form(self, name):
+    if not PRINTED_FORM_NAME.fullmatch(name):
+      raise js602.Unsupported("SaveData")
+    self.print_form()
+    if PDF_FROM_PRINT_NOTICE not in self.notices:
+      self.notices.append(PDF_FROM_PRINT_NOTICE)
+
   def close_window(self):
     self.closes_window = True
 
@@ -440,6 +457,8 @@ class FormActionHost:
 
   def show_message(self, text, title, flags):
     if int(flags) & int(js602.MB_YESNO):
+      if self.prints_form:  # MPSV forms ask before each further page of their PDF; the print dialog shows the whole form once
+        return js602.IDNO
       self.questions += 1
       if self.questions > MAX_QUESTIONS_PER_RUN:
         raise js602.Unsupported("MessageBox")
@@ -536,6 +555,8 @@ def _result_of_finished_run(document, host, values_before, data_before):
     result["scripts"] = [zfo_doc.UNREADABLE_CONDITION]
   if host.file_to_save is not None:
     result["save"] = host.file_to_save
+  if host.prints_form:
+    result["print"] = True
   if host.closes_window:
     result["close"] = True
   if host.offers_navigation:
@@ -566,7 +587,7 @@ def _run(document, element, script, repe, answers, lookups, retry):
   values_before = _page_values(document)
   data_before = serialized_data(document)
   lookups = _usable_lookups(lookups)
-  host = FormActionHost(document, element, repe, answers, lookups)
+  host = FormActionHost(document, element, repe, answers, lookups, is_started_by_button="button" in retry)
   was_script_running = document.script_running
   document.script_running = True
   outcome = None
