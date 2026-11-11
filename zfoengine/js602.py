@@ -2648,15 +2648,18 @@ def evaluate(interpreter, source, data_xpath, current_path="", list_item=None):
   return results[-1] if results else None
 
 
+# The values of Form Filler's own script library. MB_DEFAULTBTN2 is Windows's; MB_HTMLCONTENT, the MB_ICON2 icons and
+# SR_ERROR are not in that library, their values are Blanketa's.
 _FORM_ACTION_CONSTANTS = {
-  "PI_BEGINPROGRESS": 0.0, "PI_SETTEXT": 1.0, "PI_ENDPROGRESS": 2.0,
+  "PI_SETTEXT": 0.0, "PI_BEGINPROGRESS": 1.0, "PI_ENDPROGRESS": 2.0,
   "MB_OK": 0.0, "MB_YESNO": 4.0, "MB_ICONWARNING": 48.0, "MB_ICONINFORMATION": 64.0, "MB_DEFAULTBTN2": 256.0,
   "MB_HTMLCONTENT": 65536.0, "MB_ICON2WARNINGRED": 131072.0, "MB_ICON2CHECK": 262144.0,
   "IDOK": 1.0, "IDYES": 6.0, "IDNO": 7.0,
-  "VarStr": 0.0, "VarFXML": 1.0, "VarFPdf": 2.0, "VarFFo": 3.0, "VarFUndef": 4.0, "VarCUTF8": 5.0,
-  "GFD_INCLUDINGIRRELEVANT": 1.0, "GFD_CUTNAMESPACES": 2.0, "GFD_ORIGINAL": 4.0, "GFD_SIGNDATA": 8.0,
-  "SM_GET": 0.0, "SM_POST": 1.0, "SR_OK": 0.0, "SR_CANCELED": 1.0, "SR_ERROR": 2.0,
-  "SHTTP_NODLG": 1.0, "SHTTP_AUTHENTICNEVER": 2.0, "SHTTP_WEB_SERVERSENDS": 4.0, "SHTTP_WEB_CLIENTSENDS": 8.0,
+  "VarStr": 1.0, "VarFXML": 7.0, "VarFPdf": 1.0, "VarFFo": 6.0, "VarFUndef": 0.0, "VarCUTF8": 1.0,
+  "GFD_INCLUDINGIRRELEVANT": 1.0, "GFD_CUTNAMESPACES": 2.0, "GFD_ORIGINAL": 64.0, "GFD_SIGNDATA": 65536.0,
+  "SM_GET": 2.0, "SM_POST": 0.0, "SR_OK": 0.0, "SR_CANCELED": 1.0, "SR_ERROR": 2.0,
+  "SHTTP_NODLG": 512.0, "SHTTP_AUTHENTICNEVER": 32.0, "SHTTP_WEB_SERVERSENDS": 8192.0, "SHTTP_WEB_CLIENTSENDS": 4096.0,
+  "CLOSE_IGNORECHANGES": 1.0, "CLOSE_CLOSEAPPIFLAST": 16.0,
 }
 MB_YESNO = _FORM_ACTION_CONSTANTS["MB_YESNO"]
 IDOK, IDYES, IDNO = _FORM_ACTION_CONSTANTS["IDOK"], _FORM_ACTION_CONSTANTS["IDYES"], _FORM_ACTION_CONSTANTS["IDNO"]
@@ -2665,7 +2668,7 @@ SM_GET, SR_OK = _FORM_ACTION_CONSTANTS["SM_GET"], _FORM_ACTION_CONSTANTS["SR_OK"
 
 def run_form_action(interpreter, source, host):
   # Runs the script of a button or of a field change against host (form_scripts.FormActionHost). What the application
-  # offered beyond these names, sending, saving, printing and signing above all, is absent here, so it stops the script.
+  # offered beyond these names, sending, printing and signing above all, is absent here, so it stops the script.
   # SendData reaches only the lookups form_scripts.known_lookup names, after the user confirmed them.
   # A script can keep these functions in a global: they refuse outside the run they were made for, and in the calculations
   # nested in it.
@@ -2692,15 +2695,32 @@ def run_form_action(interpreter, source, host):
     answer = host.data_xpath(text(expression))
     return to_string("" if answer is None else answer)
 
-  def form_data(parameters=UNDEFINED):
-    xsl_name = interpreter.get(parameters, "xslName") if isinstance(parameters, ScriptObject) else UNDEFINED
-    return ScriptObject({"data": host.form_data(to_string(xsl_name))})
+  def parameter(parameters, name):
+    value = interpreter.get(parameters, name) if isinstance(parameters, ScriptObject) else UNDEFINED
+    return "" if value is UNDEFINED else text(value)
+
+  def form_data(parameters=UNDEFINED, *_):
+    return ScriptObject({"data": host.form_data(parameter(parameters, "xslName"), parameter(parameters, "dataPartXPath"))})
+
+  def transform_data(data=UNDEFINED, xsl_name=UNDEFINED, *_):
+    content = interpreter.get(data, "data") if isinstance(data, ScriptObject) else UNDEFINED
+    if not isinstance(content, str):
+      raise Unsupported("TransformData")
+    data.props["data"] = host.transform_data(content, text(xsl_name))
+    return UNDEFINED
 
   def send_data(_data=UNDEFINED, parameters=UNDEFINED, *_):
     if not isinstance(parameters, ScriptObject):
       raise Unsupported("SendData")
     body = host.send_data(to_number(interpreter.get(parameters, "method")), text(interpreter.get(parameters, "url")))
     return ScriptObject({"code": SR_OK, "data": ScriptObject({"data": body})})
+
+  def save_data(data=UNDEFINED, name=UNDEFINED, *_):
+    content = interpreter.get(data, "data") if isinstance(data, ScriptObject) else UNDEFINED
+    if not isinstance(content, str):
+      raise Unsupported("SaveData")
+    host.save_data(content, text(name))
+    return UNDEFINED
 
   def load_form_data_part(part=UNDEFINED, path=UNDEFINED):
     content = interpreter.get(part, "data") if isinstance(part, ScriptObject) else UNDEFINED
@@ -2727,6 +2747,10 @@ def run_form_action(interpreter, source, host):
     "LoadFormDataPart": native(load_form_data_part),
     "SendData": native(send_data),
     "XSLCheck": native(lambda name=UNDEFINED, mode=UNDEFINED, *_: host.xsl_check(text(name), "" if mode is UNDEFINED else text(mode))),
+    "TransformData": native(transform_data),
+    "SaveData": native(save_data),
+    "CloseApp": native(lambda *_: host.close_window() or UNDEFINED),
+    "NavigationDlg": native(lambda *_: host.offer_navigation() or UNDEFINED),
   })
   named_parameters = host.named_parameters
   globals_for_action = {

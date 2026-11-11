@@ -354,7 +354,7 @@ class HostileFormScripts(unittest.TestCase):
     def test_what_reaches_outside_the_form_stops_the_script_and_undoes_it(self):
         for call in ("GetDocument().SendData(1, 2)", "GetDocument().SendDataToEPortal(1)", "GetDocument().SaveData(1)", "GetDocument().Print2PDF(1)",
                      "GetDocument().PrepareSignature(1)", "GetDocument().FinalizeSignature(1)", "GetDocument().ChooseCert()",
-                     "GetDocument().Close()", "GetDocument().CloseApp()", "GetDocument().OpenAux('x')", "GetDocument().LoadFormData(1)",
+                     "GetDocument().Close()", "GetDocument().OpenAux('x')", "GetDocument().LoadFormData(1)",
                      "GetDocument().GetElement().OpenLink('http://example.org')", "GetDocument().GetElement().SetBinData('.', 1)",
                      "new XMLHttpRequest()", "eval('1')", "require('os')", "__import__('os')"):
             with self.subTest(call):

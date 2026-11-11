@@ -71,8 +71,8 @@ def _apply(template, name, source, budget):
     raise js602.Unsupported(f"šablona {name}") from error
 
 
-def transform(document, name, budget):
-  return _apply(document.get_template_text(name), name, document._get_data_root(), budget)
+def transform(document, name, budget, source=None):
+  return _apply(document.get_template_text(name), name, document._get_data_root() if source is None else source, budget)
 
 
 def transform_list(form_root, name, enum):

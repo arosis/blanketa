@@ -74,6 +74,8 @@
   .zfo-cert-choice { display: grid; gap: 10px; }
   .zfo-link { justify-self: start; padding: 0; border: 0; background: none; color: var(--accent); font: inherit; cursor: pointer; }
   .zfo-dialog-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+  .zfo-navigation-list { display: grid; gap: 2px; max-height: 60vh; overflow-y: auto; }
+  .zfo-navigation-list .zfo-btn { justify-content: flex-start; height: auto; min-height: 30px; padding: 6px 10px; text-align: left; }
   .zfo-btn.primary:hover { background: #0857bd; }
   .zfo-btn svg { width: 18px; height: 18px; flex: none; }
   .zfo-btn.icon { width: 30px; padding: 0; justify-content: center; }
@@ -354,6 +356,16 @@
     <div class="zfo-dialog-buttons">
       <button class="zfo-btn" value="details">Zobrazit podpisy</button>
       <button class="zfo-btn primary" value="ok">Pokračovat</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="zfo-dialog" data-navigation>
+  <form method="dialog">
+    <h2>Přejít na</h2>
+    <div class="zfo-navigation-list" data-navigation-list></div>
+    <div class="zfo-dialog-buttons">
+      <button class="zfo-btn" value="cancel">Zrušit</button>
     </div>
   </form>
 </dialog>

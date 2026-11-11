@@ -136,6 +136,18 @@
     </xsl:if>
   </xsl:template>
 
+  <!-- zfo-editor's own template, and the part of the form a block opens: form602anchor names it in Form Filler's navigation
+       (NavigationDlg). Every block, cell and inline passes here. -->
+  <xsl:template name="add-onclick-attribute">
+    <xsl:if test="string-length(@form602onclick) &gt; 0">
+      <xsl:attribute name="onclick">perform_click_action(this)</xsl:attribute>
+      <xsl:attribute name="zfo-app-event"><xsl:value-of select="@form602onclick"/></xsl:attribute>
+    </xsl:if>
+    <xsl:if test="normalize-space(@form602anchor) != ''">
+      <xsl:attribute name="data-anchor"><xsl:value-of select="normalize-space(@form602anchor)"/></xsl:attribute>
+    </xsl:if>
+  </xsl:template>
+
   <!-- A button with a script names itself by its position: the script stays on the server and runs from there. -->
   <xsl:template name="button-input">
     <button type="button" title="{@form602tooltip}" zfo-app-event="{@form602btnclick}">

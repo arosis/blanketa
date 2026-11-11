@@ -121,6 +121,9 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
             let json = String(data: try! JSONEncoder().encode(paths), encoding: .utf8)!
             webView.evaluateJavaScript("window.zfoRecent && zfoRecent(\(json))")
         case "print": printPage()
+        case "close":
+            // A form's own button asks; the window closes once this call has returned.
+            DispatchQueue.main.async { [weak self] in self?.window.performClose(nil) }
         case "printPdf":
             if let path = body["path"] as? String { printPdfFile(URL(fileURLWithPath: path)) }
         case "reveal":

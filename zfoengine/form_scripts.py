@@ -49,6 +49,8 @@ CHECK_WARNING_TITLE = "Varování"
 WHISPERER_FIELD_TYPE = "acm"
 WHISPERER_LIST_ATTRIBUTE = "blanketa-list"
 DATA_ROOT_PATH = "/*"
+SCRIPT_DATA_PARSER = etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False)
+SAVED_DATA_NAME = re.compile(r"[^\\/:*?\"<>|\x00-\x1f.][^\\/:*?\"<>|\x00-\x1f]{0,200}\.xml", re.I)
 XML_LANG_ATTRIBUTE = "{http://www.w3.org/XML/1998/namespace}lang"
 FO_NAMESPACES = {"fo": ns.FO_URI, "fm": ns.FM_URI}
 TRAILING_POSITION = re.compile(r"^(.*)\[(\d+)\]$", re.S)
@@ -174,6 +176,9 @@ class FormActionHost:
     self.focus_bind = None
     self.has_section_changes = False
     self.addresses = None
+    self.file_to_save = None
+    self.closes_window = False
+    self.offers_navigation = False
 
   def _current_path(self):
     owner = next(iter(self.element.xpath("ancestor-or-self::*[@form602bind][1]")), None)
@@ -321,19 +326,40 @@ class FormActionHost:
         self.notices.append(INCOMPLETE_CHECK_NOTICE)
     return not self.problems
 
-  def form_data(self, stylesheet_name):
+  def form_data(self, stylesheet_name, data_part=""):
     if stylesheet_name in ADDRESS_LIST_STYLESHEETS:
       self.addresses = czech_addresses(self.document)
       return ""
+    if not stylesheet_name:
+      return self._data_part(data_part)
     if self.document.get_template_text(stylesheet_name) is None:
       raise js602.Unsupported("GetFormData")
     return str(self._run_stylesheet(stylesheet_name))
 
-  def _run_stylesheet(self, stylesheet_name):
+  def _data_part(self, path):
+    data = self.document._get_data_root()
+    if not path:
+      return etree.tostring(data, encoding="unicode")
+    try:
+      found = data.xpath(path, namespaces=self.document._get_used_ns_prefix(path))
+    except (etree.LxmlError, ValueError, TypeError) as error:
+      raise js602.Unsupported("GetFormData") from error
+    if not isinstance(found, list) or not found or not etree.iselement(found[0]):
+      raise js602.Unsupported("GetFormData")
+    return etree.tostring(found[0], encoding="unicode")
+
+  def transform_data(self, content, stylesheet_name):
+    try:
+      source = etree.ElementTree(etree.fromstring(content.encode(), SCRIPT_DATA_PARSER))
+    except (etree.XMLSyntaxError, ValueError) as error:
+      raise js602.Unsupported("TransformData") from error
+    return str(self._run_stylesheet(stylesheet_name, source))
+
+  def _run_stylesheet(self, stylesheet_name, source=None):
     self.stylesheet_runs += 1
     if self.stylesheet_runs > MAX_STYLESHEET_RUNS_PER_RUN:
       raise js602.Exhausted("šablony")
-    return form_stylesheets.transform(self.document, stylesheet_name, self.document.script_interpreter().budget)
+    return form_stylesheets.transform(self.document, stylesheet_name, self.document.script_interpreter().budget, source)
 
   def _fields_by_data_node(self):
     document = self.document
@@ -398,6 +424,19 @@ class FormActionHost:
       raise js602.Exhausted("parametry")
     self._charge_write(value)
     self.named_parameters[name] = value
+
+  def save_data(self, content, name):
+    # The page saves the file through the save dialog of its window; the form names it, the user chooses where it goes.
+    if self.file_to_save is not None or not SAVED_DATA_NAME.fullmatch(name):
+      raise js602.Unsupported("SaveData")
+    self._charge_write(content)
+    self.file_to_save = {"name": name, "content": content}
+
+  def close_window(self):
+    self.closes_window = True
+
+  def offer_navigation(self):
+    self.offers_navigation = True
 
   def show_message(self, text, title, flags):
     if int(flags) & int(js602.MB_YESNO):
@@ -495,6 +534,12 @@ def _result_of_finished_run(document, host, values_before, data_before):
             "focus": host.focus_bind, "problems": host.problems}
   if host.check_is_incomplete:
     result["scripts"] = [zfo_doc.UNREADABLE_CONDITION]
+  if host.file_to_save is not None:
+    result["save"] = host.file_to_save
+  if host.closes_window:
+    result["close"] = True
+  if host.offers_navigation:
+    result["navigate"] = True
   if host.addresses is not None:
     document.addresses_to_check = _addresses_to_ask(document, host.addresses)
     result["addresses"] = [address_text(address) for address in document.addresses_to_check]
