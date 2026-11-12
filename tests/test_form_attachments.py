@@ -288,3 +288,159 @@ class SavingTheFileOfAField(unittest.TestCase):
         for number in numbers[1:]:
             with self.subTest(number):
                 self.assertEqual(self.request("GET", f"/attachment?s={session}&i={number}")[:2], (200, PDF))
+
+
+# The newer MPSV forms, written for FormApps Server: a list of attachments and fields for one attachment each.
+JUDGE_LISTED_FILE = """
+var ele = GetDocument().GetElement();
+if (ele.CheckBinData(".", MIMETYPE_CHECK | ANTIVIRUS_CHECK) != 0) {
+  MessageBox("Soubor nebyl vložen.");
+  if (!ele.RemoveSection(".")) {
+    ele.SetData("../d:filename", "att.filename", ""); ele.SetBinData(".", new Variant()); ele.SetData("../../d:empty", "empty", "1");
+  }
+}
+"""
+REMOVE_LISTED_FILE = """
+var ele = GetDocument().GetElement();
+if (!ele.RemoveSection(".")) {
+  ele.SetData("../d:filename", "att.filename", ""); ele.SetBinData("ancestor::*[@form602ct='rep'][1]//fo:basic-link", new Variant());
+  ele.SetData("../d:size", "att.size", ""); ele.SetData("../../d:empty", "empty", "1");
+}
+"""
+UPLOAD_ONE_FILE = """
+var ele = GetDocument().GetElement();
+var link = "ancestor::*[@form602id='state1']//*[@form602id='data2']";
+var data = ele.GetUploadedFileData();
+if (data.data) {
+  ele.SetData("../d:error", "s1.error", "");
+  ele.SetBinData(link, data);
+  if (ele.CheckBinData(link, MIMETYPE_CHECK | ANTIVIRUS_CHECK) != 0) { ele.SetBinData(link, new Variant()); ele.SetData("../d:error", "s1.error", "Soubor nebyl vložen."); }
+} else ele.SetData("../d:error", "s1.error", "Chyba při nahrávání.");
+"""
+NEWER_FORM = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#" Id="_1"><dsig:Object Id="_2" MimeType="text/xml">
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:fm="http://software602.cz/forms" xmlns:d="http://software602.cz/sample">
+<fm:formparams><fm:model><fm:instance><d:root><d:attachments>
+<d:attachment><d:data/><d:filename/><d:size/><d:extension/><d:timestamp>0</d:timestamp></d:attachment><d:empty>1</d:empty></d:attachments>
+<d:attachment1><d:data/><d:filename/><d:size/><d:extension/><d:error/></d:attachment1></d:root></fm:instance>
+<fm:bind Id="k" nodeset="/d:root"><fm:bind Id="att" nodeset="d:attachments/d:attachment"><fm:bind Id="att.data" nodeset="d:data"/>
+<fm:bind Id="att.filename" nodeset="d:filename"/><fm:bind Id="att.size" nodeset="d:size"/><fm:bind Id="att.extension" nodeset="d:extension"/>
+<fm:bind Id="att.timestamp" nodeset="d:timestamp"/></fm:bind><fm:bind Id="empty" nodeset="d:attachments/d:empty"/>
+<fm:bind Id="s1.data" nodeset="d:attachment1/d:data"/><fm:bind Id="s1.filename" nodeset="d:attachment1/d:filename"/>
+<fm:bind Id="s1.size" nodeset="d:attachment1/d:size"/><fm:bind Id="s1.extension" nodeset="d:attachment1/d:extension"/>
+<fm:bind Id="s1.error" nodeset="d:attachment1/d:error"/></fm:bind></fm:model></fm:formparams>
+<fo:page-sequence master-reference="p"><fo:flow flow-name="xsl-region-body">
+<fo:block fa-data-id="attachments-section">
+<fo:inline form602ct="btm" form602bindref="att.data" form602attchsec="ancestor::*[@fa-data-id='attachments-section']//*[@form602ct='rep']"
+ form602maxallfilessize="700" form602maxonefilesize="400" form602maxoccurs="3" form602webaccept=".pdf,.png" form602webaccepttype="strict"
+ form602attchuploadstartaction="{ GetDocument().GetElement().SetDataTo('empty', '0'); }">Nahrajte ze zařízení</fo:inline>
+<fo:block form602ct="rep" form602bind="att">
+<fo:basic-link form602ct="bil" form602bindref="att.data" filenamebind="att.filename" filesizebind="att.size" mediatypebind="att.extension"
+ form602onchange=%s/>
+<fo:inline form602ct="btn" form602bindref="att.data" form602btnclick=%s>Odebrat</fo:inline>
+</fo:block></fo:block>
+<fo:block form602id="state1">
+<fo:inline form602ct="bib" form602bindref="s1.data" form602maxsize="400" form602webaccept=".pdf" form602btnclick=%s>Nahrát soubor</fo:inline>
+<fo:basic-link form602ct="bil" form602id="data2" form602bindref="s1.data" filenamebind="s1.filename" filesizebind="s1.size" mediatypebind="s1.extension"/>
+</fo:block>
+</fo:flow></fo:page-sequence></fo:root></dsig:Object></dsig:Signature>"""
+REMOVE_BUTTON, UPLOAD_BUTTON = 0, 1
+
+
+def newer_form(upload=UPLOAD_ONE_FILE):
+    return engine.open_document((NEWER_FORM % tuple(quoteattr("{" + script + "}") for script in (JUDGE_LISTED_FILE, REMOVE_LISTED_FILE, upload))).encode())
+
+
+def listed(doc, part):
+    return [node.text or "" for node in doc._get_data_root().xpath(f"//d:attachment/d:{part}", namespaces={"d": "http://software602.cz/sample"})]
+
+
+def add_to_list(doc, name, content):
+    return form_scripts.add_file_to_list(doc, 0, "", [], None, chosen(name, content))
+
+
+def upload(doc, name, content):
+    return form_scripts.run_button_script(doc, UPLOAD_BUTTON, "", [], None, chosen(name, content))
+
+
+class ListsOfAttachments(unittest.TestCase):
+    def test_each_file_gets_an_item_written_as_the_web_application_of_mpsv_writes_it(self):
+        # Seen in the data its form no. 362 saved in November 2026: the size in bytes, the extension as the name has it, timestamp 0.
+        doc = newer_form()
+        self.assertEqual(add_to_list(doc, "Plna moc.pdf", PDF)["messages"], [])
+        self.assertIn("sections", add_to_list(doc, "Sken Velky.PNG", PNG))
+        self.assertEqual(listed(doc, "filename"), ["Plna moc.pdf", "Sken Velky.PNG"])
+        self.assertEqual(listed(doc, "size"), [str(len(PDF)), str(len(PNG))])
+        self.assertEqual(listed(doc, "extension"), ["pdf", "PNG"])
+        self.assertEqual(listed(doc, "timestamp"), ["0", "0"])
+        self.assertEqual([base64.b64decode(data) for data in listed(doc, "data")], [PDF, PNG])
+        self.assertEqual(value(doc, "empty"), "0")
+
+    def test_the_form_judges_each_file_and_takes_a_bad_one_out_again(self):
+        doc = newer_form()
+        add_to_list(doc, "Plna moc.pdf", PDF)
+        self.assertEqual(add_to_list(doc, "podvrh.pdf", PNG)["messages"], [{"text": "Soubor nebyl vložen.", "title": ""}])
+        self.assertEqual(listed(doc, "filename"), ["Plna moc.pdf"])
+        lone = newer_form()
+        add_to_list(lone, "podvrh.pdf", PNG)
+        self.assertEqual((listed(lone, "filename"), listed(lone, "data"), value(lone, "empty")), ([""], [""], "1"))
+
+    def test_the_list_takes_only_what_its_button_allows(self):
+        doc = newer_form()
+        for name, content, refusal in (("tabulka.xlsx", b"PK\x03\x04", "Formulář tu přijímá jen soubory typu PDF, PNG."),
+                                       ("velky.pdf", PDF + bytes(400), "Soubor je větší než 400\u00a0B, formulář ho nepřijme.")):
+            with self.subTest(name):
+                self.assertEqual(add_to_list(doc, name, content), {"stopped": refusal})
+        for name in ("a.pdf", "b.pdf"):
+            add_to_list(doc, name, PDF + bytes(200))
+        self.assertEqual(add_to_list(doc, "c.pdf", PDF + bytes(300)), {"stopped": "Přílohy by dohromady měly víc než 700\u00a0B, formulář soubor nepřijme."})
+        add_to_list(doc, "c.pdf", PDF)
+        self.assertEqual(add_to_list(doc, "d.pdf", PDF), {"stopped": "Formulář přijme nejvýš 3 příloh."})
+        self.assertEqual(listed(doc, "filename"), ["a.pdf", "b.pdf", "c.pdf"])
+
+    def test_the_form_takes_files_out_of_the_list_down_to_an_empty_one(self):
+        doc = newer_form()
+        add_to_list(doc, "a.pdf", PDF)
+        add_to_list(doc, "b.pdf", PDF)
+        form_scripts.run_button_script(doc, REMOVE_BUTTON, "block---att-rep-0", [])
+        self.assertEqual(listed(doc, "filename"), ["b.pdf"])
+        form_scripts.run_button_script(doc, REMOVE_BUTTON, "block---att-rep-0", [])
+        self.assertEqual((listed(doc, "filename"), listed(doc, "data"), listed(doc, "size"), value(doc, "empty")), ([""], [""], [""], "1"))
+        add_to_list(doc, "c.pdf", PDF)
+        self.assertEqual(listed(doc, "filename"), ["c.pdf"])
+
+    def test_only_a_list_button_takes_files_for_a_list(self):
+        doc = newer_form()
+        for position in (1, -1, "0", None):
+            with self.subTest(position):
+                self.assertIsNone(form_scripts.add_file_to_list(doc, position, "", [], None, chosen("a.pdf", PDF)))
+        self.assertIsNone(form_scripts.add_file_to_list(doc, 0, "", [], None, {"name": "../a.pdf", "content": ""}))
+
+
+class FieldsForOneAttachment(unittest.TestCase):
+    def test_the_script_of_the_upload_button_puts_the_file_into_its_link(self):
+        doc = newer_form()
+        result = upload(doc, "Potvrzeni.PDF", PDF)
+        self.assertEqual((result["messages"], result["notices"]), ([], [form_scripts.NO_ANTIVIRUS_NOTICE]))
+        self.assertEqual((value(doc, "s1.filename"), value(doc, "s1.size"), value(doc, "s1.extension")), ("Potvrzeni.PDF", str(len(PDF)), "PDF"))
+        self.assertEqual(base64.b64decode(value(doc, "s1.data")), PDF)
+
+    def test_a_file_the_form_judges_bad_leaves_the_field_empty_and_its_error_written(self):
+        doc = newer_form()
+        upload(doc, "Potvrzeni.pdf", PDF)
+        upload(doc, "podvrh.pdf", PNG)
+        self.assertEqual((value(doc, "s1.filename"), value(doc, "s1.data"), value(doc, "s1.size")), ("", "", ""))
+        self.assertEqual(value(doc, "s1.error"), "Soubor nebyl vložen.")
+
+    def test_the_button_takes_only_the_types_and_the_size_it_names(self):
+        doc = newer_form()
+        self.assertEqual(upload(doc, "sken.png", PNG), {"stopped": "Formulář tu přijímá jen soubory typu PDF."})
+        self.assertEqual(upload(doc, "velky.pdf", PDF + bytes(400)), {"stopped": "Soubor je větší než 400\u00a0B, formulář ho nepřijme."})
+        self.assertEqual(value(doc, "s1.data"), "")
+
+    def test_only_an_upload_button_gets_a_file_and_only_a_file_goes_into_a_link(self):
+        doc = newer_form()
+        self.assertIsNone(form_scripts.run_button_script(doc, REMOVE_BUTTON, "block---att-rep-0", [], None, chosen("a.pdf", PDF)))
+        made_up = newer_form("var v = new Variant(); v.data = 'text'; GetDocument().GetElement().SetBinData(\"//*[@form602id='data2']\", v);")
+        self.assertEqual(upload(made_up, "a.pdf", PDF)["refused"], "element.SetBinData")
+        no_link = newer_form("var e = GetDocument().GetElement(); e.SetBinData(\"//*[@form602ct='bib']\", e.GetUploadedFileData());")
+        self.assertEqual(upload(no_link, "a.pdf", PDF)["refused"], "element.GetBinData")

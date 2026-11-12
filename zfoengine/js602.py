@@ -2825,17 +2825,29 @@ def run_form_action(interpreter, source, host):
     host.load_data_part(text(content), text(path))
     return True
 
-  def attached_file(path=UNDEFINED, *_):
-    content = host.attachment(text(path))
+  def file_as_variant(name, content):
     variant = ScriptObject({"data": _text_of_file(content)})
-    files_read_by_the_script.append((variant, content))
+    files_read_by_the_script.append((variant, name, content))
     return variant
 
+  def file_of_variant(data):
+    return next(((name, content) for variant, name, content in files_read_by_the_script if variant is data), None)
+
   def attachment_as_base64(data=UNDEFINED, *_):
-    content = next((content for variant, content in files_read_by_the_script if variant is data), None)
-    if content is None:
+    file = file_of_variant(data)
+    if file is None:
       raise Unsupported("VariantToBase64")
-    return base64.b64encode(content).decode("ascii")
+    return base64.b64encode(file[1]).decode("ascii")
+
+  def put_file_into_field(path=UNDEFINED, data=UNDEFINED, *_):
+    file = file_of_variant(data)
+    if file is not None:
+      host.put_file(text(path), *file)
+    elif isinstance(data, ScriptObject) and interpreter.get(data, "data") == "":
+      host.clear_file(text(path))  # forms take an attachment away by putting an empty Variant in its place
+    else:
+      raise Unsupported("element.SetBinData")
+    return UNDEFINED
 
   def check_attachment(path=UNDEFINED, checks=0.0, *_):
     fault = host.fault_of_attachment(text(path), int(to_number(checks)))
@@ -2843,10 +2855,11 @@ def run_form_action(interpreter, source, host):
 
   element = HostObject("element", {
     "DataXpath": native(data_xpath),
-    "GetBinData": native(attached_file),
+    "GetBinData": native(lambda path=UNDEFINED, *_: file_as_variant(*host.attachment_with_name(text(path)))),
+    "SetBinData": native(put_file_into_field),
     "GetBinDataSize": native(lambda path=UNDEFINED, *_: float(len(host.attachment(text(path))))),
     "CheckBinData": native(check_attachment),
-    "GetUploadedFileData": native(lambda *_: ScriptObject({"data": host.uploaded_file_data()})),
+    "GetUploadedFileData": native(lambda *_: file_as_variant(*host.uploaded())),
     "GetCurrentDataXPath": native(host.current_path),
     "GetListItemData": native(lambda *args: host.list_item(*(to_string(arg) for arg in args))),
     "GetAttribute": native(lambda name=UNDEFINED, path=UNDEFINED: host.attribute(text(name), text(path))),

@@ -174,6 +174,8 @@ def run_form_script(document, msg_data):
   answers = msg_data.get("answers") or []
   lookups = msg_data.get("lookups")
   repe = msg_data.get("repe") or ""
+  if "attach" in msg_data and "file_list" in msg_data:
+    return _script_answer(form_scripts.add_file_to_list(document, msg_data["file_list"], repe, answers, lookups, msg_data["attach"]))
   if "attach" in msg_data:
     return _script_answer(form_scripts.attach_file(document, msg_data.get("file_field"), repe, answers, lookups, msg_data["attach"]))
   if "field" in msg_data:
