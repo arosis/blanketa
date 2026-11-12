@@ -330,14 +330,7 @@ class ZFO_document:
     # get the copy of original data tree
     # cdt - computation data tree
     cdt = copy.deepcopy(data_tree)
-    # get all inputs that have form602ct=num
-    doc_root = self.content.getroot()
-    num_inputs = doc_root.xpath('//*[@form602ct="num"]')
-    for num_input in num_inputs:          
-      bind_id = num_input.get("form602bind")
-      if bind_id is None:
-        log.warning("Num input has no form602bind attribute")
-        continue
+    for bind_id in self._binds_of_number_fields():
       bind = self._find_bind_elem(bind_id)
       # get paths to elements that are bound to number inputs
       path = self._get_abs_data_path(bind[0])      
@@ -1283,6 +1276,11 @@ class ZFO_document:
       return {}
     
   
+  def _calculated_over_the_file_data(self, bind, path):
+    nsmap = self._get_used_ns_prefix(path)
+    found = self._get_data_root().xpath(path, namespaces=nsmap)
+    return ev.eval_calculate(self, bind, node=found[0], nsmap=nsmap) if len(found) else None
+
   def calculate_values(self, bind_id, repe_data):
     '''
     Goes through binds that depend on
@@ -1310,13 +1308,19 @@ class ZFO_document:
       # 'rep' is ok, if the rep data is bound to another bind, it is ignored
       path = self._get_abs_data_path(dependent_bind, rep) 
       
-      calculated = ev.eval_calculate(self, dependent_bind, path=path)
-      if calculated is None:
+      over_zero_filled = ev.eval_calculate(self, dependent_bind, path=path)
+      if over_zero_filled is None:
         continue
+      # zfoengine: as in recalc_form, the file gets what its own data give, so a field that takes over an empty number
+      # stays empty; only where they give nothing (a sum with an empty number) the zero-filled copy decides
+      calculated = self._calculated_over_the_file_data(dependent_bind, path) or over_zero_filled
       # store calculated value - third elemnt in tuple
       value, bind_id,\
       constr_res, constr_comment,\
       original_value = self.store_value_path(dependent_bind, calculated[2], path)      
+      if constr_res:
+        self._store_one_value_to_tree(self._get_computable_data_root(), bind_id, path,
+                                      self._value_for_calculations(bind_id, over_zero_filled[2]))
       # mark the changes in changelog if the constraint fails
       change_log_entry = (bind_id, path, original_value, calculated[2])
       change_log.append(change_log_entry)
@@ -1490,8 +1494,11 @@ class ZFO_document:
     constr_res = True
     constr_comment = ""
     if not suppress_constraints:
-      # evaluate constraint    
+      # zfoengine: the constraint judges what was written, an empty number as empty, not as the zero calculations use
+      computing = self._get_computable_data_root()
+      self._store_one_value_to_tree(computing, bind_id, abs_path, value)
       constr_res, constr_comment = ev.eval_constraint(self, bind, abs_path)
+      self._store_one_value_to_tree(computing, bind_id, abs_path, self._value_for_calculations(bind_id, value))
     
     # if the constraint is fulfilled, keep the stored data
     if constr_res:

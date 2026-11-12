@@ -423,6 +423,47 @@ def form_with_a_sum():
     return form
 
 
+class NumbersTheUserDeleted(unittest.TestCase):
+    """Sums count a deleted number as zero, as Form Filler does; whatever else reads it finds it empty."""
+
+    def form_whose(self, bind, becomes):
+        form = form_with_a_sum().replace(bind, becomes)
+        self.assertIn(becomes, form)
+        return engine.open_document(form)
+
+    def delete_the_second_number(self, doc):
+        doc.store_value("n2", "50", "sekce-rep-0")
+        return doc.store_value("n2", "", "sekce-rep-0")
+
+    def test_a_field_that_takes_the_number_over_stays_empty(self):
+        doc = self.form_whose(b'<fm:bind Id="c" nodeset="d:c"/>', b'<fm:bind Id="c" nodeset="d:c" depends="n1|n2" calculate="../d:n2"/>')
+        self.delete_the_second_number(doc)
+        self.assertEqual(doc.get_value("c", "sekce-rep-0"), "")
+        doc.store_value("n1", "3", "sekce-rep-0")
+        self.assertEqual(doc.get_value("c", "sekce-rep-0"), "")
+        engine.handle(doc, "recalc_form", "")
+        self.assertEqual(doc.get_value("c", "sekce-rep-0"), "")
+        self.assertEqual(doc.get_value("soucet"), "3")
+
+    def test_a_script_finds_the_number_empty(self):
+        asks = b"""<fm:bind Id="c" nodeset="d:c" depends="n2" calculate="{ Result(GetDocument().GetElement().DataXpath('../d:n2') == '' ? 'empty' : 'filled'); }"/>"""
+        doc = self.form_whose(b'<fm:bind Id="c" nodeset="d:c"/>', asks)
+        self.delete_the_second_number(doc)
+        self.assertEqual(doc.get_value("c", "sekce-rep-0"), "empty")
+
+    def test_a_constraint_that_allows_an_empty_number_lets_it_be_deleted(self):
+        doc = self.form_whose(b'<fm:bind Id="n2" nodeset="d:n2"/>', b"""<fm:bind Id="n2" nodeset="d:n2" constraint=". = '' or . &gt; 10"/>""")
+        self.assertTrue(self.delete_the_second_number(doc)[2])
+        self.assertFalse(doc.get_value("n2", "sekce-rep-0"))
+        self.assertEqual(doc.get_value("soucet"), "0")
+
+    def test_a_constraint_that_wants_a_number_keeps_the_old_one(self):
+        doc = self.form_whose(b'<fm:bind Id="n2" nodeset="d:n2"/>', b'<fm:bind Id="n2" nodeset="d:n2" constraint=". &gt; 10"/>')
+        self.assertFalse(self.delete_the_second_number(doc)[2])
+        self.assertEqual(doc.get_value("n2", "sekce-rep-0"), "50")
+        self.assertEqual(doc.get_value("soucet"), "50")
+
+
 class FilesTheUserChooses(unittest.TestCase):
     """The Nahrát uložená data (XML) button of MPSV forms loads a file the user chooses back into the data."""
 
