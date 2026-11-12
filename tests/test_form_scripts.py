@@ -487,6 +487,18 @@ class FilesTheUserChooses(unittest.TestCase):
         self.assertEqual(typed.get_value("soucet"), "5")
         self.assertFalse(recalculated.get_value("n2", "sekce-rep-0"))
 
+    def test_a_number_the_user_deleted_counts_as_zero_like_form_filler_does(self):
+        doc = engine.open_document(form_with_a_sum())
+        doc.store_value("n1", "100", "sekce-rep-0")
+        doc.store_value("n2", "7", "sekce-rep-0")
+        doc.store_value("n2", "", "sekce-rep-0")
+        self.assertEqual(doc.get_value("soucet"), "100")
+        engine.handle(doc, "recalc_form", "")
+        self.assertEqual(doc.get_value("soucet"), "100")
+        doc.store_value("n1", "200", "sekce-rep-0")
+        self.assertEqual(doc.get_value("soucet"), "200")
+        self.assertFalse(doc.get_value("n2", "sekce-rep-0"))
+
     def test_the_chosen_file_reads_no_other_file(self):
         hostile = ('<!DOCTYPE d [<!ENTITY e SYSTEM "%s">]>' % (ROOT / "VERSION").as_uri()) + SAVED_SECTION.replace("ze souboru", "&e;")
         doc, result = self.click(hostile)

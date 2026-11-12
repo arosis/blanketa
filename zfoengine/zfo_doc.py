@@ -119,6 +119,7 @@ class ZFO_document:
     self.data_root = None
     # tree which the computation will be executed on
     self.computing_data_tree = None
+    self._number_binds = None
     # holds original (empty) model - it is used to create new repeatable sections
     self.original_model = None
     self.readonlybinds = ""
@@ -706,7 +707,19 @@ class ZFO_document:
     Stores value to the specified path in both trees - "calculable" and original.
     '''
     self._store_one_value_to_tree(self._get_data_root(), name, path, value)
-    self._store_one_value_to_tree(self._get_computable_data_root(), name, path, value)
+    self._store_one_value_to_tree(self._get_computable_data_root(), name, path, self._value_for_calculations(name, value))
+
+  def _value_for_calculations(self, bind_id, value):
+    # zfoengine: Form Filler counts a number the user deleted as zero, like one never filled in (checked in Form Filler
+    # 4.81: 200 + deleted + 0 shows 200)
+    if value in (None, "") and bind_id in self._binds_of_number_fields():
+      return "0"
+    return value
+
+  def _binds_of_number_fields(self):
+    if self._number_binds is None:
+      self._number_binds = frozenset(self.content.getroot().xpath('//*[@form602ct="num"]/@form602bind'))
+    return self._number_binds
   
   def _get_ns_prefix(self, ns_uri):
     '''
@@ -1225,12 +1238,12 @@ class ZFO_document:
         att = self._path_contains_att(path)
         if att is None:            
           self.store_value_node(bind.get("Id"), copy, calculated[2])
-          self.store_value_node(bind.get("Id"), calc_copy, cal_calculated[2])
+          self.store_value_node(bind.get("Id"), calc_copy, self._value_for_calculations(bind.get("Id"), cal_calculated[2]))
         else:
           att_owner = copy.getparent()
           self.store_value_node(bind.get("Id"), att_owner, calculated[2], att_name=att)
           calc_att_owner = calc_copy.getparent()
-          self.store_value_node(bind.get("Id"), calc_att_owner, cal_calculated[2], att_name=att)
+          self.store_value_node(bind.get("Id"), calc_att_owner, self._value_for_calculations(bind.get("Id"), cal_calculated[2]), att_name=att)
         # to the results put the returned value from evaluation
         if self.is_bind_file(bind.get("Id")):
           #res[calculated[0]] = self._get_filename_of_bind(path)
