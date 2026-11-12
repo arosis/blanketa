@@ -39,6 +39,9 @@ MAX_UPLOADED_CHARACTERS = 16_000_000
 MAX_ATTACHED_BYTES = 17 * 1024 * 1024  # what MPSV forms take for all the attachments of one application
 MAX_ATTACHED_CHARACTERS = 2 * MAX_ATTACHED_BYTES  # in base64; a file over the limit still decodes, for its refusal to name the limit
 ATTACHMENT_FIELD_TYPE = "bin"
+# The newer MPSV forms, written for FormApps Server: a button hands a chosen file to its script (bib) or adds each chosen
+# file to a repeating section (btm), and a link shows the file an attachment holds (bil).
+UPLOAD_BUTTON_TYPE, FILE_LIST_BUTTON_TYPE, ATTACHMENT_LINK_TYPE = "bib", "btm", "bil"
 NAME_OF_UNNAMED_ATTACHMENT = "priloha"
 FIELD_ONLY_GIVES_ITS_FILE = "save"  # form602menu of a field that hands its file back to the user and takes none
 NO_ANTIVIRUS_NOTICE = "Blanketa vložený soubor antivirem nekontroluje."
@@ -186,6 +189,10 @@ def _repe_text(repetitions):
   return "|||".join(f"block---{bind_id}-rep-{index}" for bind_id, index in repetitions.items()) or None
 
 
+def _data_bind_of(field):
+  return field.get("form602bind") or field.get("form602bindref")
+
+
 class FormActionHost:
   def __init__(self, document, element, repe, answers, lookups, is_started_by_button, uploaded_file=None):
     self.document = document
@@ -213,11 +220,14 @@ class FormActionHost:
     self.document_to_open = None
     self.is_started_by_button = is_started_by_button
     self.uploaded_file = uploaded_file
+    self.types_the_upload_takes = set()
     self.offers_navigation = False
 
   def _current_path(self):
-    owner = next(iter(self.element.xpath("ancestor-or-self::*[@form602bind][1]")), None)
-    binds = self.document._find_bind_elem(owner.get("form602bind")) if owner is not None else []
+    # A button or a link of the newer MPSV forms stands at the data it refers to (form602bindref): their scripts write to
+    # "../d:error" and "../d:filename" beside it.
+    owner = next(iter(self.element.xpath("ancestor-or-self::*[@form602bind or @form602bindref][1]")), None)
+    binds = self.document._find_bind_elem(_data_bind_of(owner)) if owner is not None else []
     if not len(binds):
       return DATA_ROOT_PATH
     return self.document._get_abs_data_path(binds[0], self.repetitions)
@@ -282,22 +292,45 @@ class FormActionHost:
     bind = self._bind(bind_id)
     self._store(bind, self.document._get_abs_data_path(bind, self.repetitions), value)
 
-  def take_file(self, name, content):
-    # Form Filler writes the file in base64 into the field's data, its name and its extension, without the dot and as
-    # the name has it, into the binds the field names (seen in Form Filler 4.81 on an MPSV form).
-    field = self.element
-    for bind_id, value in ((field.get("form602bind"), base64.b64encode(content).decode("ascii")),
-                           (field.get("filenamebind"), name), (field.get("mediatypebind"), file_kinds.extension_as_written(name))):
+  def _write_about_file(self, field, data, name, extension, size):
+    for bind_id, value in ((_data_bind_of(field), data), (field.get("filenamebind"), name), (field.get("mediatypebind"), extension),
+                           (field.get("filesizebind"), size)):
       if bind_id:
         bind = self._bind(bind_id)
         self._store(bind, self.document._get_abs_data_path(bind, self.repetitions), value, is_users_own=True)
 
-  def _attachment_field(self, path):
+  def take_file(self, name, content):
+    # Form Filler writes the file in base64 into the field's data, its name and its extension, without the dot and as
+    # the name has it, into the binds the field names (seen in Form Filler 4.81 on an MPSV form). The web application of
+    # MPSV writes the same and the size in bytes beside them (seen in its saved data in November 2026).
+    self._write_about_file(self.element, base64.b64encode(content).decode("ascii"), name, file_kinds.extension_as_written(name),
+                           str(len(content)))
+
+  def _attachment_field(self, path, asked_by="element.GetBinData"):
     fields = [self.element] if path.strip() in ("", ".") else self._form_elements(path)
-    field = next((field for field in fields if field.get("form602ct") == ATTACHMENT_FIELD_TYPE and field.get("form602bind")), None)
+    field = next((field for field in fields if field.get("form602ct") in (ATTACHMENT_FIELD_TYPE, ATTACHMENT_LINK_TYPE)
+                  and _data_bind_of(field)), None)
     if field is None:
-      raise js602.Unsupported("element.GetBinData")
+      raise js602.Unsupported(asked_by)
     return field
+
+  def put_file(self, path, name, content):
+    field = self._attachment_field(path, "element.SetBinData")
+    self._write_about_file(field, base64.b64encode(content).decode("ascii"), name, file_kinds.extension_as_written(name), str(len(content)))
+
+  def clear_file(self, path):
+    self._write_about_file(self._attachment_field(path, "element.SetBinData"), "", "", "", "")
+
+  def attachment_with_name(self, path):
+    field = self._attachment_field(path)
+    return (self._value_of_bind(field.get("filenamebind")) if field.get("filenamebind") else ""), self._content_of(field)
+
+  def uploaded(self):
+    if self.uploaded_file is None:
+      raise js602.Unsupported("element.GetUploadedFileData")
+    if isinstance(self.uploaded_file, str):
+      return "", self.uploaded_file.encode()
+    return self.uploaded_file
 
   def _value_of_bind(self, bind_id):
     document = self.document
@@ -309,7 +342,7 @@ class FormActionHost:
 
   def _content_of(self, field):
     try:
-      return base64.b64decode(self._value_of_bind(field.get("form602bind")))
+      return base64.b64decode(self._value_of_bind(_data_bind_of(field)))
     except (binascii.Error, ValueError) as error:
       raise js602.Unsupported("element.GetBinData") from error
 
@@ -323,7 +356,8 @@ class FormActionHost:
     if not checks & int(js602.MIMETYPE_CHECK):
       return None
     name = self._value_of_bind(field.get("filenamebind")) if field.get("filenamebind") else ""
-    return file_kinds.fault_of_kind(name, self._content_of(field), file_kinds.extensions_in_filter(field.get("form602ffilter")))
+    allowed = file_kinds.extensions_in_filter(field.get("form602ffilter")) or self.types_the_upload_takes
+    return file_kinds.fault_of_kind(name, self._content_of(field), allowed)
 
   def _section_and_position(self, path):
     found = self._form_elements(path)
@@ -430,11 +464,6 @@ class FormActionHost:
     for tag, written in filled_copies.items():
       for published_beyond_the_written in published.findall(tag)[written:]:
         published.remove(published_beyond_the_written)
-
-  def uploaded_file_data(self):
-    if self.uploaded_file is None:
-      raise js602.Unsupported("element.GetUploadedFileData")
-    return self.uploaded_file
 
   def xpath_in_text(self, content, expression):
     try:
@@ -865,15 +894,142 @@ def attach_file(document, position, repe, answers, lookups=None, file=None):
               before_script=lambda host: host.take_file(file["name"], content))
 
 
+def _limit_of(element, attribute):
+  limit = element.get(attribute) or ""
+  return min(int(limit), MAX_ATTACHED_BYTES) if limit.isascii() and limit.isdigit() else MAX_ATTACHED_BYTES
+
+
+def _size_in_text(size):
+  for unit, bytes_in_unit in (("MB", 1024 * 1024), ("kB", 1024)):
+    if size >= bytes_in_unit:
+      return f"{size / bytes_in_unit:.1f}".replace(".", ",").removesuffix(",0") + "\u00a0" + unit
+  return f"{size}\u00a0B"
+
+
+def _types_in_text(extensions):
+  return ", ".join(sorted(extension.upper() for extension in extensions))
+
+
+def _refusal_of_uploaded_file(button, name, content):
+  if len(content) > _limit_of(button, "form602maxsize"):
+    return f"Soubor je větší než {_size_in_text(_limit_of(button, 'form602maxsize'))}, formulář ho nepřijme."
+  allowed = file_kinds.extensions_in_accept(button.get("form602webaccept"))
+  if allowed and file_kinds.extension_of(name) not in allowed:
+    return f"Formulář tu přijímá jen soubory typu {_types_in_text(allowed)}."
+  return None
+
+
 def run_button_script(document, position, repe, answers, lookups=None, uploaded_file=None):
   buttons = button_elements(document.root)
   if not 0 <= position < len(buttons):
     return None
   element = buttons[position]
+  if isinstance(uploaded_file, dict):
+    return _run_with_uploaded_file(document, position, element, repe, answers, lookups, uploaded_file)
   if not isinstance(uploaded_file, str) or len(uploaded_file) > MAX_UPLOADED_CHARACTERS:
     uploaded_file = None
   retry = {"button": position} if uploaded_file is None else {"button": position, "upload": uploaded_file}
   return _run(document, element, element.get("form602btnclick"), repe, answers, lookups, retry, uploaded_file)
+
+
+def _run_with_uploaded_file(document, position, button, repe, answers, lookups, file):
+  # A file of any kind for the script of an upload button, which puts it where the form keeps the attachment.
+  content = _content_of_chosen_file(file)
+  if content is None or button.get("form602ct") != UPLOAD_BUTTON_TYPE:
+    return None
+  refusal = _refusal_of_uploaded_file(button, file["name"], content)
+  if refusal is not None:
+    return {"stopped": refusal}
+
+  def name_the_types_the_button_takes(host):
+    host.types_the_upload_takes = file_kinds.extensions_in_accept(button.get("form602webaccept"))
+
+  return _run(document, button, button.get("form602btnclick"), repe, answers, lookups, {"button": position, "upload": file},
+              uploaded_file=(file["name"], content), before_script=name_the_types_the_button_takes)
+
+
+def file_list_buttons(root):
+  return [element for element in root.iter() if isinstance(element.tag, str) and element.get("form602ct") == FILE_LIST_BUTTON_TYPE]
+
+
+def _section_and_link_of_list(button):
+  try:
+    found = button.xpath(button.get("form602attchsec") or "", namespaces=FO_NAMESPACES)
+  except (etree.LxmlError, ValueError, TypeError):
+    return None
+  sections = [element for element in found if etree.iselement(element) and element.get("form602repe")] if isinstance(found, list) else []
+  links = sections[0].xpath(".//*[@form602ct=$link]", link=ATTACHMENT_LINK_TYPE) if sections else []
+  return (sections[0], links[0]) if links else None
+
+
+def _sizes_of_listed_files(document, link, outer_repetitions):
+  return [int(size) for size in _texts_at(document, link.get("filesizebind"), outer_repetitions) if size.isascii() and size.isdigit()]
+
+
+def _texts_at(document, bind_id, repetitions):
+  bind = document._find_bind_elem(bind_id or "")
+  if not len(bind):
+    return []
+  path = document._get_abs_data_path(bind[0], repetitions)
+  return [node if isinstance(node, str) else node.text or "" for node in document._get_data_root().xpath(path, namespaces=document._get_used_ns_prefix(path))]
+
+
+def _items_holding_a_file(document, section_bind, link, outer_repetitions):
+  # A list starts with one empty item, which the first file takes; every other item is somebody's file, whatever it lacks.
+  items = len(_texts_at(document, section_bind, outer_repetitions)) or 1
+  first_is_empty = not any("".join(_texts_at(document, bind_id, {**outer_repetitions, section_bind: 0}))
+                           for bind_id in (_data_bind_of(link), link.get("filenamebind")))
+  return 0 if items == 1 and first_is_empty else items
+
+
+def _refusal_of_file_for_list(button, name, content, sizes_listed, files_listed):
+  one, together = _limit_of(button, "form602maxonefilesize"), _limit_of(button, "form602maxallfilessize")
+  if len(content) > one:
+    return f"Soubor je větší než {_size_in_text(one)}, formulář ho nepřijme."
+  allowed = file_kinds.extensions_in_accept(button.get("form602webaccept"))
+  if allowed and file_kinds.extension_of(name) not in allowed:
+    return f"Formulář tu přijímá jen soubory typu {_types_in_text(allowed)}."
+  most = button.get("form602maxoccurs") or ""
+  if most.isascii() and most.isdigit() and files_listed >= int(most):
+    return f"Formulář přijme nejvýš {most} příloh."
+  if sum(sizes_listed) + len(content) > together:
+    return f"Přílohy by dohromady měly víc než {_size_in_text(together)}, formulář soubor nepřijme."
+  return None
+
+
+def add_file_to_list(document, position, repe, answers, lookups=None, file=None):
+  # Each chosen file gets an item of the repeating section the button names, and the script of the item's link judges it.
+  # The item and the script count as one whole, as with a field for a file.
+  buttons = file_list_buttons(document.root)
+  content = _content_of_chosen_file(file)
+  if type(position) is not int or not 0 <= position < len(buttons) or content is None:
+    return None
+  button = buttons[position]
+  section_and_link = _section_and_link_of_list(button)
+  if section_and_link is None:
+    return None
+  section, link = section_and_link
+  section_bind = section.get("form602repe")
+  outer = {name: index for name, index in _repetitions_of(repe).items() if name != section_bind}
+  refusal = _refusal_of_file_for_list(button, file["name"], content, _sizes_of_listed_files(document, link, outer),
+                                      _items_holding_a_file(document, section_bind, link, outer))
+  if refusal is not None:
+    return {"stopped": refusal}
+  item = _items_holding_a_file(document, section_bind, link, outer)
+  start_script = button.get("form602attchuploadstartaction")
+
+  def put_the_file_into_its_item(host):
+    host.types_the_upload_takes = file_kinds.extensions_in_accept(button.get("form602webaccept"))
+    if is_action_script(start_script):
+      js602.run_form_action(document.script_interpreter(), start_script, host)
+    if item > 0:
+      host._charge_section_change()
+      document.clone_section(section_bind, _repe_text(outer))
+    host.take_file(file["name"], content)
+
+  script = link.get("form602onchange") if is_action_script(link.get("form602onchange")) else None
+  return _run(document, link, script, _repe_text({**outer, section_bind: item}), answers, lookups,
+              {"file_list": position, "attach": file}, before_script=put_the_file_into_its_item)
 
 
 def run_field_change_script(document, bind_id, repe, answers, lookups=None, values=()):

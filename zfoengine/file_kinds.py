@@ -22,6 +22,7 @@ CONTENT_STARTS = {
   "docx": ZIP_ARCHIVE, "xlsx": ZIP_ARCHIVE, "odt": ZIP_ARCHIVE, "doc": OLE_DOCUMENT, "xls": OLE_DOCUMENT,
 }
 TEXT_MARKS = (b"\xef\xbb\xbf", b"\xff\xfe", b"\xfe\xff")
+EXTENSION_IN_ACCEPT = re.compile(r"\.([A-Za-z0-9]{1,10})")
 EXTENSION_IN_FILTER = re.compile(r"\*\.([A-Za-z0-9]{1,10})")
 
 UNKNOWN_FORMAT, FORMAT_MISMATCH, FORMAT_NOT_ALLOWED = "unknown format", "format mismatch", "format not allowed"
@@ -40,6 +41,12 @@ def extensions_in_filter(file_filter):
   # Every second part is what the dialog matches, the parts before them only describe it.
   patterns = ";".join((file_filter or "").split("|")[1::2]).split(";")
   found = (EXTENSION_IN_FILTER.fullmatch(pattern.strip()) for pattern in patterns)
+  return {extension.group(1).lower() for extension in found if extension}
+
+
+def extensions_in_accept(accept):
+  # form602webaccept is the accept attribute of a file input: ".pdf,.odt,.jpg".
+  found = (EXTENSION_IN_ACCEPT.fullmatch(part.strip()) for part in (accept or "").split(","))
   return {extension.group(1).lower() for extension in found if extension}
 
 
