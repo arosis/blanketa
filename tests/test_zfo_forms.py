@@ -527,3 +527,36 @@ class FieldValuesInTheCheck(unittest.TestCase):
                   for element in page.xpath("//*[@data-format]")}
         self.assertEqual(fields, {"dat": ("date-pick", "d.M.yyyy", None), "cas": ("timeInput", "H:mm", None),
                                   "pocet": ("numberInput", "# ##0,00", None), "den": ("outputelement", "d. M. yyyy", None)})
+
+
+FORM_WITH_FUNCTION_CONDITIONS = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#" Id="_1"><dsig:Object Id="_2" MimeType="text/xml">
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:fm="http://software602.cz/forms" xmlns:d="http://software602.cz/sample">
+<fm:formparams><fm:model><fm:instance><d:root><d:program>%s</d:program><d:castka/><d:jmeno/><d:ucel/></d:root></fm:instance>
+<fm:bind Id="k" nodeset="/d:root"><fm:bind Id="program" nodeset="d:program"/>
+<fm:bind Id="castka" nodeset="d:castka" required="&quot;And( DataXpath(/d:root/d:program[1]!='A'), DataXpath(/d:root/d:program[1]!='B'), DataXpath(/d:root/d:program[1]!='C'), DataXpath(/d:root/d:program[1]!='D') )&quot;"/>
+<fm:bind Id="ucel" nodeset="d:ucel" required="&quot;Not( DataXpath(/d:root/d:program[1]='A'), DataXpath(/d:root/d:program[1]='B') )&quot;"/>
+<fm:bind Id="jmeno" nodeset="d:jmeno" required="true()"/></fm:bind></fm:model></fm:formparams>
+</fo:root></dsig:Object></dsig:Signature>"""
+
+
+class ConditionsWrittenAsFunctions(unittest.TestCase):
+    def check(self, program):
+        doc = engine.open_document((FORM_WITH_FUNCTION_CONDITIONS % program).encode())
+        answer = engine.handle(doc, "check_form", "")[0]
+        return sorted(problem["field"] for problem in answer["data"]), answer["scripts"]
+
+    def test_and_with_four_parts_holds_when_all_of_them_hold(self):
+        self.assertIn("castka", self.check("E")[0])
+
+    def test_and_with_four_parts_fails_on_any_of_them(self):
+        for program in "ABCD":
+            with self.subTest(program):
+                self.assertNotIn("castka", self.check(program)[0])
+
+    def test_a_function_called_with_more_values_than_it_takes_is_left_out_and_the_rest_is_checked(self):
+        self.assertEqual(self.check("E"), (["castka", "jmeno"], ["podmínka formuláře, kterou nejde vyhodnotit"]))
+
+    def test_the_sample_names_the_required_amount_the_user_deleted(self):
+        doc = engine.open_document(zipfile.ZipFile(ROOT / "samples/olk-dotace/form.zfo").read("form.fo"))
+        engine.handle(doc, "store_val", {"field": "z_celkem", "value": "", "repe": "", "input_id": "z_celkem"})
+        self.assertIn("z_celkem", [problem["field"] for problem in engine.handle(doc, "check_form", "")[0]["data"]])

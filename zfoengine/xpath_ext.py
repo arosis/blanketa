@@ -194,8 +194,8 @@ class ExtendedXpathEvaluator:
     res = round(num, acc)
     return res
   
-  def And(self, context, op1, op2):
-    return op1 and op2
+  def And(self, context, *args):
+    return reduce(lambda x,y: x and y, args)
   
   def Or(self, context, *args):
     '''
