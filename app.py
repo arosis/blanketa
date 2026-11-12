@@ -58,6 +58,7 @@ SHOWN_CERTIFICATES_BY_ID = {}
 IMPORTS = {}
 LOCK = threading.Lock()
 MAX_SESSIONS = 8
+MAX_FILES_PREPARED_TO_SAVE = 4  # of one form; the user may ask for several attachments before a host fetched the first
 PLAIN_TEXT = "text/plain"
 PLAIN_TEXT_UTF8 = "text/plain; charset=utf-8"
 HTML_UTF8 = "text/html; charset=utf-8"
@@ -593,8 +594,7 @@ class Handler(BaseHTTPRequestHandler):
             if index >= len(message.attachments):
                 return None
             return message.info["attachments"][index]["name"], message.attachments[index]
-        prepared = session.get("file_to_save")
-        return prepared[1:] if prepared is not None and prepared[0] == index else None
+        return session.get("files_to_save", {}).get(index)
 
     def _serve_attachment(self, query):
         session = SESSIONS.get(first_query_value(query, "s"))
@@ -720,11 +720,16 @@ class Handler(BaseHTTPRequestHandler):
             request = json.loads(body or b"{}")
         except ValueError:
             return self._send_not_found()
-        file = form_scripts.file_of_field(session["doc"], request.get("file_field"), request.get("repe") or "")
+        if not isinstance(request, dict) or not isinstance(request.get("repe", ""), str):
+            return self._send_not_found()
+        file = form_scripts.file_of_field(session["doc"], request.get("file_field"), request.get("repe", ""))
         if file is None:
             return self._send_not_found()
-        index = session.get("file_to_save", (0,))[0] + 1
-        session["file_to_save"] = (index, *file)
+        prepared = session.setdefault("files_to_save", {})
+        index = max(prepared, default=0) + 1
+        prepared[index] = file
+        for older in sorted(prepared)[:-MAX_FILES_PREPARED_TO_SAVE]:
+            del prepared[older]
         return self._send_json({"index": index, "name": file[0]})
 
     def _save_zfo(self, session, query, body):

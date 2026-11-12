@@ -273,6 +273,18 @@ class SavingTheFileOfAField(unittest.TestCase):
         for path in (f"/attachment?s={session}&i=0", f"/attachment?s={session}&i=2", "/attachment?s=jina&i=1"):
             with self.subTest(path):
                 self.assertEqual(self.request("GET", path)[0], 404)
-        for body in (b"", b"{", json.dumps({"file_field": FIELD_THAT_GIVES_ITS_FILE}).encode(), json.dumps({"file_field": "0"}).encode()):
+        for body in (b"", b"{", b"[]", b"3", b'"x"', json.dumps({"file_field": FIELD_THAT_TAKES_A_FILE, "repe": 5}).encode(),
+                     json.dumps({"file_field": FIELD_THAT_GIVES_ITS_FILE}).encode(), json.dumps({"file_field": "0"}).encode()):
             with self.subTest(body):
                 self.assertEqual(self.request("POST", f"/file-of-field?s={session}", body)[0], 404)
+
+    def test_files_asked_for_one_after_another_stay_ready_until_the_oldest_gives_way(self):
+        session = app.new_session({"name": "s-prilohou", "doc": engine.open_document((FORM % (FILTER, "", '""')).encode())})
+        attached = json.dumps({"type": "run_form_script", "data": {"file_field": FIELD_THAT_TAKES_A_FILE, "repe": "", "attach": chosen("a.pdf", PDF)}})
+        self.request("POST", f"/ipc?s={session}", attached.encode())
+        ask = json.dumps({"file_field": FIELD_THAT_TAKES_A_FILE}).encode()
+        numbers = [json.loads(self.request("POST", f"/file-of-field?s={session}", ask)[1])["index"] for _ in range(app.MAX_FILES_PREPARED_TO_SAVE + 1)]
+        self.assertEqual(self.request("GET", f"/attachment?s={session}&i={numbers[0]}")[0], 404)
+        for number in numbers[1:]:
+            with self.subTest(number):
+                self.assertEqual(self.request("GET", f"/attachment?s={session}&i={number}")[:2], (200, PDF))
