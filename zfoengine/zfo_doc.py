@@ -1091,16 +1091,18 @@ class ZFO_document:
     return rules
 
   def _evaluate_condition(self, condition, otherwise, evaluate, *args, **kwargs):
-    # Published forms carry conditions XPath cannot read (an unclosed bracket in MPSV forms) or that call a function
-    # with more values than it takes (TypeError): such a condition is left out and the check says it is not complete,
-    # instead of the whole check failing.
+    # Published forms carry conditions XPath cannot read (an unclosed bracket in MPSV forms) or whose function fails
+    # on what it is given (too many values, text where a number belongs): such a condition is left out and the check
+    # says it is not complete, instead of the whole check failing.
     try:
       return evaluate(*args, **kwargs)
-    except (etree.XPathError, TypeError) as error:
+    except etree.XPathError as error:
       log.info("Condition left out of the check: %s (%s)", condition, error)
-      self.conditions_left_out += 1
-      self.script_problems.add(UNREADABLE_CONDITION)
-      return otherwise
+    except (TypeError, ValueError) as error:
+      log.warning("Condition left out of the check: %s (%s: %s)", condition, type(error).__name__, error)
+    self.conditions_left_out += 1
+    self.script_problems.add(UNREADABLE_CONDITION)
+    return otherwise
 
   def get_multiswitch_values(self):
     '''

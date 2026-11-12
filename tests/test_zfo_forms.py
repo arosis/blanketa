@@ -529,19 +529,20 @@ class FieldValuesInTheCheck(unittest.TestCase):
                                   "pocet": ("numberInput", "# ##0,00", None), "den": ("outputelement", "d. M. yyyy", None)})
 
 
+MISCALLED_NOT = "Not( DataXpath(/d:root/d:program[1]='A'), DataXpath(/d:root/d:program[1]='B') )"
 FORM_WITH_FUNCTION_CONDITIONS = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#" Id="_1"><dsig:Object Id="_2" MimeType="text/xml">
 <fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:fm="http://software602.cz/forms" xmlns:d="http://software602.cz/sample">
 <fm:formparams><fm:model><fm:instance><d:root><d:program>%s</d:program><d:castka/><d:jmeno/><d:ucel/></d:root></fm:instance>
 <fm:bind Id="k" nodeset="/d:root"><fm:bind Id="program" nodeset="d:program"/>
 <fm:bind Id="castka" nodeset="d:castka" required="&quot;And( DataXpath(/d:root/d:program[1]!='A'), DataXpath(/d:root/d:program[1]!='B'), DataXpath(/d:root/d:program[1]!='C'), DataXpath(/d:root/d:program[1]!='D') )&quot;"/>
-<fm:bind Id="ucel" nodeset="d:ucel" required="&quot;Not( DataXpath(/d:root/d:program[1]='A'), DataXpath(/d:root/d:program[1]='B') )&quot;"/>
+<fm:bind Id="ucel" nodeset="d:ucel" required="&quot;%s&quot;"/>
 <fm:bind Id="jmeno" nodeset="d:jmeno" required="true()"/></fm:bind></fm:model></fm:formparams>
 </fo:root></dsig:Object></dsig:Signature>"""
 
 
 class ConditionsWrittenAsFunctions(unittest.TestCase):
-    def check(self, program):
-        doc = engine.open_document((FORM_WITH_FUNCTION_CONDITIONS % program).encode())
+    def check(self, program, condition_of_purpose=MISCALLED_NOT):
+        doc = engine.open_document((FORM_WITH_FUNCTION_CONDITIONS % (program, condition_of_purpose)).encode())
         answer = engine.handle(doc, "check_form", "")[0]
         return sorted(problem["field"] for problem in answer["data"]), answer["scripts"]
 
@@ -555,6 +556,12 @@ class ConditionsWrittenAsFunctions(unittest.TestCase):
 
     def test_a_function_called_with_more_values_than_it_takes_is_left_out_and_the_rest_is_checked(self):
         self.assertEqual(self.check("E"), (["castka", "jmeno"], ["podmínka formuláře, kterou nejde vyhodnotit"]))
+
+    def test_a_function_given_text_for_a_number_is_left_out_and_named_in_the_log(self):
+        with self.assertLogs("zfo.zfo_doc", "WARNING") as logs:
+            checked = self.check("E", "Round( 'abc' , 2 )")
+        self.assertEqual(checked, (["castka", "jmeno"], ["podmínka formuláře, kterou nejde vyhodnotit"]))
+        self.assertIn("ValueError", logs.output[0])
 
     def test_the_sample_names_the_required_amount_the_user_deleted(self):
         doc = engine.open_document(zipfile.ZipFile(ROOT / "samples/olk-dotace/form.zfo").read("form.fo"))
