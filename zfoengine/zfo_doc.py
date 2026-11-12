@@ -1268,14 +1268,15 @@ class ZFO_document:
     # some of those binds read, are not there yet
     return self.recalc_form(only=self._get_system_binds())
 
-  def calculate_what_a_published_form_derives_from_system_binds(self):
-    # zfoengine: a form nobody filled in has nothing stored with its system binds
+  def calculate_a_form_nobody_filled_in(self):
+    # zfoengine: Form Filler calculates a form when it opens it (seen in 4.81: counters, totals and the form's own number
+    # are in the data before the user touches anything). A filled-in form keeps what was stored with it.
     if self._find_filled_data_object() is not None:
       return {}
     try:
-      return self.recalc_form(starting_at=self._get_system_binds())
+      return self.recalc_form()
     except RecursionError:
-      log.info("Binds of the form depend on each other, what depends on its system binds stays as published")
+      log.info("Binds of the form depend on each other, the form stays as published")
       return {}
     
   

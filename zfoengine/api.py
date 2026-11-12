@@ -133,9 +133,9 @@ def data_element(doc):
     return copy.deepcopy(doc._get_data_root().getroot())
 
 
-def calculate_what_a_published_form_derives_from_system_binds(doc):
+def calculate_a_form_nobody_filled_in(doc):
   with _LOCK:
-    return doc.calculate_what_a_published_form_derives_from_system_binds()
+    return doc.calculate_a_form_nobody_filled_in()
 
 
 def data_text(doc, path):

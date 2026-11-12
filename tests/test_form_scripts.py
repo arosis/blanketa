@@ -200,6 +200,29 @@ FORM_WITH_SYSTEM_BIND = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09
 </fm:model></fm:formparams></fo:root></dsig:Object></dsig:Signature>"""
 
 
+FORM_WITH_A_LIST_WITHOUT_VALUES = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#" Id="_1"><dsig:Object Id="_2" MimeType="text/xml">
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:fm="http://software602.cz/forms" xmlns:d="http://software602.cz/sample">
+<fm:formparams><fm:model><fm:instance><d:root><d:okres0/><d:okres/></d:root></fm:instance>
+<fm:bind Id="k" nodeset="/d:root"><fm:bind Id="okres0" nodeset="d:okres0"/>
+<fm:bind Id="okres" nodeset="d:okres" depends="okres0" calculate="&quot;GetListItemData( okresy , ../d:okres0 , @itemtext )&quot;"/></fm:bind>
+</fm:model><fm:enum name="okresy"><fm:list><fm:listitem itemtext="Blansko" value=""/><fm:listitem itemtext="Znojmo" value=""/></fm:list></fm:enum>
+</fm:formparams></fo:root></dsig:Object></dsig:Signature>"""
+
+
+class ListsWhoseItemsCarryNoValue(unittest.TestCase):
+    def setUp(self):
+        self.doc = engine.open_document(FORM_WITH_A_LIST_WITHOUT_VALUES.encode())
+
+    def test_a_field_nothing_was_chosen_in_names_no_item_of_the_list(self):
+        # Form Filler 4.81 leaves the copy of an unchosen district empty in the forms of Jihomoravský kraj.
+        engine.calculate_a_form_nobody_filled_in(self.doc)
+        self.assertFalse(self.doc.get_value("okres"))
+
+    def test_a_chosen_item_is_found_by_its_text(self):
+        engine.handle(self.doc, "store_val", {"field": "okres0", "value": "Znojmo", "repe": "", "input_id": "okres0"})
+        self.assertEqual(self.doc.get_value("okres"), "Znojmo")
+
+
 class SystemBinds(unittest.TestCase):
     """Binds depending on "system" are calculated from the form's own settings, as Form Filler does when a form opens."""
     def setUp(self):
@@ -210,22 +233,32 @@ class SystemBinds(unittest.TestCase):
         self.assertEqual(self.doc.get_value("email"), "ulozeny@example.cz")
 
     def test_a_published_form_has_nothing_stored_so_what_depends_on_them_is_calculated_once_its_lists_are_there(self):
-        engine.calculate_what_a_published_form_derives_from_system_binds(self.doc)
+        engine.calculate_a_form_nobody_filled_in(self.doc)
         self.assertEqual(self.doc.get_value("email"), "PrijemcePodani@example.cz")
+
+    def test_a_published_form_is_calculated_whole_as_form_filler_does_on_opening(self):
+        # Form Filler 4.81 has the counters and totals of an MPSV form in its data before the user touches anything.
+        with_a_counter = FORM_WITH_SYSTEM_BIND.replace("<d:seznam/>", '<d:seznam/><d:polozky pocet=""><d:polozka/><d:polozka/></d:polozky>').replace(
+            "</fm:bind>\n</fm:model>", '<fm:bind Id="pocet" nodeset="d:polozky/@pocet" calculate="count(../d:polozka)"/></fm:bind>\n</fm:model>')
+        doc = engine.open_document(with_a_counter.encode())
+        self.assertFalse(doc.get_value("pocet"))
+        engine.calculate_a_form_nobody_filled_in(doc)
+        self.assertEqual(doc.get_value("pocet"), "2")
+        self.assertFalse(doc.is_changed)
 
     def test_a_filled_form_keeps_what_was_stored_with_it(self):
         filled = FORM_WITH_SYSTEM_BIND.replace("</dsig:Object></dsig:Signature>", "</dsig:Object><dsig:Object>"
                                                '<d:root xmlns:d="http://software602.cz/sample"><d:seznam>PrijemcePodani</d:seznam>'
                                                "<d:email>vyplneny@example.cz</d:email></d:root></dsig:Object></dsig:Signature>")
         doc = engine.open_document(filled.encode())
-        engine.calculate_what_a_published_form_derives_from_system_binds(doc)
+        engine.calculate_a_form_nobody_filled_in(doc)
         self.assertEqual(doc.get_value("email"), "vyplneny@example.cz")
 
     def test_binds_that_depend_on_each_other_do_not_keep_a_published_form_from_opening(self):
         circular = FORM_WITH_SYSTEM_BIND.replace("<d:seznam/>", "<d:seznam/><d:kruh/>").replace('depends="seznam"', 'depends="seznam|kruh"').replace(
             "</fm:bind>\n</fm:model>", '<fm:bind Id="kruh" nodeset="d:kruh" depends="email" calculate="/d:root/d:email"/></fm:bind>\n</fm:model>')
         doc = engine.open_document(circular.encode())
-        engine.calculate_what_a_published_form_derives_from_system_binds(doc)
+        engine.calculate_a_form_nobody_filled_in(doc)
         self.assertEqual(doc.get_value("seznam"), "PrijemcePodani")
 
     def test_recalculation_calculates_them_and_what_depends_on_them(self):
