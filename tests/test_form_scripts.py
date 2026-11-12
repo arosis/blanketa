@@ -345,6 +345,14 @@ class WindowFunctions(unittest.TestCase):
         self.assertIn("<x>&e;</x>", saved)
         self.assertNotIn((ROOT / "VERSION").read_text().strip(), saved)
 
+    def test_a_stylesheet_gets_only_the_part_of_the_data_the_script_names(self):
+        # Form Filler 4.81 saves <Data …> from an MPSV form whose script names /d:root/d:Data and the stylesheet XmlExport.
+        part_name = stylesheet("Nazev", "<part><xsl:value-of select='local-name(/*)'/></part>")
+        doc = engine.open_document(form_with_stylesheets(
+            "var p = new DataParam(); p.xslName = 'Nazev'; p.dataPartXPath = '/d:root/d:sekce';"
+            " GetDocument().SaveData(GetDocument().GetFormData(p), 'cast.xml');", (part_name,)))
+        self.assertIn("<part>sekce</part>", form_scripts.run_button_script(doc, 0, "", [])["save"]["content"])
+
     def test_a_missing_part_of_the_data_stops_the_script(self):
         self.assertEqual(self.click("var p = new DataParam(); p.dataPartXPath = '/d:root/d:neni'; GetDocument().GetFormData(p);")["refused"],
                          "GetFormData")

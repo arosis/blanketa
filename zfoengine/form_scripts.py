@@ -15,6 +15,8 @@
 #
 # A dialog cannot wait for its answer here, the page lives elsewhere. A script asking a question is undone, the page asks,
 # and the script runs again from its start with the answers given so far.
+import base64
+import binascii
 import copy
 import logging
 import re
@@ -22,7 +24,7 @@ import re
 import lxml.etree as etree
 
 from . import evaluate as ev
-from . import form_stylesheets, js602, ns, zfo_doc
+from . import file_kinds, form_stylesheets, js602, ns, zfo_doc
 
 log = logging.getLogger("zfo.form_scripts")
 
@@ -34,6 +36,10 @@ MAX_QUESTIONS_PER_RUN = 8
 MAX_NAMED_PARAMETERS = 1_000
 MAX_LOOKUPS_PER_RUN = 3
 MAX_UPLOADED_CHARACTERS = 16_000_000
+MAX_ATTACHED_BYTES = 17 * 1024 * 1024  # what MPSV forms take for all the attachments of one application
+ATTACHMENT_FIELD_TYPE = "bin"
+FIELD_ONLY_GIVES_ITS_FILE = "save"  # form602menu of a field that hands its file back to the user and takes none
+NO_ANTIVIRUS_NOTICE = "Blanketa vložený soubor antivirem nekontroluje."
 MAX_STYLESHEET_RUNS_PER_RUN = 50  # a stylesheet's own work spends no budget; MPSV forms run 7 per click
 # Lists of the addresses a form would send to MPSV's own service, in the two generations of MPSV forms. The form gets an
 # empty list: Blanketa checks the addresses itself in RÚIAN (ruian.py), after the user agrees.
@@ -53,10 +59,12 @@ DATA_ROOT_PATH = "/*"
 SCRIPT_DATA_PARSER = etree.XMLParser(resolve_entities=False, no_network=True, load_dtd=False)
 PLAIN_FILE_NAME = r"[^\\/:*?\"<>|\x00-\x1f.][^\\/:*?\"<>|\x00-\x1f]{0,200}"
 SAVED_DATA_NAME = re.compile(PLAIN_FILE_NAME + r"\.xml", re.I)
+ATTACHED_FILE_NAME = re.compile(PLAIN_FILE_NAME)
 PRINTED_FORM_NAME = re.compile(PLAIN_FILE_NAME + r"\.pdf", re.I)
 XML_LANG_ATTRIBUTE = "{http://www.w3.org/XML/1998/namespace}lang"
 FO_NAMESPACES = {"fo": ns.FO_URI, "fm": ns.FM_URI}
 TRAILING_POSITION = re.compile(r"^(.*)\[(\d+)\]$", re.S)
+FIRST_OF_AN_ATTRIBUTE = re.compile(r"(/@[^/\[\]]+)\[1\]$")
 ARES_REGISTERS = {register: f"https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/{register}/"
                   for register in ("ekonomicke-subjekty", "ekonomicke-subjekty-res")}
 ARES_SUBJECT_URL = re.compile(r"https://ares\.gov\.cz/ekonomicke-subjekty-v-be/rest/(ekonomicke-subjekty(?:-res)?)/([0-9]{8})")
@@ -244,9 +252,10 @@ class FormActionHost:
     if self.writes > MAX_WRITES_PER_RUN or self.written_characters > MAX_WRITTEN_CHARACTERS_PER_RUN:
       raise js602.Exhausted("zápisy")
 
-  def _store(self, bind, path, value):
+  def _store(self, bind, path, value, is_users_own=False):
     document = self.document
-    self._charge_write(value)
+    if not is_users_own:
+      self._charge_write(value)
     try:
       if not document._get_data_root().xpath(path, namespaces=document._get_used_ns_prefix(path)):
         raise js602.Unsupported("SetData")
@@ -262,12 +271,57 @@ class FormActionHost:
     return binds[0]
 
   def set_data(self, path, bind_id, value):
+    # MPSV forms write the size of an attachment to ".../@Velikost[1]"; an element has one attribute of a name.
+    path = FIRST_OF_AN_ATTRIBUTE.sub(r"\1", path)
     absolute = path if path.startswith("/") else self._current_path() + "/" + path
     self._store(self._bind(bind_id), absolute, value)
 
   def set_data_to(self, bind_id, value):
     bind = self._bind(bind_id)
     self._store(bind, self.document._get_abs_data_path(bind, self.repetitions), value)
+
+  def take_file(self, name, content):
+    # Form Filler writes the file in base64 into the field's data, its name and its extension without the dot into the
+    # binds the field names (seen in Form Filler 4.81 on an MPSV form).
+    field = self.element
+    for bind_id, value in ((field.get("form602bind"), base64.b64encode(content).decode("ascii")),
+                           (field.get("filenamebind"), name), (field.get("mediatypebind"), file_kinds.extension_of(name))):
+      if bind_id:
+        bind = self._bind(bind_id)
+        self._store(bind, self.document._get_abs_data_path(bind, self.repetitions), value, is_users_own=True)
+
+  def _attachment_field(self, path):
+    fields = [self.element] if path.strip() in ("", ".") else self._form_elements(path)
+    field = next((field for field in fields if field.get("form602ct") == ATTACHMENT_FIELD_TYPE and field.get("form602bind")), None)
+    if field is None:
+      raise js602.Unsupported("element.GetBinData")
+    return field
+
+  def _value_of_bind(self, bind_id):
+    document = self.document
+    path = document._get_abs_data_path(self._bind(bind_id), self.repetitions)
+    nodes = document._get_data_root().xpath(path, namespaces=document._get_used_ns_prefix(path))
+    if not nodes:
+      return ""
+    return nodes[0] if isinstance(nodes[0], str) else nodes[0].text or ""
+
+  def _content_of(self, field):
+    try:
+      return base64.b64decode(self._value_of_bind(field.get("form602bind")))
+    except (binascii.Error, ValueError) as error:
+      raise js602.Unsupported("element.GetBinData") from error
+
+  def attachment(self, path):
+    return self._content_of(self._attachment_field(path))
+
+  def fault_of_attachment(self, path, checks):
+    field = self._attachment_field(path)
+    if checks & int(js602.ANTIVIRUS_CHECK) and NO_ANTIVIRUS_NOTICE not in self.notices:
+      self.notices.append(NO_ANTIVIRUS_NOTICE)
+    if not checks & int(js602.MIMETYPE_CHECK):
+      return None
+    name = self._value_of_bind(field.get("filenamebind")) if field.get("filenamebind") else ""
+    return file_kinds.fault_of_kind(name, self._content_of(field), file_kinds.extensions_in_filter(field.get("form602ffilter")))
 
   def _section_and_position(self, path):
     found = self._form_elements(path)
@@ -413,6 +467,8 @@ class FormActionHost:
       return self._data_part(data_part)
     if self.document.get_template_text(stylesheet_name) is None:
       raise js602.Unsupported("GetFormData")
+    if data_part:
+      return self.transform_data(self._data_part(data_part), stylesheet_name)
     return str(self._run_stylesheet(stylesheet_name))
 
   def _data_part(self, path):
@@ -677,7 +733,7 @@ def _use_czech_for_form_texts(document):
     root.set(XML_LANG_ATTRIBUTE, "cs")
 
 
-def _run(document, element, script, repe, answers, lookups, retry, uploaded_file=None):
+def _run(document, element, script, repe, answers, lookups, retry, uploaded_file=None, before_script=None):
   _use_czech_for_form_texts(document)
   saved_data = copy.deepcopy(document._get_data_root())
   saved_computing_data = copy.deepcopy(document._get_computable_data_root())
@@ -690,7 +746,10 @@ def _run(document, element, script, repe, answers, lookups, retry, uploaded_file
   document.script_running = True
   outcome = None
   try:
-    js602.run_form_action(document.script_interpreter(), script, host)
+    if before_script is not None:
+      before_script(host)
+    if script is not None:
+      js602.run_form_action(document.script_interpreter(), script, host)
   except _AnswerNeeded as question:
     outcome = {"question": {"text": question.text, "title": question.title,
                             "retry": {**retry, "repe": repe or "", "answers": list(answers), "lookups": lookups}}}
@@ -732,6 +791,54 @@ def _choose_whispered_item(document, element, bind_id, repe):
   chosen = document.root.xpath("//fm:enum[@name=$list]/fm:list/fm:listitem[@itemtext=$text][1]/@value",
                                namespaces=FO_NAMESPACES, list=list_name, text=typed)
   document.script_named_parameters.update({"ACIItemId": str(chosen[0]) if chosen else "", "ACIText": typed})
+
+
+def file_fields(root):
+  # Their position is how the page and the engine agree on one: MPSV forms bind the field that loads saved data and the
+  # field that takes an attachment to the same place in the data.
+  return [element for element in root.iter() if isinstance(element.tag, str) and element.get("form602ct") == ATTACHMENT_FIELD_TYPE
+          and element.get("form602bind")]
+
+
+def _field_that_takes_files(document, position):
+  fields = file_fields(document.root)
+  if type(position) is not int or not 0 <= position < len(fields) or fields[position].get("form602menu") == FIELD_ONLY_GIVES_ITS_FILE:
+    return None
+  return fields[position]
+
+
+def _content_of_chosen_file(file):
+  if not isinstance(file, dict) or not isinstance(file.get("name"), str) or not isinstance(file.get("content"), str):
+    return None
+  if not ATTACHED_FILE_NAME.fullmatch(file["name"]):
+    return None
+  try:
+    return base64.b64decode(file["content"], validate=True)
+  except (binascii.Error, ValueError):
+    return None
+
+
+def _refusal_of_chosen_file(field, name, content):
+  if len(content) > MAX_ATTACHED_BYTES:
+    return f"Soubor je větší než {MAX_ATTACHED_BYTES // (1024 * 1024)}\u00a0MB, formulář ho nepřijme."
+  allowed = file_kinds.extensions_in_filter(field.get("form602ffilter"))
+  if field.get("form602ffiltertype") == "strict" and allowed and file_kinds.extension_of(name) not in allowed:
+    return "Formulář tu přijímá jen soubory typu " + ", ".join(sorted(extension.upper() for extension in allowed)) + "."
+  return None
+
+
+def attach_file(document, position, repe, answers, lookups=None, file=None):
+  # The file goes into the data and the field's script runs as one whole: a script that stops leaves no file behind.
+  field = _field_that_takes_files(document, position)
+  content = _content_of_chosen_file(file)
+  if field is None or content is None:
+    return None
+  refusal = _refusal_of_chosen_file(field, file["name"], content)
+  if refusal is not None:
+    return {"stopped": refusal}
+  script = field.get("form602onchange") if is_action_script(field.get("form602onchange")) else None
+  return _run(document, field, script, repe, answers, lookups, {"file_field": position, "attach": file},
+              before_script=lambda host: host.take_file(file["name"], content))
 
 
 def run_button_script(document, position, repe, answers, lookups=None, uploaded_file=None):
