@@ -681,10 +681,13 @@
       native.postMessage({action: 'saveAttachment', files: [{url, name}], folder: false, open: false});
       return;
     }
+    const file = await fetch(url);
+    if (!file.ok) { setStatus('Přílohu se nepodařilo stáhnout.'); return; }
     const link = document.createElement('a');
-    link.href = url;
+    link.href = URL.createObjectURL(await file.blob());
     link.download = name;
     link.click();
+    URL.revokeObjectURL(link.href);
     setStatusMarkup(`Příloha stažena jako <b>${escapeHtml(name)}</b>`);
   };
   window.zfoAttachmentSaved = path => savedStatus('Příloha uložena do', path);
