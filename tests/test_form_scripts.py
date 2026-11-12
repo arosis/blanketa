@@ -200,6 +200,29 @@ FORM_WITH_SYSTEM_BIND = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09
 </fm:model></fm:formparams></fo:root></dsig:Object></dsig:Signature>"""
 
 
+FORM_WITH_A_LIST_WITHOUT_VALUES = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#" Id="_1"><dsig:Object Id="_2" MimeType="text/xml">
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:fm="http://software602.cz/forms" xmlns:d="http://software602.cz/sample">
+<fm:formparams><fm:model><fm:instance><d:root><d:okres0/><d:okres/></d:root></fm:instance>
+<fm:bind Id="k" nodeset="/d:root"><fm:bind Id="okres0" nodeset="d:okres0"/>
+<fm:bind Id="okres" nodeset="d:okres" depends="okres0" calculate="&quot;GetListItemData( okresy , ../d:okres0 , @itemtext )&quot;"/></fm:bind>
+</fm:model><fm:enum name="okresy"><fm:list><fm:listitem itemtext="Blansko" value=""/><fm:listitem itemtext="Znojmo" value=""/></fm:list></fm:enum>
+</fm:formparams></fo:root></dsig:Object></dsig:Signature>"""
+
+
+class ListsWhoseItemsCarryNoValue(unittest.TestCase):
+    def setUp(self):
+        self.doc = engine.open_document(FORM_WITH_A_LIST_WITHOUT_VALUES.encode())
+
+    def test_a_field_nothing_was_chosen_in_names_no_item_of_the_list(self):
+        # Form Filler 4.81 leaves the copy of an unchosen district empty in the forms of Jihomoravský kraj.
+        engine.calculate_a_form_nobody_filled_in(self.doc)
+        self.assertFalse(self.doc.get_value("okres"))
+
+    def test_a_chosen_item_is_found_by_its_text(self):
+        engine.handle(self.doc, "store_val", {"field": "okres0", "value": "Znojmo", "repe": "", "input_id": "okres0"})
+        self.assertEqual(self.doc.get_value("okres"), "Znojmo")
+
+
 class SystemBinds(unittest.TestCase):
     """Binds depending on "system" are calculated from the form's own settings, as Form Filler does when a form opens."""
     def setUp(self):

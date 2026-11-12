@@ -111,8 +111,12 @@ class ExtendedXpathEvaluator:
     
     if type(data) is etree._Element:
       data = data.text or ""
-    
-    
+
+    # zfoengine: a field nothing was chosen in names no item, also in a list whose items all carry value=""
+    # (forms of Jihomoravský kraj); Form Filler 4.81 leaves such a calculation empty
+    if not str(data).strip():
+      return ""
+
     items = lst.xpath("fm:list/fm:listitem[normalize-space(@value)=$data]", namespaces = nss, data = data)
     if len(items) == 0:
       items = lst.xpath("fm:list/fm:listitem[normalize-space(@itemtext)=$data]", namespaces = nss, data = data)
