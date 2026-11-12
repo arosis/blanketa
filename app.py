@@ -331,6 +331,7 @@ def render_zfo_page(name, blank=False, data=None, lists_waited_for=False):
     engine.calculate_a_form_nobody_filled_in(engine_doc)
     unfilled_lists = codelists.fill(doc, lists, data_text)
     form_scripts.name_buttons_for_page(doc)
+    form_scripts.name_file_fields_for_page(doc)
     form_scripts.name_repeating_sections_by_bind(doc)
     for hidden in doc.xpath("//dsig:SignatureProperties | //dsig:Object[not(@Id)]", namespaces={"dsig": DS}):
         hidden.getparent().remove(hidden)
@@ -586,16 +587,24 @@ class Handler(BaseHTTPRequestHandler):
                                    {"X-Content-Type-Options": "nosniff",
                                     "Content-Disposition": f"attachment; filename*=UTF-8''{quote(entry_name.rsplit('/', 1)[-1])}"})
 
+    def _attachment_of(self, session, index):
+        if "message" in session:
+            message = session["message"]
+            if index >= len(message.attachments):
+                return None
+            return message.info["attachments"][index]["name"], message.attachments[index]
+        prepared = session.get("file_to_save")
+        return prepared[1:] if prepared is not None and prepared[0] == index else None
+
     def _serve_attachment(self, query):
         session = SESSIONS.get(first_query_value(query, "s"))
         index = first_query_value(query, "i")
-        if session is None or "message" not in session or not (index.isascii() and index.isdecimal()):
+        if session is None or not (index.isascii() and index.isdecimal()) or len(index) > 9:
             return self._send_not_found()
-        message = session["message"]
-        if int(index) >= len(message.attachments):
+        attachment = self._attachment_of(session, int(index))
+        if attachment is None:
             return self._send_not_found()
-        name = message.info["attachments"][int(index)]["name"]
-        body = message.attachments[int(index)]
+        name, body = attachment
         self.send_response(200)
         # Never rendered by the app window: a hostile attachment must not run as a page of the local server.
         self.send_header("Content-Type", "application/octet-stream")
@@ -704,6 +713,20 @@ class Handler(BaseHTTPRequestHandler):
         message = json.loads(body)
         self._send_json(engine.handle(session["doc"], message.get("type"), message.get("data")))
 
+    def _prepare_file_of_field(self, session, body):
+        # The hosts save only what this server serves under /attachment with a number, so the file a field of the form
+        # holds is set aside under the next number and the page hands that address to its host.
+        try:
+            request = json.loads(body or b"{}")
+        except ValueError:
+            return self._send_not_found()
+        file = form_scripts.file_of_field(session["doc"], request.get("file_field"), request.get("repe") or "")
+        if file is None:
+            return self._send_not_found()
+        index = session.get("file_to_save", (0,))[0] + 1
+        session["file_to_save"] = (index, *file)
+        return self._send_json({"index": index, "name": file[0]})
+
     def _save_zfo(self, session, query, body):
         try:
             result = save_zfo(session, first_query_value(query, "cert") or None, json.loads(body or b"{}").get("password"))
@@ -767,6 +790,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._answer_engine_message(session, body)
             if url.path == "/save":
                 return self._save_zfo(session, url.query, body)
+            if url.path == "/file-of-field" and "doc" in session:
+                return self._prepare_file_of_field(session, body)
             if url.path in ("/pdf-save", "/pdf-print"):
                 return self._save_or_print_pdf(session, url, body)
             if url.path == "/pdf-print-document":

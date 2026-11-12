@@ -177,6 +177,40 @@
     </div>
   </xsl:template>
 
+  <!-- A field for a file (form602ct="bin") is a button: it takes a file from the user (form602menu="add"), or hands the
+       file it holds back (form602menu="save"). zfo-editor drew a text field with two buttons that did nothing. -->
+  <xsl:template match="fo:block[@blanketa-file-field] | fo:block-container[@blanketa-file-field]">
+    <div>
+      <xsl:call-template name="add-style-attribute"/>
+      <xsl:call-template name="file-input"/>
+    </div>
+  </xsl:template>
+
+  <xsl:template match="fo:inline[@blanketa-file-field]">
+    <span>
+      <xsl:call-template name="add-style-attribute"/>
+      <xsl:call-template name="file-input"/>
+    </span>
+  </xsl:template>
+
+  <xsl:template name="file-input">
+    <button type="button" class="zfo-file-field" title="{@form602tooltip}" data-file-field="{@blanketa-file-field}">
+      <xsl:choose>
+        <xsl:when test="@form602menu = 'save'">
+          <xsl:attribute name="onclick">save_form_file(this)</xsl:attribute>
+          <xsl:value-of select="normalize-space(.)"/>
+          <xsl:if test="normalize-space(.) = ''">Uložit soubor</xsl:if>
+        </xsl:when>
+        <xsl:otherwise>
+          <xsl:attribute name="onclick">attach_form_file(this)</xsl:attribute>
+          <xsl:attribute name="data-file-filter"><xsl:value-of select="@form602ffilter"/></xsl:attribute>
+          <xsl:value-of select="normalize-space(.)"/>
+          <xsl:if test="normalize-space(.) = ''">Vybrat soubor</xsl:if>
+        </xsl:otherwise>
+      </xsl:choose>
+    </button>
+  </xsl:template>
+
   <xsl:template match="fo:instream-foreign-object[@blanketa-button]">
     <button type="button" class="zfo-picture-button" title="{@form602tooltip}" zfo-app-event="{@form602btnclick}"
             onclick="run_form_button(this)" data-form-button="{@blanketa-button}">

@@ -39,6 +39,7 @@ MAX_UPLOADED_CHARACTERS = 16_000_000
 MAX_ATTACHED_BYTES = 17 * 1024 * 1024  # what MPSV forms take for all the attachments of one application
 MAX_ATTACHED_CHARACTERS = 2 * MAX_ATTACHED_BYTES  # in base64; a file over the limit still decodes, for its refusal to name the limit
 ATTACHMENT_FIELD_TYPE = "bin"
+NAME_OF_UNNAMED_ATTACHMENT = "priloha"
 FIELD_ONLY_GIVES_ITS_FILE = "save"  # form602menu of a field that hands its file back to the user and takes none
 NO_ANTIVIRUS_NOTICE = "Blanketa vložený soubor antivirem nekontroluje."
 MAX_STYLESHEET_RUNS_PER_RUN = 50  # a stylesheet's own work spends no budget; MPSV forms run 7 per click
@@ -799,6 +800,28 @@ def file_fields(root):
   # field that takes an attachment to the same place in the data.
   return [element for element in root.iter() if isinstance(element.tag, str) and element.get("form602ct") == ATTACHMENT_FIELD_TYPE
           and element.get("form602bind")]
+
+
+def name_file_fields_for_page(root):
+  for position, element in enumerate(file_fields(root)):
+    element.set("blanketa-file-field", str(position))
+
+
+def file_of_field(document, position, repe):
+  # The file a field holds, for the user to save: its name comes from the data and so from whoever filled the form in.
+  fields = file_fields(document.root)
+  if type(position) is not int or not 0 <= position < len(fields):
+    return None
+  field = fields[position]
+  host = FormActionHost(document, field, repe, [], {}, is_started_by_button=False)
+  try:
+    content = host._content_of(field)
+    name = host._value_of_bind(field.get("filenamebind")) if field.get("filenamebind") else ""
+  except (js602.Unsupported, etree.LxmlError, ValueError, TypeError, IndexError):
+    return None
+  if not content:
+    return None
+  return (name if ATTACHED_FILE_NAME.fullmatch(name) else NAME_OF_UNNAMED_ATTACHMENT), content
 
 
 def _field_that_takes_files(document, position):

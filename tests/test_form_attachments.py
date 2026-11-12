@@ -1,10 +1,17 @@
 """Files a user attaches to a ZFO form: the field keeps the file in the data and the form's script files it away."""
 import base64
+import http.client
+import json
+import threading
 import unittest
+from http.server import ThreadingHTTPServer
 from xml.sax.saxutils import quoteattr
 
 import support  # noqa: F401  (puts the project on the import path)
+from lxml import etree
+from lxml import html as lxml_html
 
+import app
 from zfoengine import api as engine
 from zfoengine import file_kinds, form_scripts
 
@@ -53,11 +60,12 @@ FORM = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#" Id="_1
 <fm:bind Id="Priloha.Data" nodeset="d:Data/d:Priloha/d:Data"/><fm:bind Id="Priloha.Nazev" nodeset="d:Data/d:Priloha/d:Nazev"/>
 <fm:bind Id="Priloha.Typ" nodeset="d:Data/d:Priloha/d:Typ"/><fm:bind Id="Priloha.Velikost" nodeset="d:Data/d:Priloha/@Velikost"/>
 </fm:bind></fm:model></fm:formparams>
-<fo:inline form602ct="txt" form602bind="poznamka"/>
+<fo:page-sequence master-reference="p"><fo:flow flow-name="xsl-region-body">
+<fo:block><fo:inline form602ct="txt" form602bind="poznamka"/></fo:block>
 <fo:block form602ct="bin" form602bind="Pom.Soubor.Data" filenamebind="Pom.Soubor.Nazev" mediatypebind="Pom.Soubor.Typ"
  form602menu="add" form602ffilter="%s" %s form602onchange=%s>Vložit soubor</fo:block>
 <fo:block form602ct="bin" form602bind="Priloha.Data" filenamebind="Priloha.Nazev" mediatypebind="Priloha.Typ" form602menu="save">Stáhnout</fo:block>
-</fo:root></dsig:Object></dsig:Signature>"""
+</fo:flow></fo:page-sequence></fo:root></dsig:Object></dsig:Signature>"""
 
 
 def form(script=FILE_AWAY, file_filter=FILTER, strict=True):
@@ -200,3 +208,71 @@ class KindsOfAttachedFiles(unittest.TestCase):
         for name, content in (("a.pdf", PNG), ("a.xml", b"text"), ("a.jpeg", PDF)):
             with self.subTest(name):
                 self.assertEqual(file_kinds.fault_of_kind(name, content, set()), file_kinds.FORMAT_MISMATCH)
+
+
+class FilesAFieldHolds(unittest.TestCase):
+    def test_a_field_gives_back_the_file_and_the_name_it_was_given(self):
+        doc = engine.open_document((FORM % (FILTER, "", '""')).encode())
+        attach(doc, "Sken.PNG", PNG)
+        self.assertEqual(form_scripts.file_of_field(doc, FIELD_THAT_TAKES_A_FILE, ""), ("Sken.PNG", PNG))
+
+    def test_an_empty_field_and_a_field_that_does_not_exist_give_nothing(self):
+        doc = form()
+        for position in (FIELD_THAT_TAKES_A_FILE, FIELD_THAT_GIVES_ITS_FILE, 2, -1, "0", None):
+            with self.subTest(position):
+                self.assertIsNone(form_scripts.file_of_field(doc, position, ""))
+
+    def test_a_name_from_the_data_that_is_no_plain_file_name_is_not_passed_on(self):
+        doc = form()
+        attach(doc, "a.pdf", PDF)
+        engine.handle(doc, "store_val", {"field": "Priloha.Nazev", "value": "../../.ssh/config", "repe": "", "input_id": "x"})
+        self.assertEqual(form_scripts.file_of_field(doc, FIELD_THAT_GIVES_ITS_FILE, ""), (form_scripts.NAME_OF_UNNAMED_ATTACHMENT, PDF))
+
+
+class FileFieldsOnThePage(unittest.TestCase):
+    def test_a_field_for_a_file_is_a_button_that_takes_a_file_or_gives_its_file_back(self):
+        root = etree.fromstring((FORM % (FILTER, "", '""')).encode())
+        form_scripts.name_file_fields_for_page(root)
+        page = lxml_html.fromstring(etree.tostring(app.XSLT(etree.ElementTree(root), PATH_TO_JS="'/s/'", PATH_TO_CSS="'/s/'"),
+                                                   method="html", encoding="unicode"))
+        buttons = [(button.text_content().strip(), button.get("data-file-field"), button.get("onclick"), button.get("data-file-filter"))
+                   for button in page.xpath("//button[@class='zfo-file-field']")]
+        self.assertEqual(buttons, [("Vložit soubor", "0", "attach_form_file(this)", FILTER), ("Stáhnout", "1", "save_form_file(this)", None)])
+        self.assertEqual(page.xpath("//input[@class='fileInput'] | //button[@name='add_attachment']"), [])
+
+
+class SavingTheFileOfAField(unittest.TestCase):
+    """The hosts save what the server serves under /attachment with a number; the page asks for the file of a field first."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), app.Handler)
+        cls.port = cls.server.server_address[1]
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def request(self, method, path, body=None):
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=30)
+        connection.request(method, path, body=body, headers={"Host": f"127.0.0.1:{self.port}"})
+        response = connection.getresponse()
+        return response.status, response.read(), response.getheader("Content-Disposition")
+
+    def test_the_file_the_user_attached_comes_back_under_the_number_the_server_gave_it(self):
+        session = app.new_session({"name": "s-prilohou", "doc": engine.open_document((FORM % (FILTER, "", '""')).encode())})
+        ask = json.dumps({"file_field": FIELD_THAT_TAKES_A_FILE, "repe": ""}).encode()
+        self.assertEqual(self.request("POST", f"/file-of-field?s={session}", ask)[0], 404)
+        attached = json.dumps({"type": "run_form_script", "data": {"file_field": FIELD_THAT_TAKES_A_FILE, "repe": "", "attach": chosen("Plná moc.pdf", PDF)}})
+        self.assertEqual(self.request("POST", f"/ipc?s={session}", attached.encode())[0], 200)
+        status, answer, _ = self.request("POST", f"/file-of-field?s={session}", ask)
+        self.assertEqual((status, json.loads(answer)), (200, {"index": 1, "name": "Plná moc.pdf"}))
+        self.assertEqual(self.request("GET", f"/attachment?s={session}&i=1"), (200, PDF, "attachment; filename*=UTF-8''Pln%C3%A1%20moc.pdf"))
+        for path in (f"/attachment?s={session}&i=0", f"/attachment?s={session}&i=2", "/attachment?s=jina&i=1"):
+            with self.subTest(path):
+                self.assertEqual(self.request("GET", path)[0], 404)
+        for body in (b"", b"{", json.dumps({"file_field": FIELD_THAT_GIVES_ITS_FILE}).encode(), json.dumps({"file_field": "0"}).encode()):
+            with self.subTest(body):
+                self.assertEqual(self.request("POST", f"/file-of-field?s={session}", body)[0], 404)
