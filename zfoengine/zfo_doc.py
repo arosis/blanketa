@@ -119,6 +119,7 @@ class ZFO_document:
     self.data_root = None
     # tree which the computation will be executed on
     self.computing_data_tree = None
+    self._number_binds = None
     # holds original (empty) model - it is used to create new repeatable sections
     self.original_model = None
     self.readonlybinds = ""
@@ -329,14 +330,7 @@ class ZFO_document:
     # get the copy of original data tree
     # cdt - computation data tree
     cdt = copy.deepcopy(data_tree)
-    # get all inputs that have form602ct=num
-    doc_root = self.content.getroot()
-    num_inputs = doc_root.xpath('//*[@form602ct="num"]')
-    for num_input in num_inputs:          
-      bind_id = num_input.get("form602bind")
-      if bind_id is None:
-        log.warning("Num input has no form602bind attribute")
-        continue
+    for bind_id in self._binds_of_number_fields():
       bind = self._find_bind_elem(bind_id)
       # get paths to elements that are bound to number inputs
       path = self._get_abs_data_path(bind[0])      
@@ -706,7 +700,19 @@ class ZFO_document:
     Stores value to the specified path in both trees - "calculable" and original.
     '''
     self._store_one_value_to_tree(self._get_data_root(), name, path, value)
-    self._store_one_value_to_tree(self._get_computable_data_root(), name, path, value)
+    self._store_one_value_to_tree(self._get_computable_data_root(), name, path, self._value_for_calculations(name, value))
+
+  def _value_for_calculations(self, bind_id, value):
+    # zfoengine: Form Filler counts a number the user deleted as zero, like one never filled in (checked in Form Filler
+    # 4.81: 200 + deleted + 0 shows 200)
+    if value in (None, "") and bind_id in self._binds_of_number_fields():
+      return "0"
+    return value
+
+  def _binds_of_number_fields(self):
+    if self._number_binds is None:
+      self._number_binds = frozenset(self.content.getroot().xpath('//*[@form602ct="num"]/@form602bind'))
+    return self._number_binds
   
   def _get_ns_prefix(self, ns_uri):
     '''
@@ -1214,19 +1220,23 @@ class ZFO_document:
         # evaluate over the model that has empty numbers set to zero
         cal_calculated = ev.eval_calculate(self, bind, node=calc_copy, nsmap=nsmap)
         
-        if (calculated is None) or (cal_calculated is None):
-          continue 
+        if cal_calculated is None:
+          continue
+        # zfoengine: an empty number makes the sum over the file's data not a number; a typed value is calculated over the
+        # zero-filled copy only (calculate_values), so the whole recalculation takes that result too
+        if calculated is None:
+          calculated = cal_calculated
         # store value to both copies - one in the original tree, one into
         # data tree changed at init and filled with zeros
         att = self._path_contains_att(path)
         if att is None:            
           self.store_value_node(bind.get("Id"), copy, calculated[2])
-          self.store_value_node(bind.get("Id"), calc_copy, cal_calculated[2])
+          self.store_value_node(bind.get("Id"), calc_copy, self._value_for_calculations(bind.get("Id"), cal_calculated[2]))
         else:
           att_owner = copy.getparent()
           self.store_value_node(bind.get("Id"), att_owner, calculated[2], att_name=att)
           calc_att_owner = calc_copy.getparent()
-          self.store_value_node(bind.get("Id"), calc_att_owner, cal_calculated[2], att_name=att)
+          self.store_value_node(bind.get("Id"), calc_att_owner, self._value_for_calculations(bind.get("Id"), cal_calculated[2]), att_name=att)
         # to the results put the returned value from evaluation
         if self.is_bind_file(bind.get("Id")):
           #res[calculated[0]] = self._get_filename_of_bind(path)
@@ -1266,6 +1276,11 @@ class ZFO_document:
       return {}
     
   
+  def _calculated_over_the_file_data(self, bind, path):
+    nsmap = self._get_used_ns_prefix(path)
+    found = self._get_data_root().xpath(path, namespaces=nsmap)
+    return ev.eval_calculate(self, bind, node=found[0], nsmap=nsmap) if len(found) else None
+
   def calculate_values(self, bind_id, repe_data):
     '''
     Goes through binds that depend on
@@ -1293,13 +1308,19 @@ class ZFO_document:
       # 'rep' is ok, if the rep data is bound to another bind, it is ignored
       path = self._get_abs_data_path(dependent_bind, rep) 
       
-      calculated = ev.eval_calculate(self, dependent_bind, path=path)
-      if calculated is None:
+      over_zero_filled = ev.eval_calculate(self, dependent_bind, path=path)
+      if over_zero_filled is None:
         continue
+      # zfoengine: as in recalc_form, the file gets what its own data give, so a field that takes over an empty number
+      # stays empty; only where they give nothing (a sum with an empty number) the zero-filled copy decides
+      calculated = self._calculated_over_the_file_data(dependent_bind, path) or over_zero_filled
       # store calculated value - third elemnt in tuple
       value, bind_id,\
       constr_res, constr_comment,\
       original_value = self.store_value_path(dependent_bind, calculated[2], path)      
+      if constr_res:
+        self._store_one_value_to_tree(self._get_computable_data_root(), bind_id, path,
+                                      self._value_for_calculations(bind_id, over_zero_filled[2]))
       # mark the changes in changelog if the constraint fails
       change_log_entry = (bind_id, path, original_value, calculated[2])
       change_log.append(change_log_entry)
@@ -1473,8 +1494,11 @@ class ZFO_document:
     constr_res = True
     constr_comment = ""
     if not suppress_constraints:
-      # evaluate constraint    
+      # zfoengine: the constraint judges what was written, an empty number as empty, not as the zero calculations use
+      computing = self._get_computable_data_root()
+      self._store_one_value_to_tree(computing, bind_id, abs_path, value)
       constr_res, constr_comment = ev.eval_constraint(self, bind, abs_path)
+      self._store_one_value_to_tree(computing, bind_id, abs_path, self._value_for_calculations(bind_id, value))
     
     # if the constraint is fulfilled, keep the stored data
     if constr_res:

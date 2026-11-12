@@ -409,6 +409,61 @@ LOAD_SECTION = ("var doc = GetDocument(); var data = doc.GetElement().GetUploade
 SAVED_SECTION = '<d:sekce xmlns:d="http://software602.cz/sample" pro="vzorek"><d:c>ze souboru</d:c></d:sekce>'
 
 
+FIVE_AND_AN_EMPTY_NUMBER = SAVED_SECTION.replace("<d:c>ze souboru</d:c>", "<d:c/><d:n1>5</d:n1><d:n2/>")
+
+
+def form_with_a_sum():
+    form = form_with_stylesheets(LOAD_SECTION, ()).replace(b"<d:sekce><d:c/></d:sekce>", b"<d:sekce><d:c/><d:n1/><d:n2/></d:sekce><d:soucet/>")
+    form = form.replace(b'<fm:bind Id="c" nodeset="d:c"/></fm:bind>',
+                        b'<fm:bind Id="c" nodeset="d:c"/><fm:bind Id="n1" nodeset="d:n1"/><fm:bind Id="n2" nodeset="d:n2"/></fm:bind>'
+                        b'<fm:bind Id="soucet" nodeset="d:soucet" depends="n1|n2" calculate="/d:root/d:sekce/d:n1 + /d:root/d:sekce/d:n2"/>')
+    form = form.replace(b'<fo:inline form602ct="txt" form602bind="c"/></fo:block>',
+                        b'<fo:inline form602ct="txt" form602bind="c"/><fo:inline form602ct="num" form602bind="n1"/>'
+                        b'<fo:inline form602ct="num" form602bind="n2"/></fo:block><fo:inline form602ct="num" form602bind="soucet"/>')
+    return form
+
+
+class NumbersTheUserDeleted(unittest.TestCase):
+    """Sums count a deleted number as zero, as Form Filler does; whatever else reads it finds it empty."""
+
+    def form_whose(self, bind, becomes):
+        form = form_with_a_sum().replace(bind, becomes)
+        self.assertIn(becomes, form)
+        return engine.open_document(form)
+
+    def delete_the_second_number(self, doc):
+        doc.store_value("n2", "50", "sekce-rep-0")
+        return doc.store_value("n2", "", "sekce-rep-0")
+
+    def test_a_field_that_takes_the_number_over_stays_empty(self):
+        doc = self.form_whose(b'<fm:bind Id="c" nodeset="d:c"/>', b'<fm:bind Id="c" nodeset="d:c" depends="n1|n2" calculate="../d:n2"/>')
+        self.delete_the_second_number(doc)
+        self.assertEqual(doc.get_value("c", "sekce-rep-0"), "")
+        doc.store_value("n1", "3", "sekce-rep-0")
+        self.assertEqual(doc.get_value("c", "sekce-rep-0"), "")
+        engine.handle(doc, "recalc_form", "")
+        self.assertEqual(doc.get_value("c", "sekce-rep-0"), "")
+        self.assertEqual(doc.get_value("soucet"), "3")
+
+    def test_a_script_finds_the_number_empty(self):
+        asks = b"""<fm:bind Id="c" nodeset="d:c" depends="n2" calculate="{ Result(GetDocument().GetElement().DataXpath('../d:n2') == '' ? 'empty' : 'filled'); }"/>"""
+        doc = self.form_whose(b'<fm:bind Id="c" nodeset="d:c"/>', asks)
+        self.delete_the_second_number(doc)
+        self.assertEqual(doc.get_value("c", "sekce-rep-0"), "empty")
+
+    def test_a_constraint_that_allows_an_empty_number_lets_it_be_deleted(self):
+        doc = self.form_whose(b'<fm:bind Id="n2" nodeset="d:n2"/>', b"""<fm:bind Id="n2" nodeset="d:n2" constraint=". = '' or . &gt; 10"/>""")
+        self.assertTrue(self.delete_the_second_number(doc)[2])
+        self.assertFalse(doc.get_value("n2", "sekce-rep-0"))
+        self.assertEqual(doc.get_value("soucet"), "0")
+
+    def test_a_constraint_that_wants_a_number_keeps_the_old_one(self):
+        doc = self.form_whose(b'<fm:bind Id="n2" nodeset="d:n2"/>', b'<fm:bind Id="n2" nodeset="d:n2" constraint=". &gt; 10"/>')
+        self.assertFalse(self.delete_the_second_number(doc)[2])
+        self.assertEqual(doc.get_value("n2", "sekce-rep-0"), "50")
+        self.assertEqual(doc.get_value("soucet"), "50")
+
+
 class FilesTheUserChooses(unittest.TestCase):
     """The Nahrát uložená data (XML) button of MPSV forms loads a file the user chooses back into the data."""
 
@@ -452,17 +507,38 @@ class FilesTheUserChooses(unittest.TestCase):
         self.assertEqual(doc.get_value("c", "sekce-rep-0"), "dopsáno")
 
     def test_an_empty_number_of_the_file_counts_as_zero_in_the_forms_sums(self):
-        form = form_with_stylesheets(LOAD_SECTION, ()).replace(b"<d:sekce><d:c/></d:sekce>", b"<d:sekce><d:c/><d:n1/><d:n2/></d:sekce><d:soucet/>")
-        form = form.replace(b'<fm:bind Id="c" nodeset="d:c"/></fm:bind>',
-                            b'<fm:bind Id="c" nodeset="d:c"/><fm:bind Id="n1" nodeset="d:n1"/><fm:bind Id="n2" nodeset="d:n2"/></fm:bind>'
-                            b'<fm:bind Id="soucet" nodeset="d:soucet" depends="n1|n2" calculate="/d:root/d:sekce/d:n1 + /d:root/d:sekce/d:n2"/>')
-        form = form.replace(b'<fo:inline form602ct="txt" form602bind="c"/></fo:block>',
-                            b'<fo:inline form602ct="txt" form602bind="c"/><fo:inline form602ct="num" form602bind="n1"/>'
-                            b'<fo:inline form602ct="num" form602bind="n2"/></fo:block><fo:inline form602ct="num" form602bind="soucet"/>')
-        doc = engine.open_document(form)
-        form_scripts.run_button_script(doc, 0, "", [], None, SAVED_SECTION.replace("<d:c>ze souboru</d:c>", "<d:c/><d:n1>5</d:n1><d:n2/>"))
+        doc = engine.open_document(form_with_a_sum())
+        form_scripts.run_button_script(doc, 0, "", [], None, FIVE_AND_AN_EMPTY_NUMBER)
         doc.store_value("n1", "6", "sekce-rep-0")
         self.assertEqual(doc.get_value("soucet"), "6")
+
+    def test_sums_follow_the_loaded_numbers_without_any_typing(self):
+        doc = engine.open_document(form_with_a_sum())
+        result = form_scripts.run_button_script(doc, 0, "", [], None, FIVE_AND_AN_EMPTY_NUMBER)
+        self.assertEqual(doc.get_value("soucet"), "5")
+        self.assertEqual(result["values"]["soucet"], "5")
+
+    def test_the_whole_recalculation_counts_an_empty_number_as_zero_like_typing_does(self):
+        typed = engine.open_document(form_with_a_sum())
+        typed.store_value("n1", "5", "sekce-rep-0")
+        recalculated = engine.open_document(form_with_a_sum())
+        form_scripts.run_button_script(recalculated, 0, "", [], None, FIVE_AND_AN_EMPTY_NUMBER)
+        engine.handle(recalculated, "recalc_form", "")
+        self.assertEqual(recalculated.get_value("soucet"), typed.get_value("soucet"))
+        self.assertEqual(typed.get_value("soucet"), "5")
+        self.assertFalse(recalculated.get_value("n2", "sekce-rep-0"))
+
+    def test_a_number_the_user_deleted_counts_as_zero_like_form_filler_does(self):
+        doc = engine.open_document(form_with_a_sum())
+        doc.store_value("n1", "100", "sekce-rep-0")
+        doc.store_value("n2", "7", "sekce-rep-0")
+        doc.store_value("n2", "", "sekce-rep-0")
+        self.assertEqual(doc.get_value("soucet"), "100")
+        engine.handle(doc, "recalc_form", "")
+        self.assertEqual(doc.get_value("soucet"), "100")
+        doc.store_value("n1", "200", "sekce-rep-0")
+        self.assertEqual(doc.get_value("soucet"), "200")
+        self.assertFalse(doc.get_value("n2", "sekce-rep-0"))
 
     def test_the_chosen_file_reads_no_other_file(self):
         hostile = ('<!DOCTYPE d [<!ENTITY e SYSTEM "%s">]>' % (ROOT / "VERSION").as_uri()) + SAVED_SECTION.replace("ze souboru", "&e;")
