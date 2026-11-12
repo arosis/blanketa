@@ -306,20 +306,20 @@ class FormActionHost:
     self._write_about_file(self.element, base64.b64encode(content).decode("ascii"), name, file_kinds.extension_as_written(name),
                            str(len(content)))
 
-  def _attachment_field(self, path):
+  def _attachment_field(self, path, asked_by="element.GetBinData"):
     fields = [self.element] if path.strip() in ("", ".") else self._form_elements(path)
     field = next((field for field in fields if field.get("form602ct") in (ATTACHMENT_FIELD_TYPE, ATTACHMENT_LINK_TYPE)
                   and _data_bind_of(field)), None)
     if field is None:
-      raise js602.Unsupported("element.GetBinData")
+      raise js602.Unsupported(asked_by)
     return field
 
   def put_file(self, path, name, content):
-    field = self._attachment_field(path)
+    field = self._attachment_field(path, "element.SetBinData")
     self._write_about_file(field, base64.b64encode(content).decode("ascii"), name, file_kinds.extension_as_written(name), str(len(content)))
 
   def clear_file(self, path):
-    self._write_about_file(self._attachment_field(path), "", "", "", "")
+    self._write_about_file(self._attachment_field(path, "element.SetBinData"), "", "", "", "")
 
   def attachment_with_name(self, path):
     field = self._attachment_field(path)
@@ -963,15 +963,26 @@ def _section_and_link_of_list(button):
 
 
 def _sizes_of_listed_files(document, link, outer_repetitions):
-  bind = document._find_bind_elem(link.get("filesizebind") or "")
+  return [int(size) for size in _texts_at(document, link.get("filesizebind"), outer_repetitions) if size.isascii() and size.isdigit()]
+
+
+def _texts_at(document, bind_id, repetitions):
+  bind = document._find_bind_elem(bind_id or "")
   if not len(bind):
     return []
-  path = document._get_abs_data_path(bind[0], outer_repetitions)
-  return [int(size) for size in (node.text or "" for node in document._get_data_root().xpath(path, namespaces=document._get_used_ns_prefix(path)))
-          if size.isascii() and size.isdigit()]
+  path = document._get_abs_data_path(bind[0], repetitions)
+  return [node if isinstance(node, str) else node.text or "" for node in document._get_data_root().xpath(path, namespaces=document._get_used_ns_prefix(path))]
 
 
-def _refusal_of_file_for_list(button, name, content, sizes_listed):
+def _items_holding_a_file(document, section_bind, link, outer_repetitions):
+  # A list starts with one empty item, which the first file takes; every other item is somebody's file, whatever it lacks.
+  items = len(_texts_at(document, section_bind, outer_repetitions)) or 1
+  first_is_empty = not any("".join(_texts_at(document, bind_id, {**outer_repetitions, section_bind: 0}))
+                           for bind_id in (_data_bind_of(link), link.get("filenamebind")))
+  return 0 if items == 1 and first_is_empty else items
+
+
+def _refusal_of_file_for_list(button, name, content, sizes_listed, files_listed):
   one, together = _limit_of(button, "form602maxonefilesize"), _limit_of(button, "form602maxallfilessize")
   if len(content) > one:
     return f"Soubor je větší než {_size_in_text(one)}, formulář ho nepřijme."
@@ -979,7 +990,7 @@ def _refusal_of_file_for_list(button, name, content, sizes_listed):
   if allowed and file_kinds.extension_of(name) not in allowed:
     return f"Formulář tu přijímá jen soubory typu {_types_in_text(allowed)}."
   most = button.get("form602maxoccurs") or ""
-  if most.isascii() and most.isdigit() and len(sizes_listed) >= int(most):
+  if most.isascii() and most.isdigit() and files_listed >= int(most):
     return f"Formulář přijme nejvýš {most} příloh."
   if sum(sizes_listed) + len(content) > together:
     return f"Přílohy by dohromady měly víc než {_size_in_text(together)}, formulář soubor nepřijme."
@@ -1000,12 +1011,11 @@ def add_file_to_list(document, position, repe, answers, lookups=None, file=None)
   section, link = section_and_link
   section_bind = section.get("form602repe")
   outer = {name: index for name, index in _repetitions_of(repe).items() if name != section_bind}
-  sizes_listed = _sizes_of_listed_files(document, link, outer)
-  refusal = _refusal_of_file_for_list(button, file["name"], content, sizes_listed)
+  refusal = _refusal_of_file_for_list(button, file["name"], content, _sizes_of_listed_files(document, link, outer),
+                                      _items_holding_a_file(document, section_bind, link, outer))
   if refusal is not None:
     return {"stopped": refusal}
-  # The section starts with one empty item, which the first file takes.
-  item = len(sizes_listed)
+  item = _items_holding_a_file(document, section_bind, link, outer)
   start_script = button.get("form602attchuploadstartaction")
 
   def put_the_file_into_its_item(host):

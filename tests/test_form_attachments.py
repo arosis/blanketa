@@ -408,6 +408,21 @@ class ListsOfAttachments(unittest.TestCase):
         add_to_list(doc, "c.pdf", PDF)
         self.assertEqual(listed(doc, "filename"), ["c.pdf"])
 
+    def test_an_item_that_holds_a_file_is_never_taken_for_the_empty_one(self):
+        doc = newer_form()
+        for bind_id, text in (("att.filename", "puvodni.pdf"), ("att.data", base64.b64encode(PDF).decode())):
+            engine.handle(doc, "store_val", {"field": bind_id, "value": text, "repe": "block---att-rep-0", "input_id": bind_id})
+        add_to_list(doc, "novy.pdf", PDF)
+        self.assertEqual(listed(doc, "filename"), ["puvodni.pdf", "novy.pdf"])
+
+    def test_a_question_of_the_form_is_asked_and_the_file_comes_again_with_the_answer(self):
+        asking = NEWER_FORM.replace('form602attchuploadstartaction="{', 'form602attchuploadstartaction="{ if (MessageBox(\'Vložit?\', \'\', MB_YESNO) != IDYES) NeznamaFunkce();')
+        doc = engine.open_document((asking % tuple(quoteattr("{" + script + "}") for script in (JUDGE_LISTED_FILE, REMOVE_LISTED_FILE, UPLOAD_ONE_FILE))).encode())
+        question = add_to_list(doc, "a.pdf", PDF)["question"]
+        self.assertEqual((question["retry"]["file_list"], listed(doc, "filename")), (0, [""]))
+        engine.handle(doc, "run_form_script", {**question["retry"], "answers": [True]})
+        self.assertEqual(listed(doc, "filename"), ["a.pdf"])
+
     def test_only_a_list_button_takes_files_for_a_list(self):
         doc = newer_form()
         for position in (1, -1, "0", None):
@@ -443,4 +458,4 @@ class FieldsForOneAttachment(unittest.TestCase):
         made_up = newer_form("var v = new Variant(); v.data = 'text'; GetDocument().GetElement().SetBinData(\"//*[@form602id='data2']\", v);")
         self.assertEqual(upload(made_up, "a.pdf", PDF)["refused"], "element.SetBinData")
         no_link = newer_form("var e = GetDocument().GetElement(); e.SetBinData(\"//*[@form602ct='bib']\", e.GetUploadedFileData());")
-        self.assertEqual(upload(no_link, "a.pdf", PDF)["refused"], "element.GetBinData")
+        self.assertEqual(upload(no_link, "a.pdf", PDF)["refused"], "element.SetBinData")
