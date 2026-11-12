@@ -174,6 +174,8 @@ def run_form_script(document, msg_data):
   answers = msg_data.get("answers") or []
   lookups = msg_data.get("lookups")
   repe = msg_data.get("repe") or ""
+  if "attach" in msg_data:
+    return _script_answer(form_scripts.attach_file(document, msg_data.get("file_field"), repe, answers, lookups, msg_data["attach"]))
   if "field" in msg_data:
     values = [value for value in msg_data.get("values") or [] if isinstance(value, str)]
     return _field_change_script_answer(document, msg_data["field"], repe, answers, lookups, values)

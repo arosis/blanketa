@@ -18,10 +18,13 @@
 #
 # Numbers are floats, undefined is UNDEFINED and null is None. Local time is kept as if it were UTC, scripts only do date
 # arithmetic with it.
+import base64
 import datetime
 import json
 import math
 import re
+
+from . import file_kinds
 
 STEP_BUDGET = 2_000_000  # for one script run; the largest forms published by offices stay far below it
 MAX_CALL_DEPTH = 150
@@ -96,6 +99,14 @@ class _FormCopy(ScriptObject):
 
 class _PrintedForm(ScriptObject):
   __slots__ = ()
+
+
+def _text_of_file(content):
+  # A script reads an attached XML file as text; any other file it only hands on, byte for character.
+  try:
+    return content.decode("utf-8-sig")
+  except UnicodeDecodeError:
+    return content.decode("latin-1")
 
 
 def _offers_value_to_set(host_object, name):
@@ -1603,8 +1614,10 @@ def _javascript_add(left, right, budget):
     return left + right
   left, right = to_primitive(left), to_primitive(right)
   if type(left) is str or type(right) is str:
-    result = to_string(left) + to_string(right)
-    if len(result) > MAX_STRING_LENGTH:
+    left_text, right_text = to_string(left), to_string(right)
+    result = left_text + right_text
+    # The text of a file the user attached may be longer than a script may make; joining it with "" makes nothing longer.
+    if left_text and right_text and len(result) > MAX_STRING_LENGTH:
       raise Exhausted("text")
     budget.spend_text(result)
     return result
@@ -2676,6 +2689,20 @@ _FORM_ACTION_CONSTANTS = {
   "SHTTP_NODLG": 512.0, "SHTTP_AUTHENTICNEVER": 32.0, "SHTTP_WEB_SERVERSENDS": 8192.0, "SHTTP_WEB_CLIENTSENDS": 4096.0,
   "CLOSE_IGNORECHANGES": 1.0, "CLOSE_CLOSEAPPIFLAST": 16.0,
 }
+# The checks of an attached file belong to FormApps Server, Form Filler's library has neither them nor these names.
+# Forms only compare the answer of CheckBinData with the names, so the values are Blanketa's; 0 is "no fault".
+_ATTACHMENT_CHECK_CONSTANTS = {
+  "MIMETYPE_CHECK": 1.0, "ANTIVIRUS_CHECK": 2.0,
+  "ERROR_BIN_DATA_UNKNOWN_FORMAT": 1.0, "ERROR_BIN_DATA_FORMAT_MISMATCH": 2.0, "ERROR_BIN_DATA_FORMAT_NOT_ALLOWED": 3.0,
+  "ERROR_BIN_DATA_INFECTED": 4.0, "ERROR_BIN_DATA_AVENGINE": 5.0,
+}
+MIMETYPE_CHECK, ANTIVIRUS_CHECK = _ATTACHMENT_CHECK_CONSTANTS["MIMETYPE_CHECK"], _ATTACHMENT_CHECK_CONSTANTS["ANTIVIRUS_CHECK"]
+NO_FAULT_OF_ATTACHMENT = 0.0
+FAULTS_OF_ATTACHMENT = {
+  file_kinds.UNKNOWN_FORMAT: _ATTACHMENT_CHECK_CONSTANTS["ERROR_BIN_DATA_UNKNOWN_FORMAT"],
+  file_kinds.FORMAT_MISMATCH: _ATTACHMENT_CHECK_CONSTANTS["ERROR_BIN_DATA_FORMAT_MISMATCH"],
+  file_kinds.FORMAT_NOT_ALLOWED: _ATTACHMENT_CHECK_CONSTANTS["ERROR_BIN_DATA_FORMAT_NOT_ALLOWED"],
+}
 MB_YESNO = _FORM_ACTION_CONSTANTS["MB_YESNO"]
 FORMAT_OF_FORM = _FORM_ACTION_CONSTANTS["VarFFo"]
 FORMAT_OF_PDF = _FORM_ACTION_CONSTANTS["VarFPdf"]
@@ -2692,6 +2719,7 @@ def run_form_action(interpreter, source, host):
   run_level = interpreter.runs_in_progress + 1
   is_finished = []
   documents_on_the_web = []
+  files_read_by_the_script = []
 
   def native(function):
     def guarded(this, args):
@@ -2795,10 +2823,29 @@ def run_form_action(interpreter, source, host):
   def load_form_data_part(part=UNDEFINED, path=UNDEFINED):
     content = interpreter.get(part, "data") if isinstance(part, ScriptObject) else UNDEFINED
     host.load_data_part(text(content), text(path))
-    return UNDEFINED
+    return True
+
+  def attached_file(path=UNDEFINED, *_):
+    content = host.attachment(text(path))
+    variant = ScriptObject({"data": _text_of_file(content)})
+    files_read_by_the_script.append((variant, content))
+    return variant
+
+  def attachment_as_base64(data=UNDEFINED, *_):
+    content = next((content for variant, content in files_read_by_the_script if variant is data), None)
+    if content is None:
+      raise Unsupported("VariantToBase64")
+    return base64.b64encode(content).decode("ascii")
+
+  def check_attachment(path=UNDEFINED, checks=0.0, *_):
+    fault = host.fault_of_attachment(text(path), int(to_number(checks)))
+    return NO_FAULT_OF_ATTACHMENT if fault is None else FAULTS_OF_ATTACHMENT[fault]
 
   element = HostObject("element", {
     "DataXpath": native(data_xpath),
+    "GetBinData": native(attached_file),
+    "GetBinDataSize": native(lambda path=UNDEFINED, *_: float(len(host.attachment(text(path))))),
+    "CheckBinData": native(check_attachment),
     "GetUploadedFileData": native(lambda *_: ScriptObject({"data": host.uploaded_file_data()})),
     "GetCurrentDataXPath": native(host.current_path),
     "GetListItemData": native(lambda *args: host.list_item(*(to_string(arg) for arg in args))),
@@ -2828,6 +2875,8 @@ def run_form_action(interpreter, source, host):
   named_parameters = host.named_parameters
   globals_for_action = {
     **_FORM_ACTION_CONSTANTS,
+    **_ATTACHMENT_CHECK_CONSTANTS,
+    "VariantToBase64": native(attachment_as_base64),
     "GetDocument": native(lambda *_: document),
     "MessageBox": native(message_box),
     "DbgLog": native(lambda *_: UNDEFINED),
