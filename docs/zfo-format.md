@@ -181,7 +181,7 @@ Funkce kontrolují počet a typ argumentů a při chybě vyhodí `SyntaxError`
 
 ## 10. Funkce skriptů tlačítek a jejich stav
 
-Skripty tlačítek a změn polí dostanou vedle běžného JavaScriptu jen funkce z této tabulky. Volání čehokoli jiného skript zastaví, data se vrátí do stavu před stisknutím a uživatel se dozví, co se nestalo. Stav k listopadu 2026; podrobnosti k jednotlivým funkcím jsou v oddílu 4.
+Skripty tlačítek a změn polí dostanou vedle běžného JavaScriptu jen funkce z této tabulky. Volání čehokoli jiného skript zastaví, data se vrátí do stavu před stisknutím a uživatel se dozví, co se nestalo. Co sahá mimo data formuláře (tisk, zobrazení dokumentu z webu, uložení dat do souboru, zavření okna a dialog „Přejít na“), smí jen skript tlačítka; skript změny pole se na tom zastaví, aby formulář nic z toho nevyvolal pouhým psaním. Je to rozhodnutí Blankety, ve stažených veřejných formulářích to žádný skript změny pole nedělá. Stav k listopadu 2026; podrobnosti k jednotlivým funkcím jsou v oddílu 4.
 
 | Objekt | Funkce | Co dělá v Blanketě |
 |---|---|---|

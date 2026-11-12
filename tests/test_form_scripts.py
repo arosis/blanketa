@@ -380,6 +380,20 @@ class WindowFunctions(unittest.TestCase):
         result = form_scripts.run_field_change_script(engine.open_document(form), "a", "", [])
         self.assertEqual(result["refused"], "tisk bez stisku tlačítka")
 
+    def test_a_changed_field_neither_closes_the_window_nor_saves_data_nor_offers_the_parts(self):
+        for action, stop in (("doc.CloseApp(CLOSE_IGNORECHANGES);", "zavření okna bez stisku tlačítka"),
+                             (SAVE_EXPORT % "'data.xml'", "uložení dat bez stisku tlačítka"),
+                             ("doc.NavigationDlg(0, 0);", "přechod na část formuláře bez stisku tlačítka")):
+            with self.subTest(stop):
+                script = quoteattr("{var doc = GetDocument(); doc.GetElement().SetDataTo('a', 'zapsáno skriptem'); " + action + "}").encode()
+                form = form_with_stylesheets("", (EXPORT,)).replace(b'form602bind="a"/>', b'form602bind="a" form602onchange=' + script + b"/>")
+                doc = engine.open_document(form)
+                value_before = doc.get_value("a")
+                result = form_scripts.run_field_change_script(doc, "a", "", [])
+                self.assertEqual(result["refused"], stop)
+                self.assertEqual(doc.get_value("a"), value_before)
+                self.assertFalse({"close", "save", "navigate"} & set(result))
+
     def test_only_the_filled_copy_of_the_form_itself_is_printed(self):
         for script, stop in ((PRINT_COPY % "aux.CleanForm();" + "doc.ShowData(pdf);", "tisk prázdného formuláře"),
                              (PRINT_COPY.replace("aux.LoadFormData(doc.GetFormData(d));", "") % "" + "doc.ShowData(pdf);", "GetFormData"),
