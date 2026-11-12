@@ -648,6 +648,50 @@
       else run(await file.text());
     });
   };
+  const MAX_ATTACHED_BYTES = 17 * 1024 * 1024;
+  // form602ffilter is the filter of a Windows file dialog: "PDF soubory (*.pdf)|*.pdf|XML soubory (*.xml)|*.xml".
+  const extensionsOfFilter = filter => (filter || '').split('|').filter((part, index) => index % 2 === 1).join(';').split(';')
+    .map(pattern => /^\*(\.[A-Za-z0-9]{1,10})$/.exec(pattern.trim())?.[1]).filter(Boolean);
+  const contentInBase64 = file => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener('load', () => resolve(reader.result.slice(reader.result.indexOf(',') + 1)));
+    reader.addEventListener('error', () => reject(reader.error));
+    reader.readAsDataURL(file);
+  });
+  window.attach_form_file = button => chooseFile(extensionsOfFilter(button.dataset.fileFilter).join(','), async file => {
+    if (file.size > MAX_ATTACHED_BYTES) { setStatus('Soubor je větší než 17\u00a0MB, formulář ho nepřijme.'); return; }
+    let content;
+    try {
+      content = await contentInBase64(file);
+    } catch {
+      setStatus('Soubor se nepodařilo přečíst.');
+      return;
+    }
+    send(JSON.stringify({type: 'run_form_script', data: {
+      file_field: Number(button.dataset.fileField), repe: get_parent_repe(button), attach: {name: file.name, content}}}));
+  });
+  window.save_form_file = async button => {
+    await queue;
+    const response = await fetch('/file-of-field?s=' + SESSION, {method: 'POST', body: JSON.stringify({
+      file_field: Number(button.dataset.fileField), repe: get_parent_repe(button)})});
+    if (!response.ok) { setStatus('V\u00a0tomto poli žádný soubor není.'); return; }
+    const {index, name} = await response.json();
+    const url = `/attachment?s=${SESSION}&i=${index}`;
+    if (native) {
+      native.postMessage({action: 'saveAttachment', files: [{url, name}], folder: false, open: false});
+      return;
+    }
+    const file = await fetch(url);
+    if (!file.ok) { setStatus('Přílohu se nepodařilo stáhnout.'); return; }
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(await file.blob());
+    link.download = name;
+    link.click();
+    URL.revokeObjectURL(link.href);
+    setStatusMarkup(`Příloha stažena jako <b>${escapeHtml(name)}</b>`);
+  };
+  window.zfoAttachmentSaved = path => savedStatus('Příloha uložena do', path);
+  window.zfoAttachmentFailed = reason => setStatus(`Přílohu se nepodařilo uložit: ${reason}`);
   window.form_script_callback = result => {
     if (result.question) {
       const {text, title, retry} = result.question;

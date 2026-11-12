@@ -159,7 +159,7 @@
     .zfo-bar, .zfo-help-panel, .zfo-panel, .zfo-status, .zfo-notice, #pending_request { display: none !important; }
     .zfo-stage { overflow: visible; }
     .zfo-page { margin: 0 auto; box-shadow: none; border-radius: 0; zoom: 1 !important; }
-    .zfo-page button[zfo-app-event], .zfo-page button[data-form-button] { visibility: hidden; }
+    .zfo-page button[zfo-app-event], .zfo-page button[data-form-button], .zfo-page .zfo-file-field { visibility: hidden; }
     .zfo-page .zfo-invalid { box-shadow: none !important; }
     .zfo-page, .zfo-page * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .zfo-page input[type=text], .zfo-page select, .zfo-page textarea { background-color: transparent !important; }
@@ -220,6 +220,8 @@
   .zfo-page input[type=checkbox]:disabled, .zfo-page input[type=radio]:disabled { background-color: var(--field-readonly); cursor: default; }
   .zfo-page td:has(> input[type=text]), .zfo-page td:has(> select) { padding: 0 !important; }
   .zfo-page td > input[type=text], .zfo-page td > select { height: 100%; }
+  /* A field for a file wears what the form gave its block: the button inside only makes the block one. */
+  .zfo-page .zfo-file-field { width: 100%; margin: 0; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: inherit; cursor: pointer; }
   /* Repeating sections use the form's own +/- buttons, as in Form Filler; zfo-editor's extra controls stay hidden. */
   .zfo-page td:has(> button[onclick^="clone_row"]), .zfo-page td:has(> button[onclick^="del_row"]),
   .zfo-page [class~="602-repetition-table"] > tbody > tr:has(> td > button[onclick^="clone_table"]) { display: none !important; }
