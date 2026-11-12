@@ -1214,8 +1214,12 @@ class ZFO_document:
         # evaluate over the model that has empty numbers set to zero
         cal_calculated = ev.eval_calculate(self, bind, node=calc_copy, nsmap=nsmap)
         
-        if (calculated is None) or (cal_calculated is None):
-          continue 
+        if cal_calculated is None:
+          continue
+        # zfoengine: an empty number makes the sum over the file's data not a number; a typed value is calculated over the
+        # zero-filled copy only (calculate_values), so the whole recalculation takes that result too
+        if calculated is None:
+          calculated = cal_calculated
         # store value to both copies - one in the original tree, one into
         # data tree changed at init and filled with zeros
         att = self._path_contains_att(path)
