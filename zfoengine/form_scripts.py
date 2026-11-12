@@ -506,9 +506,14 @@ class FormActionHost:
         raise js602.Unsupported("SendData")
     return address
 
-  def show_document_on_the_web(self, url):
+  def _only_after_a_button(self, what):
+    # A form is someone else's file: what reaches beyond its data happens only when the user presses a button of the
+    # form, not while they type.
     if not self.is_started_by_button:
-      raise js602.Unsupported("dokument z webu bez stisku tlačítka")
+      raise js602.Unsupported(what + " bez stisku tlačítka")
+
+  def show_document_on_the_web(self, url):
+    self._only_after_a_button("dokument z webu")
     if self.document_to_open is not None:
       raise js602.Unsupported("ShowData")
     self.document_to_open = url
@@ -520,6 +525,7 @@ class FormActionHost:
     self.named_parameters[name] = value
 
   def save_data(self, content, name):
+    self._only_after_a_button("uložení dat")
     # The page saves the file through the save dialog of its window; the form names it, the user chooses where it goes.
     if self.file_to_save is not None or not SAVED_DATA_NAME.fullmatch(name):
       raise js602.Unsupported("SaveData")
@@ -527,8 +533,7 @@ class FormActionHost:
     self.file_to_save = {"name": name, "content": content}
 
   def print_form(self):
-    if not self.is_started_by_button:
-      raise js602.Unsupported("tisk bez stisku tlačítka")
+    self._only_after_a_button("tisk")
     self.prints_form = True
 
   def save_printed_form(self, name):
@@ -539,9 +544,11 @@ class FormActionHost:
       self.notices.append(PDF_FROM_PRINT_NOTICE)
 
   def close_window(self):
+    self._only_after_a_button("zavření okna")
     self.closes_window = True
 
   def offer_navigation(self):
+    self._only_after_a_button("přechod na část formuláře")
     self.offers_navigation = True
 
   def show_message(self, text, title, flags):
