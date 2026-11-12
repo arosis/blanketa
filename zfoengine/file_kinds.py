@@ -11,6 +11,7 @@
 #*    Written in November 2026 by Richard Winkler Bejr for "Blanketa".
 
 # What a form may ask about a file the user attached: whether its content is what its extension says.
+import re
 
 ZIP_ARCHIVE = (b"PK\x03\x04",)
 OLE_DOCUMENT = (b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1",)
@@ -21,19 +22,25 @@ CONTENT_STARTS = {
   "docx": ZIP_ARCHIVE, "xlsx": ZIP_ARCHIVE, "odt": ZIP_ARCHIVE, "doc": OLE_DOCUMENT, "xls": OLE_DOCUMENT,
 }
 TEXT_MARKS = (b"\xef\xbb\xbf", b"\xff\xfe", b"\xfe\xff")
+EXTENSION_IN_FILTER = re.compile(r"\*\.([A-Za-z0-9]{1,10})")
 
 UNKNOWN_FORMAT, FORMAT_MISMATCH, FORMAT_NOT_ALLOWED = "unknown format", "format mismatch", "format not allowed"
 
 
+def extension_as_written(name):
+  return name.rsplit(".", 1)[1] if "." in name else ""
+
+
 def extension_of(name):
-  return name.rsplit(".", 1)[1].lower() if "." in name else ""
+  return extension_as_written(name).lower()
 
 
 def extensions_in_filter(file_filter):
   # form602ffilter is the filter of a Windows file dialog: "PDF soubory (*.pdf)|*.pdf|XML soubory (*.xml)|*.xml".
   # Every second part is what the dialog matches, the parts before them only describe it.
   patterns = ";".join((file_filter or "").split("|")[1::2]).split(";")
-  return {pattern.strip()[2:].lower() for pattern in patterns if pattern.strip().startswith("*.") and "*" not in pattern.strip()[2:]}
+  found = (EXTENSION_IN_FILTER.fullmatch(pattern.strip()) for pattern in patterns)
+  return {extension.group(1).lower() for extension in found if extension}
 
 
 def _starts_as_xml(content):

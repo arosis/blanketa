@@ -94,7 +94,7 @@ class FilesAttachedToAForm(unittest.TestCase):
         doc = engine.open_document((FORM % (FILTER, "", '""')).encode())
         self.assertTrue(attach(doc, "Sken.PNG", PNG)["changed"])
         self.assertEqual(base64.b64decode(value(doc, "Pom.Soubor.Data")), PNG)
-        self.assertEqual((value(doc, "Pom.Soubor.Nazev"), value(doc, "Pom.Soubor.Typ")), ("Sken.PNG", "png"))
+        self.assertEqual((value(doc, "Pom.Soubor.Nazev"), value(doc, "Pom.Soubor.Typ")), ("Sken.PNG", "PNG"))
 
     def test_a_file_whose_content_is_not_what_its_extension_says_does_not_get_in(self):
         doc = form()
@@ -123,6 +123,17 @@ class FilesAttachedToAForm(unittest.TestCase):
         result = attach(doc, "velky.pdf", PDF + bytes(form_scripts.MAX_ATTACHED_BYTES))
         self.assertEqual(result, {"stopped": "Soubor je větší než 17 MB, formulář ho nepřijme."})
         self.assertEqual(value(doc, "Pom.Soubor.Data"), "")
+
+    def test_a_file_far_beyond_what_a_form_takes_is_not_even_read(self):
+        doc = form()
+        beyond_reading = {"name": "a.pdf", "content": "A" * (form_scripts.MAX_ATTACHED_CHARACTERS + 4)}
+        self.assertIsNone(form_scripts.attach_file(doc, FIELD_THAT_TAKES_A_FILE, "", [], None, beyond_reading))
+
+    def test_the_form_gets_the_type_of_the_file_as_its_name_has_it(self):
+        # Form Filler 4.81 stores <Typ>PDF</Typ> for "Sken Velky.PDF".
+        doc = form()
+        self.assertEqual(attach(doc, "Sken Velky.PDF", PDF)["messages"], [])
+        self.assertEqual((value(doc, "Priloha.Nazev"), value(doc, "Priloha.Typ")), ("Sken Velky.PDF", "PDF"))
 
     def test_a_file_of_several_megabytes_goes_through_the_script(self):
         doc = form()
@@ -178,6 +189,7 @@ class KindsOfAttachedFiles(unittest.TestCase):
     def test_the_filter_of_a_field_names_the_extensions_it_takes(self):
         self.assertEqual(file_kinds.extensions_in_filter("PDF soubory (*.pdf)|*.pdf|Obrázky|*.JPG;*.jpeg"), {"pdf", "jpg", "jpeg"})
         self.assertEqual(file_kinds.extensions_in_filter(None), set())
+        self.assertEqual(file_kinds.extensions_in_filter("Cokoli|*.*|Dlouhé|*.priponadelsineznormalni|Znaky|*.<b>;*.docx"), {"docx"})
 
     def test_known_kinds_are_told_by_how_their_content_starts(self):
         for name, content in (("a.pdf", PDF), ("a.PNG", PNG), ("a.jpg", b"\xff\xd8\xff\xe0"), ("a.gif", b"GIF89a"), ("a.docx", b"PK\x03\x04"),

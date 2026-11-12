@@ -37,6 +37,7 @@ MAX_NAMED_PARAMETERS = 1_000
 MAX_LOOKUPS_PER_RUN = 3
 MAX_UPLOADED_CHARACTERS = 16_000_000
 MAX_ATTACHED_BYTES = 17 * 1024 * 1024  # what MPSV forms take for all the attachments of one application
+MAX_ATTACHED_CHARACTERS = 2 * MAX_ATTACHED_BYTES  # in base64; a file over the limit still decodes, for its refusal to name the limit
 ATTACHMENT_FIELD_TYPE = "bin"
 FIELD_ONLY_GIVES_ITS_FILE = "save"  # form602menu of a field that hands its file back to the user and takes none
 NO_ANTIVIRUS_NOTICE = "Blanketa vložený soubor antivirem nekontroluje."
@@ -281,11 +282,11 @@ class FormActionHost:
     self._store(bind, self.document._get_abs_data_path(bind, self.repetitions), value)
 
   def take_file(self, name, content):
-    # Form Filler writes the file in base64 into the field's data, its name and its extension without the dot into the
-    # binds the field names (seen in Form Filler 4.81 on an MPSV form).
+    # Form Filler writes the file in base64 into the field's data, its name and its extension, without the dot and as
+    # the name has it, into the binds the field names (seen in Form Filler 4.81 on an MPSV form).
     field = self.element
     for bind_id, value in ((field.get("form602bind"), base64.b64encode(content).decode("ascii")),
-                           (field.get("filenamebind"), name), (field.get("mediatypebind"), file_kinds.extension_of(name))):
+                           (field.get("filenamebind"), name), (field.get("mediatypebind"), file_kinds.extension_as_written(name))):
       if bind_id:
         bind = self._bind(bind_id)
         self._store(bind, self.document._get_abs_data_path(bind, self.repetitions), value, is_users_own=True)
@@ -810,7 +811,7 @@ def _field_that_takes_files(document, position):
 def _content_of_chosen_file(file):
   if not isinstance(file, dict) or not isinstance(file.get("name"), str) or not isinstance(file.get("content"), str):
     return None
-  if not ATTACHED_FILE_NAME.fullmatch(file["name"]):
+  if not ATTACHED_FILE_NAME.fullmatch(file["name"]) or len(file["content"]) > MAX_ATTACHED_CHARACTERS:
     return None
   try:
     return base64.b64decode(file["content"], validate=True)
