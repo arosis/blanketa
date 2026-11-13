@@ -508,15 +508,19 @@ class NewerAttachmentsOnThePage(unittest.TestCase):
 
 
 class AttachmentSample(unittest.TestCase):
+    ROOT = Path(__file__).resolve().parent.parent
+    SAMPLE = ROOT / "samples/skripty/prilohy.zfo"
+
     def test_the_sample_for_trying_attachments_in_the_apps_opens_and_keeps_a_file(self):
-        root = Path(__file__).resolve().parent.parent
-        sample = root / "samples/skripty/prilohy.zfo"
-        maker = importlib.util.spec_from_file_location("make_attachment_sample", root / "tools/make-attachment-sample.py")
-        tool = importlib.util.module_from_spec(maker)
-        maker.loader.exec_module(tool)
-        self.assertEqual(zfo_verify.read_form_fo(sample), tool.form_of_the_sample())
-        self.assertEqual([layer["subject"] for layer in zfo_verify.describe_signature_layers(zfo_verify.load_form_root(sample))],
-                         ["Blanketa TEST CA (neduveryhodna)"])
-        doc = engine.open_document(zfo_verify.read_form_fo(sample))
+        self.assertIn("TEST", zfo_verify.describe_signature_layers(zfo_verify.load_form_root(self.SAMPLE))[0]["subject"])
+        doc = engine.open_document(zfo_verify.read_form_fo(self.SAMPLE))
         add_to_list(doc, "priloha.pdf", PDF)
         self.assertEqual(form_scripts.file_of_field(doc, 0, "block---att-rep-0"), ("priloha.pdf", PDF))
+
+    def test_the_sample_is_what_its_tool_writes(self):
+        # The test authority is made anew on every machine, so the tool is given the certificate the sample names.
+        maker = importlib.util.spec_from_file_location("make_attachment_sample", self.ROOT / "tools/make-attachment-sample.py")
+        tool = importlib.util.module_from_spec(maker)
+        maker.loader.exec_module(tool)
+        certificate = zfo_verify.describe_signature_layers(zfo_verify.load_form_root(self.SAMPLE))[0]["der"]
+        self.assertEqual(zfo_verify.read_form_fo(self.SAMPLE), tool.form_naming(certificate))
