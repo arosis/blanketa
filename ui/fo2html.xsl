@@ -128,9 +128,16 @@
   </xsl:template>
 
   <xsl:template name="output-attributes">
-    <xsl:attribute name="id"><xsl:value-of select="@form602bindref"/></xsl:attribute>
+    <!-- The output beside the link of an attachment refers to the file and shows its size (blanketa-shown-bind). -->
+    <xsl:variable name="shown-bind">
+      <xsl:choose>
+        <xsl:when test="@blanketa-shown-bind"><xsl:value-of select="@blanketa-shown-bind"/></xsl:when>
+        <xsl:otherwise><xsl:value-of select="@form602bindref"/></xsl:otherwise>
+      </xsl:choose>
+    </xsl:variable>
+    <xsl:attribute name="id"><xsl:value-of select="$shown-bind"/></xsl:attribute>
     <xsl:attribute name="class">outputelement</xsl:attribute>
-    <xsl:attribute name="name"><xsl:value-of select="@form602bindref"/></xsl:attribute>
+    <xsl:attribute name="name"><xsl:value-of select="$shown-bind"/></xsl:attribute>
     <xsl:if test="@form602format">
       <xsl:attribute name="data-format"><xsl:value-of select="@form602format"/></xsl:attribute>
     </xsl:if>
@@ -191,14 +198,9 @@
   <!-- The link of an attachment (form602ct="bil") shows the name of the file it holds and hands the file back. -->
   <xsl:template match="fo:basic-link[@blanketa-file-field]">
     <button type="button" class="zfo-file-field outputelement" name="{@blanketa-shown-bind}" title="Uložit přílohu do počítače"
-            onclick="save_form_file(this)" data-file-field="{@blanketa-file-field}"/>
-  </xsl:template>
-
-  <!-- The output beside the link refers to the attachment and shows its size (form602format="attch-size-kB"). -->
-  <xsl:template match="fo:inline[@form602ct='out'][@blanketa-shown-bind]">
-    <span id="{@blanketa-shown-bind}" class="outputelement" name="{@blanketa-shown-bind}" data-format="{@form602format}">
+            onclick="save_form_file(this)" data-file-field="{@blanketa-file-field}">
       <xsl:call-template name="add-style-attribute"/>
-    </span>
+    </button>
   </xsl:template>
 
   <!-- A field for a file (form602ct="bin") is a button: it takes a file from the user (form602menu="add"), or hands the

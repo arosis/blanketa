@@ -222,6 +222,7 @@
   .zfo-page td > input[type=text], .zfo-page td > select { height: 100%; }
   /* A field for a file wears what the form gave its block: the button inside only makes the block one. */
   .zfo-page .zfo-file-field { width: 100%; margin: 0; padding: 0; border: 0; background: none; font: inherit; color: inherit; text-align: inherit; cursor: pointer; }
+  .zfo-page .zfo-file-field:empty { display: none; }
   /* Repeating sections use the form's own +/- buttons, as in Form Filler; zfo-editor's extra controls stay hidden. */
   .zfo-page td:has(> button[onclick^="clone_row"]), .zfo-page td:has(> button[onclick^="del_row"]),
   .zfo-page [class~="602-repetition-table"] > tbody > tr:has(> td > button[onclick^="clone_table"]) { display: none !important; }

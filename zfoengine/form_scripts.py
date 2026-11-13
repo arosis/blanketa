@@ -35,7 +35,6 @@ MAX_MESSAGES_PER_RUN = 5
 MAX_QUESTIONS_PER_RUN = 8
 MAX_NAMED_PARAMETERS = 1_000
 MAX_LOOKUPS_PER_RUN = 3
-MAX_UPLOADED_CHARACTERS = 16_000_000
 MAX_ATTACHED_BYTES = 17 * 1024 * 1024  # what MPSV forms take for all the attachments of one application
 MAX_ATTACHED_CHARACTERS = 2 * MAX_ATTACHED_BYTES  # in base64; a file over the limit still decodes, for its refusal to name the limit
 ATTACHMENT_FIELD_TYPE = "bin"
@@ -343,8 +342,6 @@ class FormActionHost:
   def uploaded(self):
     if self.uploaded_file is None:
       raise js602.Unsupported("element.GetUploadedFileData")
-    if isinstance(self.uploaded_file, str):
-      return "", self.uploaded_file.encode()
     return self.uploaded_file
 
   def _value_of_bind(self, bind_id):
@@ -945,10 +942,7 @@ def run_button_script(document, position, repe, answers, lookups=None, uploaded_
   element = buttons[position]
   if isinstance(uploaded_file, dict):
     return _run_with_uploaded_file(document, position, element, repe, answers, lookups, uploaded_file)
-  if not isinstance(uploaded_file, str) or len(uploaded_file) > MAX_UPLOADED_CHARACTERS:
-    uploaded_file = None
-  retry = {"button": position} if uploaded_file is None else {"button": position, "upload": uploaded_file}
-  return _run(document, element, element.get("form602btnclick"), repe, answers, lookups, retry, uploaded_file)
+  return _run(document, element, element.get("form602btnclick"), repe, answers, lookups, {"button": position})
 
 
 def _run_with_uploaded_file(document, position, button, repe, answers, lookups, file):

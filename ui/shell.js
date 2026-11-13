@@ -642,21 +642,15 @@
     if (native) native.postMessage({action: 'close'});
     else setStatus('Formulář chtěl zavřít okno. V\u00a0prohlížeči kartu zavřete sami.');
   };
-  const chooseFile = (accept, use) => {
+  const chooseFiles = (accept, use, {several = false} = {}) => {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = accept;
-    input.addEventListener('change', () => input.files[0] && use(input.files[0]));
-    input.click();
-  };
-  const chooseFiles = (accept, use) => {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = accept;
-    input.multiple = true;
+    input.multiple = several;
     input.addEventListener('change', () => input.files.length && use([...input.files]));
     input.click();
   };
+  const chooseFile = (accept, use) => chooseFiles(accept, ([file]) => use(file));
   const MAX_ATTACHED_BYTES = 17 * 1024 * 1024;
   // form602ffilter is the filter of a Windows file dialog: "PDF soubory (*.pdf)|*.pdf|XML soubory (*.xml)|*.xml".
   const extensionsOfFilter = filter => (filter || '').split('|').filter((part, index) => index % 2 === 1).join(';').split(';')
@@ -690,7 +684,7 @@
       const attach = await chosenFile(file);
       if (attach) send(JSON.stringify({type: 'run_form_script', data: {file_list: Number(button.dataset.fileList), repe: get_parent_repe(button), attach}}));
     }
-  });
+  }, {several: true});
   window.attach_form_file = button => chooseFile(extensionsOfFilter(button.dataset.fileFilter).join(','), async file => {
     const attach = await chosenFile(file);
     if (attach) send(JSON.stringify({type: 'run_form_script', data: {file_field: Number(button.dataset.fileField), repe: get_parent_repe(button), attach}}));

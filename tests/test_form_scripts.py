@@ -1,4 +1,5 @@
 """602 JavaScript in forms: the scripts offices publish, zfoengine/js602.py, and the same expressions in Node.js."""
+import base64
 import json
 import os
 import re
@@ -466,8 +467,16 @@ SAVED_SECTION = '<d:sekce xmlns:d="http://software602.cz/sample" pro="vzorek"><d
 FIVE_AND_AN_EMPTY_NUMBER = SAVED_SECTION.replace("<d:c>ze souboru</d:c>", "<d:c/><d:n1>5</d:n1><d:n2/>")
 
 
+def with_an_upload_button(form):
+    return form.replace(b'form602ct="btn" form602bind="b"', b'form602ct="bib" form602bind="b"')
+
+
+def chosen_xml(text):
+    return {"name": "data.xml", "content": base64.b64encode(text.encode()).decode()}
+
+
 def form_with_a_sum():
-    form = form_with_stylesheets(LOAD_SECTION, ()).replace(b"<d:sekce><d:c/></d:sekce>", b"<d:sekce><d:c/><d:n1/><d:n2/></d:sekce><d:soucet/>")
+    form = with_an_upload_button(form_with_stylesheets(LOAD_SECTION, ())).replace(b"<d:sekce><d:c/></d:sekce>", b"<d:sekce><d:c/><d:n1/><d:n2/></d:sekce><d:soucet/>")
     form = form.replace(b'<fm:bind Id="c" nodeset="d:c"/></fm:bind>',
                         b'<fm:bind Id="c" nodeset="d:c"/><fm:bind Id="n1" nodeset="d:n1"/><fm:bind Id="n2" nodeset="d:n2"/></fm:bind>'
                         b'<fm:bind Id="soucet" nodeset="d:soucet" depends="n1|n2" calculate="/d:root/d:sekce/d:n1 + /d:root/d:sekce/d:n2"/>')
@@ -522,8 +531,9 @@ class FilesTheUserChooses(unittest.TestCase):
     """The Nahrát uložená data (XML) button of MPSV forms loads a file the user chooses back into the data."""
 
     def click(self, uploaded_file=SAVED_SECTION, script=LOAD_SECTION, answers=()):
-        doc = engine.open_document(form_with_stylesheets(script, ()))
-        return doc, form_scripts.run_button_script(doc, 0, "", list(answers), None, uploaded_file)
+        doc = engine.open_document(with_an_upload_button(form_with_stylesheets(script, ())))
+        chosen = chosen_xml(uploaded_file) if isinstance(uploaded_file, str) else uploaded_file
+        return doc, form_scripts.run_button_script(doc, 0, "", list(answers), None, chosen)
 
     def test_the_chosen_file_fills_the_part_of_the_data_the_form_names(self):
         doc, result = self.click()
@@ -538,7 +548,7 @@ class FilesTheUserChooses(unittest.TestCase):
         self.assertFalse(result["changed"])
 
     def test_without_a_chosen_file_the_script_stops(self):
-        for uploaded_file in (None, 5, "x" * (form_scripts.MAX_UPLOADED_CHARACTERS + 1)):
+        for uploaded_file in (None, 5):
             with self.subTest(str(uploaded_file)[:5]):
                 self.assertEqual(self.click(uploaded_file)[1]["refused"], "element.GetUploadedFileData")
 
@@ -562,13 +572,13 @@ class FilesTheUserChooses(unittest.TestCase):
 
     def test_an_empty_number_of_the_file_counts_as_zero_in_the_forms_sums(self):
         doc = engine.open_document(form_with_a_sum())
-        form_scripts.run_button_script(doc, 0, "", [], None, FIVE_AND_AN_EMPTY_NUMBER)
+        form_scripts.run_button_script(doc, 0, "", [], None, chosen_xml(FIVE_AND_AN_EMPTY_NUMBER))
         doc.store_value("n1", "6", "sekce-rep-0")
         self.assertEqual(doc.get_value("soucet"), "6")
 
     def test_sums_follow_the_loaded_numbers_without_any_typing(self):
         doc = engine.open_document(form_with_a_sum())
-        result = form_scripts.run_button_script(doc, 0, "", [], None, FIVE_AND_AN_EMPTY_NUMBER)
+        result = form_scripts.run_button_script(doc, 0, "", [], None, chosen_xml(FIVE_AND_AN_EMPTY_NUMBER))
         self.assertEqual(doc.get_value("soucet"), "5")
         self.assertEqual(result["values"]["soucet"], "5")
 
@@ -576,7 +586,7 @@ class FilesTheUserChooses(unittest.TestCase):
         typed = engine.open_document(form_with_a_sum())
         typed.store_value("n1", "5", "sekce-rep-0")
         recalculated = engine.open_document(form_with_a_sum())
-        form_scripts.run_button_script(recalculated, 0, "", [], None, FIVE_AND_AN_EMPTY_NUMBER)
+        form_scripts.run_button_script(recalculated, 0, "", [], None, chosen_xml(FIVE_AND_AN_EMPTY_NUMBER))
         engine.handle(recalculated, "recalc_form", "")
         self.assertEqual(recalculated.get_value("soucet"), typed.get_value("soucet"))
         self.assertEqual(typed.get_value("soucet"), "5")
@@ -602,7 +612,7 @@ class FilesTheUserChooses(unittest.TestCase):
     def test_a_question_of_the_form_keeps_the_chosen_file(self):
         asking = "if (MessageBox('Nahrát?', '', MB_YESNO) == IDYES) {" + LOAD_SECTION + "}"
         doc, result = self.click(script=asking)
-        self.assertEqual(result["question"]["retry"]["upload"], SAVED_SECTION)
+        self.assertEqual(result["question"]["retry"]["upload"], chosen_xml(SAVED_SECTION))
         doc, result = self.click(script=asking, answers=[True])
         self.assertEqual(result["values"], {"c": "ze souboru"})
 

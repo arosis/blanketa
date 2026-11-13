@@ -92,7 +92,7 @@ class SignatureReplacementNotice(unittest.TestCase):
     def test_buttons_of_a_form_send_the_files_the_user_chose(self):
         page = ui_source("shell.js")
         parts = [re.search(pattern, page, re.S).group(0) for pattern in (
-            r"const chooseFile = .*?\n  \};", r"const chooseFiles = .*?\n  \};", r"const MAX_ATTACHED_BYTES = .*?;\n",
+            r"const chooseFiles = .*?\n  \};", r"const chooseFile = .*?;\n", r"const MAX_ATTACHED_BYTES = .*?;\n",
             r"const contentInBase64 = .*?\n  \}\);", r"const chosenFile = .*?\n  \};", r"window\.run_form_button = .*?\n  \};",
             r"window\.attach_files_to_list = .*?\n  \}\);")]
         script = """const window = globalThis, sent = [], statuses = [];
