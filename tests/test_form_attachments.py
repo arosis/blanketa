@@ -1,10 +1,12 @@
 """Files a user attaches to a ZFO form: the field keeps the file in the data and the form's script files it away."""
 import base64
 import http.client
+import importlib.util
 import json
 import threading
 import unittest
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 from xml.sax.saxutils import quoteattr
 
 import support  # noqa: F401  (puts the project on the import path)
@@ -12,6 +14,7 @@ from lxml import etree
 from lxml import html as lxml_html
 
 import app
+import zfo_verify
 from zfoengine import api as engine
 from zfoengine import file_kinds, form_scripts
 
@@ -502,3 +505,22 @@ class NewerAttachmentsOnThePage(unittest.TestCase):
         doc = newer_form()
         self.assertIsNone(form_scripts.attach_file(doc, 0, "", [], None, chosen("a.pdf", PDF)))
         self.assertEqual(listed(doc, "filename"), [""])
+
+
+class AttachmentSample(unittest.TestCase):
+    ROOT = Path(__file__).resolve().parent.parent
+    SAMPLE = ROOT / "samples/skripty/prilohy.zfo"
+
+    def test_the_sample_for_trying_attachments_in_the_apps_opens_and_keeps_a_file(self):
+        self.assertIn("TEST", zfo_verify.describe_signature_layers(zfo_verify.load_form_root(self.SAMPLE))[0]["subject"])
+        doc = engine.open_document(zfo_verify.read_form_fo(self.SAMPLE))
+        add_to_list(doc, "priloha.pdf", PDF)
+        self.assertEqual(form_scripts.file_of_field(doc, 0, "block---att-rep-0"), ("priloha.pdf", PDF))
+
+    def test_the_sample_is_what_its_tool_writes(self):
+        # The test authority is made anew on every machine, so the tool is given the certificate the sample names.
+        maker = importlib.util.spec_from_file_location("make_attachment_sample", self.ROOT / "tools/make-attachment-sample.py")
+        tool = importlib.util.module_from_spec(maker)
+        maker.loader.exec_module(tool)
+        certificate = zfo_verify.describe_signature_layers(zfo_verify.load_form_root(self.SAMPLE))[0]["der"]
+        self.assertEqual(zfo_verify.read_form_fo(self.SAMPLE), tool.form_naming(certificate))
