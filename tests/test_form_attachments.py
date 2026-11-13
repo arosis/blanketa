@@ -336,6 +336,7 @@ NEWER_FORM = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#" 
 <fo:block form602ct="rep" form602bind="att">
 <fo:basic-link form602ct="bil" form602bindref="att.data" filenamebind="att.filename" filesizebind="att.size" mediatypebind="att.extension"
  form602onchange=%s/>
+<fo:inline form602ct="out" form602bindref="att.data" form602format="attch-size-kB"/>
 <fo:inline form602ct="btn" form602bindref="att.data" form602btnclick=%s>Odebrat</fo:inline>
 </fo:block></fo:block>
 <fo:block form602id="state1">
@@ -459,3 +460,45 @@ class FieldsForOneAttachment(unittest.TestCase):
         self.assertEqual(upload(made_up, "a.pdf", PDF)["refused"], "element.SetBinData")
         no_link = newer_form("var e = GetDocument().GetElement(); e.SetBinData(\"//*[@form602ct='bib']\", e.GetUploadedFileData());")
         self.assertEqual(upload(no_link, "a.pdf", PDF)["refused"], "element.SetBinData")
+
+
+class NewerAttachmentsOnThePage(unittest.TestCase):
+    def test_the_buttons_take_files_and_the_link_of_an_attachment_gives_its_file_back(self):
+        root = etree.fromstring((NEWER_FORM % tuple(quoteattr("{" + script + "}") for script in (JUDGE_LISTED_FILE, REMOVE_LISTED_FILE, UPLOAD_ONE_FILE))).encode())
+        form_scripts.name_buttons_for_page(root)
+        form_scripts.name_file_fields_for_page(root)
+        form_scripts.name_what_attachments_show(root)
+        page = lxml_html.fromstring(etree.tostring(app.XSLT(etree.ElementTree(root), PATH_TO_JS="'/s/'", PATH_TO_CSS="'/s/'"),
+                                                   method="html", encoding="unicode"))
+        self.assertEqual([(button.text_content().strip(), button.get("data-file-list"), button.get("data-form-upload"))
+                          for button in page.xpath("//button[@onclick='attach_files_to_list(this)']")], [("Nahrajte ze zařízení", "0", ".pdf,.png")])
+        self.assertEqual([(button.text_content().strip(), button.get("data-form-button"), button.get("data-form-upload"))
+                          for button in page.xpath("//button[@data-form-upload][@onclick='run_form_button(this)']")], [("Nahrát soubor", "1", ".pdf")])
+        self.assertEqual([(link.get("name"), link.get("data-file-field"), link.get("class")) for link in page.xpath("//button[@onclick='save_form_file(this)']")],
+                         [("att.filename", "0", "zfo-file-field outputelement"), ("s1.filename", "1", "zfo-file-field outputelement")])
+
+    def test_the_link_of_an_attachment_holds_the_file_of_its_item(self):
+        doc = newer_form()
+        add_to_list(doc, "a.pdf", PDF)
+        add_to_list(doc, "b.png", PNG)
+        upload(doc, "c.pdf", PDF)
+        self.assertEqual(form_scripts.file_of_field(doc, 0, "block---att-rep-1"), ("b.png", PNG))
+        self.assertEqual(form_scripts.file_of_field(doc, 1, ""), ("c.pdf", PDF))
+
+    def test_each_row_of_the_list_shows_the_name_and_the_size_of_its_own_file_and_never_the_file_itself(self):
+        doc = newer_form()
+        add_to_list(doc, "a.pdf", PDF)
+        add_to_list(doc, "b.png", PNG)
+        self.assertEqual(doc.get_repeatable_sections()["att"], [{"att.filename": "a.pdf", "att.size": str(len(PDF))},
+                                                                 {"att.filename": "b.png", "att.size": str(len(PNG))}])
+        self.assertNotIn("att.data", form_scripts._page_values(doc))
+        root = etree.fromstring((NEWER_FORM % ('""', '""', '""')).encode())
+        form_scripts.name_what_attachments_show(root)
+        page = lxml_html.fromstring(etree.tostring(app.XSLT(etree.ElementTree(root), PATH_TO_JS="'/s/'", PATH_TO_CSS="'/s/'"),
+                                                   method="html", encoding="unicode"))
+        self.assertEqual([(size.get("name"), size.get("class")) for size in page.xpath("//*[@data-format='attch-size-kB']")], [("att.size", "outputelement")])
+
+    def test_a_link_shows_a_file_and_takes_none(self):
+        doc = newer_form()
+        self.assertIsNone(form_scripts.attach_file(doc, 0, "", [], None, chosen("a.pdf", PDF)))
+        self.assertEqual(listed(doc, "filename"), [""])

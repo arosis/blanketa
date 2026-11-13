@@ -89,30 +89,38 @@ class SignatureReplacementNotice(unittest.TestCase):
             "confirm Otevřít?", "open https://mpsv.gov.cz/n.pdf",
             "confirm Otevřít?", "status Dokument se neotevřel, otevření jste nepotvrdili."])
 
-    def test_a_file_button_runs_its_script_with_the_text_of_the_chosen_file(self):
+    def test_buttons_of_a_form_send_the_files_the_user_chose(self):
         page = ui_source("shell.js")
         parts = [re.search(pattern, page, re.S).group(0) for pattern in (
-            r"const MAX_UPLOADED_BYTES = .*?;\n", r"const chooseFile = .*?\n  \};", r"window\.run_form_button = .*?\n  \};")]
+            r"const chooseFile = .*?\n  \};", r"const chooseFiles = .*?\n  \};", r"const MAX_ATTACHED_BYTES = .*?;\n",
+            r"const contentInBase64 = .*?\n  \}\);", r"const chosenFile = .*?\n  \};", r"window\.run_form_button = .*?\n  \};",
+            r"window\.attach_files_to_list = .*?\n  \}\);")]
         script = """const window = globalThis, sent = [], statuses = [];
         const send = message => sent.push(JSON.parse(message).data), setStatus = text => statuses.push(text), get_parent_repe = () => '';
-        let chosen, size = 7, texts_read = 0;
+        let chosen = [];
+        class FileReader {
+          addEventListener(name, listener) { this[name] = listener; }
+          readAsDataURL(file) { this.result = 'data:application/pdf;base64,' + file.base64; this.load(); }
+        }
         const document = {createElement: () => ({addEventListener(name, listener) { this.listener = listener; },
-                                                 click() { this.files = [{size, text: async () => { texts_read++; return chosen; }}]; return this.listener(); }})};
+                                                 click() { this.files = chosen; return this.listener(); }})};
         %s
         (async () => {
           window.run_form_button({dataset: {formButton: '2'}});
-          chosen = '<Data/>';
-          await window.run_form_button({dataset: {formButton: '3', formUpload: '.xml'}});
+          chosen = [{name: 'Plná moc.pdf', size: 7, base64: 'JVBERi0='}];
+          window.run_form_button({dataset: {formButton: '3', formUpload: '.pdf'}});
           await new Promise(resolve => setTimeout(resolve, 10));
-          size = MAX_UPLOADED_BYTES + 1;
-          window.run_form_button({dataset: {formButton: '3', formUpload: '.xml'}});
+          chosen = [{name: 'a.pdf', size: 7, base64: 'QQ=='}, {name: 'velky.pdf', size: MAX_ATTACHED_BYTES + 1, base64: 'Qg=='}, {name: 'c.png', size: 7, base64: 'Qw=='}];
+          window.attach_files_to_list({dataset: {fileList: '0', formUpload: '.pdf,.png'}});
           await new Promise(resolve => setTimeout(resolve, 50));
-          console.log(JSON.stringify({sent, statuses, texts_read}));
+          console.log(JSON.stringify({sent, statuses}));
         })();""" % "\n".join(parts)
         result = json.loads(run_in_node(script, ""))
-        self.assertEqual(result["sent"], [{"button": 2, "repe": ""}, {"button": 3, "repe": "", "upload": "<Data/>"}])
-        self.assertEqual(result["statuses"], ["Soubor je příliš velký, formulář ho nenačte."])
-        self.assertEqual(result["texts_read"], 1)
+        self.assertEqual(result["sent"], [{"button": 2, "repe": ""},
+                                          {"button": 3, "repe": "", "upload": {"name": "Plná moc.pdf", "content": "JVBERi0="}},
+                                          {"file_list": 0, "repe": "", "attach": {"name": "a.pdf", "content": "QQ=="}},
+                                          {"file_list": 0, "repe": "", "attach": {"name": "c.png", "content": "Qw=="}}])
+        self.assertEqual(result["statuses"], ["Soubor je větší než 17\u00a0MB, formulář ho nepřijme."])
 
     def test_a_stopped_button_says_what_did_not_happen_and_what_to_do(self):
         page = ui_source("shell.js")
@@ -272,7 +280,7 @@ class FieldFormatsOnThePage(unittest.TestCase):
     console.log(JSON.stringify({
       shown: [shownValue(date, '1990-02-01'), shownValue(date, 'neco'), shownValue(time, '08:05:00'), shownValue(money, '1234567.5'),
               shownValue(money, '0.125'), shownValue(output('# ##0,00'), '0.125'), shownValue(output('##0,00 Kč'), '12'),
-              shownValue(output('d. M. yyyy'), '2026-11-10'), shownValue(output('H:mm:ss'), '7:05'), shownValue(output('attch-size-kB'), 'QUJD'),
+              shownValue(output('d. M. yyyy'), '2026-11-10'), shownValue(output('H:mm:ss'), '7:05'), shownValue(output('attch-size-kB'), '1536'),
               shownValue(element('numberInput', ''), '1.5'), shownValue(element('numberInput', "#0,00 '%%'"), '12'),
               shownValue(money, '00.0'), shownValue(output('# ##0,00'), '00.0')],
       rounded: ['2.675', '1.005', '9.999', '-0.001', '-1234.565', '.5'].map(value => shownValue(output('# ##0,00'), value)),
@@ -292,7 +300,7 @@ class FieldFormatsOnThePage(unittest.TestCase):
 
     def test_stored_values_are_shown_by_the_picture(self):
         self.assertEqual(self.run_page()["shown"], [
-            "1.2.1990", "neco", "8:05", "1\u00a0234\u00a0567,50", "0,125", "0,13", "12,00 Kč", "10. 11. 2026", "7:05:00", "QUJD", "1.5", "12,00 %", "", "0,00"])
+            "1.2.1990", "neco", "8:05", "1\u00a0234\u00a0567,50", "0,125", "0,13", "12,00 Kč", "10. 11. 2026", "7:05:00", "1,5\u00a0kB", "1.5", "12,00 %", "", "0,00"])
 
     def test_an_output_rounds_the_decimal_digits_as_written(self):
         self.assertEqual(self.run_page()["rounded"], ["2,68", "1,01", "10,00", "0,00", "-1\u00a0234,57", "0,50"])

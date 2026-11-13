@@ -52,7 +52,6 @@ DAMAGED_PAGE = ("<!doctype html><meta charset=utf-8><title>Soubor nelze otevří
                 "<body style='font:14px system-ui,sans-serif;padding:24px'><h1 style='font-size:18px'>Soubor nelze otevřít</h1>"
                 "<p>Soubor může být poškozený nebo nejde o formulář, který Blanketa umí přečíst. Může jít i o chybu Blankety; "
                 "pokud ho jiná aplikace otevře, dejte nám prosím vědět.</p>")
-NEVER_RUN_SCRIPT_ATTRIBUTES = ("form602attchuploadstartaction",)
 SESSIONS = {}
 SHOWN_CERTIFICATES_BY_ID = {}
 IMPORTS = {}
@@ -333,6 +332,7 @@ def render_zfo_page(name, blank=False, data=None, lists_waited_for=False):
     unfilled_lists = codelists.fill(doc, lists, data_text)
     form_scripts.name_buttons_for_page(doc)
     form_scripts.name_file_fields_for_page(doc)
+    form_scripts.name_what_attachments_show(doc)
     form_scripts.name_repeating_sections_by_bind(doc)
     for hidden in doc.xpath("//dsig:SignatureProperties | //dsig:Object[not(@Id)]", namespaces={"dsig": DS}):
         hidden.getparent().remove(hidden)
@@ -423,11 +423,6 @@ def binds_with_unsupported_scripts(doc):
     return found
 
 
-def count_never_run_scripts(doc):
-    return sum(1 for element in doc.iter() if isinstance(element.tag, str) for attribute in NEVER_RUN_SCRIPT_ATTRIBUTES
-               if element.get(attribute, "").lstrip().startswith("{"))
-
-
 def summary_and_modification_time(path):
     if not zfo_verify.is_zip_form(path):
         return None, datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds")
@@ -446,8 +441,7 @@ def form_info(name):
             "comment": attribute_or_default(summary, "comment"), "code": attribute_or_default(summary, "formcode"),
             "form_id": attribute_or_default(params, "form-id") or attribute_or_default(summary, "form-id"),
             "created": attribute_or_default(params, "creationdate"), "modified": modified,
-            "version": attribute_or_default(params, "xmlcore-version"), "scripts": len(binds_with_unsupported_scripts(fo)),
-            "actions": count_never_run_scripts(fo)}
+            "version": attribute_or_default(params, "xmlcore-version"), "scripts": len(binds_with_unsupported_scripts(fo))}
 
 
 def filled_form(session, key=None, cert=None):

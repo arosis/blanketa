@@ -42,6 +42,7 @@ ATTACHMENT_FIELD_TYPE = "bin"
 # The newer MPSV forms, written for FormApps Server: a button hands a chosen file to its script (bib) or adds each chosen
 # file to a repeating section (btm), and a link shows the file an attachment holds (bil).
 UPLOAD_BUTTON_TYPE, FILE_LIST_BUTTON_TYPE, ATTACHMENT_LINK_TYPE = "bib", "btm", "bil"
+SIZE_OF_ATTACHMENT_FORMAT = "attch-size-kB"
 NAME_OF_UNNAMED_ATTACHMENT = "priloha"
 FIELD_ONLY_GIVES_ITS_FILE = "save"  # form602menu of a field that hands its file back to the user and takes none
 NO_ANTIVIRUS_NOTICE = "Blanketa vložený soubor antivirem nekontroluje."
@@ -163,6 +164,20 @@ def name_repeating_sections_by_bind(root):
     if isinstance(element.tag, str) and element.get("form602ct") == "rep" and not element.get("form602repe") and element.get("form602bind"):
       element.set("form602repe", element.get("form602bind"))
       element.set("blanketa-section-by-bind", "true")
+
+
+def name_what_attachments_show(root):
+  # The link of an attachment refers to the file itself and shows its name; the output beside it refers to the file too
+  # and shows its size. The page and the values of a repeating section go by the bind that is shown.
+  links = [element for element in root.iter() if isinstance(element.tag, str) and element.get("form602ct") == ATTACHMENT_LINK_TYPE]
+  sizes_of_files = {link.get("form602bindref"): link.get("filesizebind") for link in links if link.get("filesizebind")}
+  for link in links:
+    if link.get("filenamebind"):
+      link.set("blanketa-shown-bind", link.get("filenamebind"))
+  for element in root.iter():
+    if (isinstance(element.tag, str) and element.get("form602format") == SIZE_OF_ATTACHMENT_FORMAT
+        and element.get("form602bindref") in sizes_of_files):
+      element.set("blanketa-shown-bind", sizes_of_files[element.get("form602bindref")])
 
 
 def _plain_text(element):
@@ -827,13 +842,15 @@ def _choose_whispered_item(document, element, bind_id, repe):
 def file_fields(root):
   # Their position is how the page and the engine agree on one: MPSV forms bind the field that loads saved data and the
   # field that takes an attachment to the same place in the data.
-  return [element for element in root.iter() if isinstance(element.tag, str) and element.get("form602ct") == ATTACHMENT_FIELD_TYPE
-          and element.get("form602bind")]
+  return [element for element in root.iter() if isinstance(element.tag, str)
+          and element.get("form602ct") in (ATTACHMENT_FIELD_TYPE, ATTACHMENT_LINK_TYPE) and _data_bind_of(element)]
 
 
 def name_file_fields_for_page(root):
   for position, element in enumerate(file_fields(root)):
     element.set("blanketa-file-field", str(position))
+  for position, element in enumerate(file_list_buttons(root)):
+    element.set("blanketa-file-list", str(position))
 
 
 def file_of_field(document, position, repe):
@@ -855,9 +872,11 @@ def file_of_field(document, position, repe):
 
 def _field_that_takes_files(document, position):
   fields = file_fields(document.root)
-  if type(position) is not int or not 0 <= position < len(fields) or fields[position].get("form602menu") == FIELD_ONLY_GIVES_ITS_FILE:
+  if type(position) is not int or not 0 <= position < len(fields):
     return None
-  return fields[position]
+  field = fields[position]
+  takes_files = field.get("form602ct") == ATTACHMENT_FIELD_TYPE and field.get("form602menu") != FIELD_ONLY_GIVES_ITS_FILE
+  return field if takes_files else None
 
 
 def _content_of_chosen_file(file):

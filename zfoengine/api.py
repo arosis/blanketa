@@ -68,6 +68,7 @@ def open_document(fo_bytes):
   with _LOCK:
     doc = zfo_parser.parse_fo(fo_bytes, comes_from_zip=True)
     form_scripts.name_repeating_sections_by_bind(doc.root)
+    form_scripts.name_what_attachments_show(doc.root)
     _activate(doc)
     # build the data model now (the GTK app did it lazily on the first message)
     doc._get_data_root()

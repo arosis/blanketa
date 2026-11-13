@@ -207,12 +207,22 @@
     plain = plain.replace(/[\s\u00a0]/g, '').replace(',', '.');
     return /^[-+]?\d*\.?\d*$/.test(plain) && /\d/.test(plain) ? plain : text;
   };
+  // The size of an attachment in bytes, shown as the web application of MPSV shows it: 96 B, 1,5 kB, 2,3 MB.
+  const SIZE_OF_ATTACHMENT = 'attch-size-kB';
+  const sizeInText = bytes => {
+    const size = Number(bytes);
+    if (bytes === '' || !Number.isFinite(size)) return '';
+    if (size < 1024) return `${size}\u00a0B`;
+    const [amount, unit] = size < 1024 * 1024 ? [size / 1024, 'kB'] : [size / 1024 / 1024, 'MB'];
+    return `${amount.toFixed(1).replace('.', ',')}\u00a0${unit}`;
+  };
   const fieldKind = element => {
     const picture = element.dataset?.format ?? '';
     if (element.classList.contains('date-pick')) return 'date';
     if (element.classList.contains('timeInput')) return 'time';
     if (element.classList.contains('numberInput')) return 'number';
     if (!element.classList.contains('outputelement') || !picture) return '';
+    if (picture === SIZE_OF_ATTACHMENT) return 'size';
     return /[#0]/.test(picture) ? 'number' : /[Hhms]/.test(picture) && !/[yd]/.test(picture) ? 'time' : /[yMd]/.test(picture) ? 'date' : '';
   };
   // Form Filler takes 00.0 in a number field for no value (spfillcz.xsl reads it out as "nevyplněno").
@@ -221,7 +231,8 @@
     const picture = element.dataset?.format ?? '';
     const text = value === UNFILLED_NUMBER && element.classList.contains('numberInput') ? '' : value ?? '';
     return {date: () => formatDate(text, picture), time: () => formatTime(text, picture),
-            number: () => formatNumber(text, picture, element.classList.contains('outputelement'))}[fieldKind(element)]?.() ?? text;
+            number: () => formatNumber(text, picture, element.classList.contains('outputelement')),
+            size: () => sizeInText(text)}[fieldKind(element)]?.() ?? text;
   };
   const storedValue = (element, text) => ({date: () => storedDate(text), time: () => storedTime(text),
                                            number: () => storedNumber(text, element.dataset?.format)}[fieldKind(element)]?.() ?? text);
@@ -631,7 +642,6 @@
     if (native) native.postMessage({action: 'close'});
     else setStatus('Formulář chtěl zavřít okno. V\u00a0prohlížeči kartu zavřete sami.');
   };
-  const MAX_UPLOADED_BYTES = 16_000_000;
   const chooseFile = (accept, use) => {
     const input = document.createElement('input');
     input.type = 'file';
@@ -639,14 +649,13 @@
     input.addEventListener('change', () => input.files[0] && use(input.files[0]));
     input.click();
   };
-  window.run_form_button = button => {
-    const run = upload => send(JSON.stringify({type: 'run_form_script', data: {
-      button: Number(button.dataset.formButton), repe: get_parent_repe(button), ...(upload === undefined ? {} : {upload})}}));
-    if (button.dataset.formUpload === undefined) run();
-    else chooseFile(button.dataset.formUpload, async file => {
-      if (file.size > MAX_UPLOADED_BYTES) setStatus('Soubor je příliš velký, formulář ho nenačte.');
-      else run(await file.text());
-    });
+  const chooseFiles = (accept, use) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = accept;
+    input.multiple = true;
+    input.addEventListener('change', () => input.files.length && use([...input.files]));
+    input.click();
   };
   const MAX_ATTACHED_BYTES = 17 * 1024 * 1024;
   // form602ffilter is the filter of a Windows file dialog: "PDF soubory (*.pdf)|*.pdf|XML soubory (*.xml)|*.xml".
@@ -658,17 +667,33 @@
     reader.addEventListener('error', () => reject(reader.error));
     reader.readAsDataURL(file);
   });
-  window.attach_form_file = button => chooseFile(extensionsOfFilter(button.dataset.fileFilter).join(','), async file => {
-    if (file.size > MAX_ATTACHED_BYTES) { setStatus('Soubor je větší než 17\u00a0MB, formulář ho nepřijme.'); return; }
-    let content;
+  const chosenFile = async file => {
+    if (file.size > MAX_ATTACHED_BYTES) { setStatus('Soubor je větší než 17\u00a0MB, formulář ho nepřijme.'); return null; }
     try {
-      content = await contentInBase64(file);
+      return {name: file.name, content: await contentInBase64(file)};
     } catch {
       setStatus('Soubor se nepodařilo přečíst.');
-      return;
+      return null;
     }
-    send(JSON.stringify({type: 'run_form_script', data: {
-      file_field: Number(button.dataset.fileField), repe: get_parent_repe(button), attach: {name: file.name, content}}}));
+  };
+  window.run_form_button = button => {
+    const run = upload => send(JSON.stringify({type: 'run_form_script', data: {
+      button: Number(button.dataset.formButton), repe: get_parent_repe(button), ...(upload === undefined ? {} : {upload})}}));
+    if (button.dataset.formUpload === undefined) run();
+    else chooseFile(button.dataset.formUpload, async file => {
+      const upload = await chosenFile(file);
+      if (upload) run(upload);
+    });
+  };
+  window.attach_files_to_list = button => chooseFiles(button.dataset.formUpload, async files => {
+    for (const file of files) {
+      const attach = await chosenFile(file);
+      if (attach) send(JSON.stringify({type: 'run_form_script', data: {file_list: Number(button.dataset.fileList), repe: get_parent_repe(button), attach}}));
+    }
+  });
+  window.attach_form_file = button => chooseFile(extensionsOfFilter(button.dataset.fileFilter).join(','), async file => {
+    const attach = await chosenFile(file);
+    if (attach) send(JSON.stringify({type: 'run_form_script', data: {file_field: Number(button.dataset.fileField), repe: get_parent_repe(button), attach}}));
   });
   window.save_form_file = async button => {
     await queue;
@@ -817,14 +842,12 @@
     info.modified && `Modifikován: ${formatDay(info.modified)}`,
     pageData.blank && 'Zobrazeny výchozí hodnoty – vyplněná data nejsou načtena.',
     info.scripts && 'Některé výpočty nebo kontroly v JavaScriptu 602 Blanketa neumí provést.',
-    info.actions && 'Skripty spouštěné při nahrání přílohy Blanketa nespouští.',
     info.missing_lists && 'Některé číselníky, které si formulář stahuje z\u00a0internetu, Blanketa nezískala.',
   ].filter(Boolean).join('<br>');
-  if (info.scripts || info.actions || info.missing_lists) {
+  if (info.scripts || info.missing_lists) {
     const notice = queryOne('[data-notice]');
     notice.querySelector('span').textContent = (info.scripts
       ? 'Některé výpočty nebo kontroly v tomto formuláři Blanketa neumí provést, pole proto mohou zůstat prázdná nebo neaktuální. '
-      : info.actions ? 'Při nahrání přílohy tento formulář spouští skripty, které Blanketa z\u00a0bezpečnostních důvodů nespouští. '
       : 'Některé číselníky, které si formulář stahuje z\u00a0internetu, se nepodařilo získat. Tyto položky vyplňte ručně. ')
       + 'Před odesláním formulář zkontrolujte, spolehlivý výsledek dá Software602 Form Filler.';
     notice.querySelector('button').addEventListener('click', () => { notice.hidden = true; });

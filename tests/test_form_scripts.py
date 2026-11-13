@@ -132,7 +132,6 @@ class FormScripts(unittest.TestCase):
     def test_form_description_reports_what_does_not_run(self):
         fo = etree.fromstring(zipfile.ZipFile(ROOT / "samples/skripty/vypocty.zfo").read("form.fo"))
         self.assertEqual(app.binds_with_unsupported_scripts(fo), ["odeslano"])
-        self.assertEqual(app.count_never_run_scripts(fo), 0)
 
     def test_button_stores_a_value_to_a_field_saved_as_an_attribute(self):
         doc = engine.open_document((FORM_WITH_ATTRIBUTE % "").encode())
@@ -607,14 +606,14 @@ class FilesTheUserChooses(unittest.TestCase):
         doc, result = self.click(script=asking, answers=[True])
         self.assertEqual(result["values"], {"c": "ze souboru"})
 
-    def test_the_page_offers_a_file_only_where_the_form_asks_for_xml(self):
+    def test_the_page_offers_a_file_where_a_button_of_the_form_takes_one(self):
         form = """<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format"><fo:page-sequence master-reference="p"><fo:flow flow-name="b"><fo:block>
 <fo:inline form602ct="bib" form602webaccept=".xml" blanketa-button="3">Nahrát uložená data (XML)</fo:inline>
 <fo:inline form602ct="bib" form602webaccept=".pdf,.xml" blanketa-button="4">Nahrát soubor</fo:inline></fo:block></fo:flow></fo:page-sequence></fo:root>"""
         page = etree.HTML(etree.tostring(app.XSLT(etree.ElementTree(etree.fromstring(form)), PATH_TO_JS="'/s/'", PATH_TO_CSS="'/s/'"),
                                          method="html", encoding="unicode"))
-        self.assertEqual(page.xpath("//button[@data-form-upload]/@data-form-button"), ["3"])
-        self.assertEqual(page.xpath("//button[@data-form-upload]/@data-form-upload"), [".xml"])
+        self.assertEqual(page.xpath("//button[@data-form-upload]/@data-form-button"), ["3", "4"])
+        self.assertEqual(page.xpath("//button[@data-form-upload]/@data-form-upload"), [".xml", ".pdf,.xml"])
 
     def test_no_button_of_a_form_is_printed(self):
         form = """<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format"><fo:page-sequence master-reference="p"><fo:flow flow-name="b"><fo:block>

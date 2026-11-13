@@ -178,10 +178,11 @@ class ZFO_document:
     - inputs where user selects a file. 
     '''
     result = []
-    xpath_expr = '//*[@form602ct="bin"]'
+    # zfoengine: the link of an attachment in the newer MPSV forms (bil) holds a file as well, by form602bindref
+    xpath_expr = '//*[@form602ct="bin" or @form602ct="bil"]'
     fo_elems = self.root.xpath(xpath_expr)
     for fo_elem in fo_elems:
-      bind_id = fo_elem.get("form602bind")
+      bind_id = fo_elem.get("form602bind") or fo_elem.get("form602bindref")
       result.append(bind_id)
     
     log.debug("{0} binds of file type found.".format(len(result)))
@@ -857,7 +858,9 @@ class ZFO_document:
     results = {}    
     curr_level = repe_ancestors + 1
     # get all relevant descendants of the repetition block
-    children = rep_block.xpath("descendant::*[@form602bind]")
+    # zfoengine: the link of an attachment and the output of its size show other binds than the one they refer to
+    # (form_scripts.name_what_attachments_show)
+    children = rep_block.xpath("descendant::*[@form602bind or @blanketa-shown-bind]")
     # remove children, that are under other repeating block or
     # that are repetition blocks
     # store children repetition blocks aside to special list
@@ -882,7 +885,7 @@ class ZFO_document:
       # value should be inserted
       direct.append(child)
       # this always MUST be only 1 element -> binds' ids are unique
-      bs = self._find_bind_elem(child.get("form602bind"))
+      bs = self._find_bind_elem(child.get("blanketa-shown-bind") or child.get("form602bind"))
       if not len(bs):        
         continue
       bind = bs[0]
@@ -1888,9 +1891,9 @@ class ZFO_document:
     Creates dictionaries with information used for binds storing files.
     Creates map of filenames of binds and their mediatypes 
     '''
-    inputs = self.root.xpath('//*[@form602ct="bin"]')
+    inputs = self.root.xpath('//*[@form602ct="bin" or @form602ct="bil"]')
     
-    bind_ids = [input.get("form602bind") for input in inputs]
+    bind_ids = [input.get("form602bind") or input.get("form602bindref") for input in inputs]
     filename_binds = [input.get("filenamebind") for input in inputs]
     mediatype_binds = [input.get("mediatypebind") for input in inputs]
     
