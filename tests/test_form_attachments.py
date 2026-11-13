@@ -5,6 +5,7 @@ import json
 import threading
 import unittest
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 from xml.sax.saxutils import quoteattr
 
 import support  # noqa: F401  (puts the project on the import path)
@@ -12,6 +13,7 @@ from lxml import etree
 from lxml import html as lxml_html
 
 import app
+import zfo_verify
 from zfoengine import api as engine
 from zfoengine import file_kinds, form_scripts
 
@@ -502,3 +504,13 @@ class NewerAttachmentsOnThePage(unittest.TestCase):
         doc = newer_form()
         self.assertIsNone(form_scripts.attach_file(doc, 0, "", [], None, chosen("a.pdf", PDF)))
         self.assertEqual(listed(doc, "filename"), [""])
+
+
+class AttachmentSample(unittest.TestCase):
+    def test_the_sample_for_trying_attachments_in_the_apps_opens_and_keeps_a_file(self):
+        sample = Path(__file__).resolve().parent.parent / "samples/skripty/prilohy.zfo"
+        self.assertEqual([layer["subject"] for layer in zfo_verify.describe_signature_layers(zfo_verify.load_form_root(sample))],
+                         ["Blanketa TEST CA (neduveryhodna)"])
+        doc = engine.open_document(zfo_verify.read_form_fo(sample))
+        add_to_list(doc, "priloha.pdf", PDF)
+        self.assertEqual(form_scripts.file_of_field(doc, 0, "block---att-rep-0"), ("priloha.pdf", PDF))
