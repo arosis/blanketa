@@ -8,8 +8,11 @@ Add-Type -Namespace Blanketa -Name Mouse -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
 [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
+[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr window, uint message, IntPtr wide, string text);
+[DllImport("user32.dll")] public static extern bool PostMessage(IntPtr window, uint message, IntPtr wide, IntPtr lparam);
 '@
 $LEFT_DOWN, $LEFT_UP = 0x0002, 0x0004
+$WM_SETTEXT, $BM_CLICK = 0x000C, 0x00F5
 $SYSTEM_DIALOG_CLASS = '#32770'
 $FILE_NAME_FIELDS_OF_SYSTEM_DIALOGS = '1148', '1001'
 $CONFIRMING_BUTTON_OF_SYSTEM_DIALOGS = '1'
@@ -71,9 +74,10 @@ function Find-OnForm($caption) {
   Find-Inside (Get-FormWindow) { param($element) $element.Current.Name -like $caption -and -not $element.Current.IsOffscreen }
 }
 
+# The controls of a system dialog come as panes that take no automation pattern, so they are told by their window class
+# and get window messages.
 function Find-FileNameField($dialog) {
-  Find-Inside $dialog { param($element)
-    $element.Current.ControlType -eq [System.Windows.Automation.ControlType]::Edit -and $FILE_NAME_FIELDS_OF_SYSTEM_DIALOGS -contains $element.Current.AutomationId }
+  Find-Inside $dialog { param($element) $element.Current.ClassName -eq 'Edit' -and $FILE_NAME_FIELDS_OF_SYSTEM_DIALOGS -contains $element.Current.AutomationId }
 }
 
 function Find-FileDialog {
@@ -90,10 +94,9 @@ function Find-FileDialog {
 function Confirm-FileDialogWith($path) {
   $dialog = Wait-Until 'a file dialog of the system' { Find-FileDialog }
   $field = Find-FileNameField $dialog
-  $field.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($path)
-  $confirm = Find-Inside $dialog { param($element)
-    $element.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $element.Current.AutomationId -eq $CONFIRMING_BUTTON_OF_SYSTEM_DIALOGS }
-  $confirm.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+  [Blanketa.Mouse]::SendMessage([IntPtr]$field.Current.NativeWindowHandle, $WM_SETTEXT, [IntPtr]::Zero, $path) | Out-Null
+  $confirm = Find-Inside $dialog { param($element) $element.Current.ClassName -eq 'Button' -and $element.Current.AutomationId -eq $CONFIRMING_BUTTON_OF_SYSTEM_DIALOGS }
+  [Blanketa.Mouse]::PostMessage([IntPtr]$confirm.Current.NativeWindowHandle, $BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
   Wait-Until 'the file dialog to close' { -not (Find-FileDialog) } 20 | Out-Null
 }
 
