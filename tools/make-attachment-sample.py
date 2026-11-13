@@ -5,7 +5,7 @@ for trying attachments in the built apps (tools/try-attachments-on-windows.ps1).
     .venv/bin/python tools/make-attachment-sample.py
 
 Everything in it is made up here. The apps open only a form whose publisher's certificate can be read, so the form names
-the certificate of the test authority (pki/ca.crt); it is not signed by it and the apps show the signature as broken.
+the certificate of the test authority (pki/ca.crt); it is not signed by it and the apps say it has no publisher.
 """
 import base64
 import sys

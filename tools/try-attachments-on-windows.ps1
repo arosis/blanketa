@@ -53,6 +53,7 @@ function Wait-Until($what, [scriptblock]$look, $seconds = 60) {
 }
 
 function Click-On($element) {
+  [Blanketa.Mouse]::SetForegroundWindow([IntPtr](Get-FormWindow).Current.NativeWindowHandle) | Out-Null
   $box = $element.Current.BoundingRectangle
   [Blanketa.Mouse]::SetCursorPos([int]($box.X + $box.Width / 2), [int]($box.Y + $box.Height / 2)) | Out-Null
   Start-Sleep -Milliseconds 300
@@ -70,26 +71,30 @@ function Find-OnForm($caption) {
   Find-Inside (Get-FormWindow) { param($element) $element.Current.Name -like $caption -and -not $element.Current.IsOffscreen }
 }
 
-function Find-SystemDialog {
-  $ofTheSystem = { param($element) $element.Current.ClassName -eq $SYSTEM_DIALOG_CLASS }
-  foreach ($window in $Automation::RootElement.FindAll($Tree::Children, $Everything)) {
-    if (& $ofTheSystem $window) { return $window }
-    $inside = Find-Inside $window $ofTheSystem
-    if ($inside) { return $inside }
-  }
+function Find-FileNameField($dialog) {
+  Find-Inside $dialog { param($element)
+    $element.Current.ControlType -eq [System.Windows.Automation.ControlType]::Edit -and $FILE_NAME_FIELDS_OF_SYSTEM_DIALOGS -contains $element.Current.AutomationId }
 }
 
-function Confirm-SystemDialogWith($path) {
-  $dialog = Wait-Until 'a file dialog of the system' { Find-SystemDialog }
-  $field = Wait-Until 'the file name field of the dialog' {
-    Find-Inside $dialog { param($element)
-      $element.Current.ControlType -eq [System.Windows.Automation.ControlType]::Edit -and $FILE_NAME_FIELDS_OF_SYSTEM_DIALOGS -contains $element.Current.AutomationId }
-  } 20
+function Find-FileDialog {
+  $dialogs = @()
+  foreach ($window in $Automation::RootElement.FindAll($Tree::Children, $Everything)) {
+    if ($window.Current.ClassName -eq $SYSTEM_DIALOG_CLASS) { $dialogs += $window }
+    foreach ($inside in $window.FindAll($Tree::Descendants, $Everything)) {
+      if ($inside.Current.ClassName -eq $SYSTEM_DIALOG_CLASS) { $dialogs += $inside }
+    }
+  }
+  foreach ($dialog in $dialogs) { if (Find-FileNameField $dialog) { return $dialog } }
+}
+
+function Confirm-FileDialogWith($path) {
+  $dialog = Wait-Until 'a file dialog of the system' { Find-FileDialog }
+  $field = Find-FileNameField $dialog
   $field.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($path)
   $confirm = Find-Inside $dialog { param($element)
     $element.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $element.Current.AutomationId -eq $CONFIRMING_BUTTON_OF_SYSTEM_DIALOGS }
   $confirm.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-  Wait-Until 'the file dialog to close' { -not (Find-SystemDialog) } 20 | Out-Null
+  Wait-Until 'the file dialog to close' { -not (Find-FileDialog) } 20 | Out-Null
 }
 
 New-Item -ItemType Directory -Force $Results | Out-Null
@@ -102,16 +107,16 @@ Get-Process Blanketa -ErrorAction SilentlyContinue | Stop-Process -Force
 
 $script:Blanketa = Start-Process $App -PassThru -ArgumentList "`"$((Resolve-Path $Form).Path)`""
 try {
-  $window = Wait-Until 'the window of the app' { Get-FormWindow } 120
-  [Blanketa.Mouse]::SetForegroundWindow([IntPtr]$window.Current.NativeWindowHandle) | Out-Null
+  Wait-Until 'the window of the app' { Get-FormWindow } 120 | Out-Null
+  Click-On (Wait-Until 'the notice that the form has no publisher' { Find-OnForm 'Pokra*ovat' } 120)
 
-  Click-On (Wait-Until 'the button that adds attachments' { Find-OnForm 'Nahrajte ze*' } 120)
-  Confirm-SystemDialogWith $chosen
+  Click-On (Wait-Until 'the button that adds attachments' { Find-OnForm 'Nahrajte ze*' })
+  Confirm-FileDialogWith $chosen
   $attachment = Wait-Until 'the name of the attachment on the form' { Find-OnForm $ATTACHMENT_NAME }
   Save-Screenshot 'added'
 
   Click-On $attachment
-  Confirm-SystemDialogWith $saved
+  Confirm-FileDialogWith $saved
   Wait-Until 'the saved attachment' { Test-Path $saved } 20 | Out-Null
   if ((Get-FileHash $saved).Hash -ne (Get-FileHash $chosen).Hash) { throw 'the saved attachment differs from the chosen file' }
 
