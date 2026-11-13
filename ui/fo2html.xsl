@@ -128,9 +128,16 @@
   </xsl:template>
 
   <xsl:template name="output-attributes">
-    <xsl:attribute name="id"><xsl:value-of select="@form602bindref"/></xsl:attribute>
+    <!-- The output beside the link of an attachment refers to the file and shows its size (blanketa-shown-bind). -->
+    <xsl:variable name="shown-bind">
+      <xsl:choose>
+        <xsl:when test="@blanketa-shown-bind"><xsl:value-of select="@blanketa-shown-bind"/></xsl:when>
+        <xsl:otherwise><xsl:value-of select="@form602bindref"/></xsl:otherwise>
+      </xsl:choose>
+    </xsl:variable>
+    <xsl:attribute name="id"><xsl:value-of select="$shown-bind"/></xsl:attribute>
     <xsl:attribute name="class">outputelement</xsl:attribute>
-    <xsl:attribute name="name"><xsl:value-of select="@form602bindref"/></xsl:attribute>
+    <xsl:attribute name="name"><xsl:value-of select="$shown-bind"/></xsl:attribute>
     <xsl:if test="@form602format">
       <xsl:attribute name="data-format"><xsl:value-of select="@form602format"/></xsl:attribute>
     </xsl:if>
@@ -165,9 +172,8 @@
     </button>
   </xsl:template>
 
-  <!-- A file button (form602ct="bib") hands its script a file the user chooses. The page reads the file as text, so it
-       offers the choice only where the form asks for XML; other file buttons stay plain text and their script stops. -->
-  <xsl:template match="fo:inline[@form602ct='bib'][@blanketa-button][@form602webaccept='.xml']">
+  <!-- A file button (form602ct="bib") hands its script a file the user chooses. -->
+  <xsl:template match="fo:inline[@form602ct='bib'][@blanketa-button]">
     <div>
       <xsl:call-template name="add-style-attribute"/>
       <button type="button" title="{@form602tooltip}" onclick="run_form_button(this)" data-form-button="{@blanketa-button}"
@@ -175,6 +181,26 @@
         <xsl:apply-templates/>
       </button>
     </div>
+  </xsl:template>
+
+  <!-- A button of a list of attachments (form602ct="btm") adds each file the user chooses to the list. -->
+  <xsl:template match="fo:inline[@blanketa-file-list]">
+    <div>
+      <xsl:call-template name="add-style-attribute"/>
+      <button type="button" title="{@form602tooltip}" onclick="attach_files_to_list(this)" data-file-list="{@blanketa-file-list}"
+              data-form-upload="{@form602webaccept}">
+        <xsl:value-of select="normalize-space(.)"/>
+        <xsl:if test="normalize-space(.) = ''">Přidat přílohy</xsl:if>
+      </button>
+    </div>
+  </xsl:template>
+
+  <!-- The link of an attachment (form602ct="bil") shows the name of the file it holds and hands the file back. -->
+  <xsl:template match="fo:basic-link[@blanketa-file-field]">
+    <button type="button" class="zfo-file-field outputelement" name="{@blanketa-shown-bind}" title="Uložit přílohu do počítače"
+            onclick="save_form_file(this)" data-file-field="{@blanketa-file-field}">
+      <xsl:call-template name="add-style-attribute"/>
+    </button>
   </xsl:template>
 
   <!-- A field for a file (form602ct="bin") is a button: it takes a file from the user (form602menu="add"), or hands the

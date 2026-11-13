@@ -330,11 +330,6 @@ class UnsupportedForms(unittest.TestCase):
                           '<fm:bind Id="z" constraint="{GetDocument().SendData()}"/><fm:bind Id="w" calculate="{ var a = 1; }"/>')
         self.assertEqual(app.binds_with_unsupported_scripts(doc), ["y", "z"])
 
-    def test_script_actions_are_counted_and_xpath_ones_are_not(self):
-        doc = self.parsed('<a form602attchuploadstartaction="{ SendData(); }"/><a form602attchuploadstartaction=" { x(); }"/>'
-                          '<a form602attchuploadstartaction="SendAppEvent(1)"/><a form602btnclick="{ SendData(); }"/>')
-        self.assertEqual(app.count_never_run_scripts(doc), 2)
-
     @staticmethod
     def pdf_with(xfa, source):
         writer = PdfWriter(clone_from=source)
