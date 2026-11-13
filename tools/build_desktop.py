@@ -65,6 +65,9 @@ def package_windows():
         print("Inno Setup (iscc) not found: installer skipped")
 
 
+PERMISSIONS_A_PACKAGE_MAY_NOT_GRANT = 0o022
+
+
 def package_linux():
     # The build system's libstdc++ is older than the one Mesa needs on newer systems: Qt then aborts on GLX at start.
     (DIST / "Blanketa/_internal/libstdc++.so.6").unlink()
@@ -97,5 +100,8 @@ def package_linux():
 
 
 if __name__ == "__main__":
+    # The built folders take their rights from the caller: dpkg-deb refuses a control folder others may write to, and the
+    # app's own folder would be installed writable by everyone.
+    os.umask(PERMISSIONS_A_PACKAGE_MAY_NOT_GRANT)
     pyinstaller()
     package_windows() if IS_WINDOWS else package_linux()
