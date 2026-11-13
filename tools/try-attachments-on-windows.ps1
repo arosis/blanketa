@@ -106,7 +106,6 @@ $chosen = Join-Path $Results $ATTACHMENT_NAME
 $saved = Join-Path $Results 'ulozena-priloha.pdf'
 [System.IO.File]::WriteAllText($chosen, "%PDF-1.4`n% made up for trying attachments`n%%EOF`n")
 Remove-Item $saved -ErrorAction SilentlyContinue
-Get-Process Blanketa -ErrorAction SilentlyContinue | Stop-Process -Force
 
 $script:Blanketa = Start-Process $App -PassThru -ArgumentList "`"$((Resolve-Path $Form).Path)`""
 try {
@@ -120,13 +119,14 @@ try {
 
   Click-OnForm $attachment
   Confirm-FileDialogWith $saved
-  Wait-Until 'the saved attachment' { Test-Path $saved } 20 | Out-Null
-  if ((Get-FileHash $saved).Hash -ne (Get-FileHash $chosen).Hash) { throw 'the saved attachment differs from the chosen file' }
+  Wait-Until 'a saved attachment identical to the chosen file' {
+    (Test-Path $saved) -and (Get-FileHash $saved).Hash -eq (Get-FileHash $chosen).Hash
+  } 20 | Out-Null
 
   Click-OnForm (Wait-Until 'the button that removes the attachment' { Find-OnForm 'Odebrat*' })
   Wait-Until 'the attachment to leave the form' { -not (Find-OnForm $ATTACHMENT_NAME) } 30 | Out-Null
   Save-Screenshot 'removed'
   Write-Host 'attachments ok: added, saved identical, removed'
 } finally {
-  Get-Process Blanketa -ErrorAction SilentlyContinue | Stop-Process -Force
+  Stop-Process -Id $script:Blanketa.Id -Force -ErrorAction SilentlyContinue
 }

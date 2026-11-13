@@ -67,14 +67,17 @@ FORM = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 
-def main():
+def form_of_the_sample():
     authority = x509.load_pem_x509_certificate(TEST_AUTHORITY.read_bytes())
-    form = FORM.format(certificate=base64.b64encode(authority.public_bytes(serialization.Encoding.DER)).decode(),
+    return FORM.format(certificate=base64.b64encode(authority.public_bytes(serialization.Encoding.DER)).decode(),
                        largest=LARGEST_FILE_IN_BYTES, start=quoteattr(NOTE_THAT_THE_LIST_IS_FILLED),
-                       judge=quoteattr(JUDGE_LISTED_FILE), remove=quoteattr(REMOVE_LISTED_FILE))
+                       judge=quoteattr(JUDGE_LISTED_FILE), remove=quoteattr(REMOVE_LISTED_FILE)).encode("utf-8")
+
+
+def main():
     TARGET.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(TARGET, "w", zipfile.ZIP_DEFLATED) as archive:
-        archive.writestr("form.fo", form.encode("utf-8"))
+        archive.writestr("form.fo", form_of_the_sample())
     print(f"written {TARGET}", file=sys.stdout)
 
 

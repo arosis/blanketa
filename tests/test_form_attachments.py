@@ -1,6 +1,7 @@
 """Files a user attaches to a ZFO form: the field keeps the file in the data and the form's script files it away."""
 import base64
 import http.client
+import importlib.util
 import json
 import threading
 import unittest
@@ -508,7 +509,12 @@ class NewerAttachmentsOnThePage(unittest.TestCase):
 
 class AttachmentSample(unittest.TestCase):
     def test_the_sample_for_trying_attachments_in_the_apps_opens_and_keeps_a_file(self):
-        sample = Path(__file__).resolve().parent.parent / "samples/skripty/prilohy.zfo"
+        root = Path(__file__).resolve().parent.parent
+        sample = root / "samples/skripty/prilohy.zfo"
+        maker = importlib.util.spec_from_file_location("make_attachment_sample", root / "tools/make-attachment-sample.py")
+        tool = importlib.util.module_from_spec(maker)
+        maker.loader.exec_module(tool)
+        self.assertEqual(zfo_verify.read_form_fo(sample), tool.form_of_the_sample())
         self.assertEqual([layer["subject"] for layer in zfo_verify.describe_signature_layers(zfo_verify.load_form_root(sample))],
                          ["Blanketa TEST CA (neduveryhodna)"])
         doc = engine.open_document(zfo_verify.read_form_fo(sample))
