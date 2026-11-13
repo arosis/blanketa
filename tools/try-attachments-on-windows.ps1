@@ -8,14 +8,10 @@ Add-Type -Namespace Blanketa -Name Mouse -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
 [DllImport("user32.dll")] public static extern void mouse_event(uint flags, uint dx, uint dy, uint data, UIntPtr extra);
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
-[DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr window, uint message, IntPtr wide, string text);
-[DllImport("user32.dll")] public static extern bool PostMessage(IntPtr window, uint message, IntPtr wide, IntPtr lparam);
 '@
 $LEFT_DOWN, $LEFT_UP = 0x0002, 0x0004
-$WM_SETTEXT, $BM_CLICK = 0x000C, 0x00F5
 $SYSTEM_DIALOG_CLASS = '#32770'
 $FILE_NAME_FIELDS_OF_SYSTEM_DIALOGS = '1148', '1001'
-$CONFIRMING_BUTTON_OF_SYSTEM_DIALOGS = '1'
 $ATTACHMENT_NAME = 'priloha.pdf'
 $Automation = [System.Windows.Automation.AutomationElement]
 $Tree = [System.Windows.Automation.TreeScope]
@@ -56,7 +52,6 @@ function Wait-Until($what, [scriptblock]$look, $seconds = 60) {
 }
 
 function Click-On($element) {
-  [Blanketa.Mouse]::SetForegroundWindow([IntPtr](Get-FormWindow).Current.NativeWindowHandle) | Out-Null
   $box = $element.Current.BoundingRectangle
   [Blanketa.Mouse]::SetCursorPos([int]($box.X + $box.Width / 2), [int]($box.Y + $box.Height / 2)) | Out-Null
   Start-Sleep -Milliseconds 300
@@ -70,12 +65,17 @@ function Get-FormWindow {
   }
 }
 
+function Click-OnForm($element) {
+  [Blanketa.Mouse]::SetForegroundWindow([IntPtr](Get-FormWindow).Current.NativeWindowHandle) | Out-Null
+  Click-On $element
+}
+
 function Find-OnForm($caption) {
   Find-Inside (Get-FormWindow) { param($element) $element.Current.Name -like $caption -and -not $element.Current.IsOffscreen }
 }
 
-# The controls of a system dialog come as panes that take no automation pattern, so they are told by their window class
-# and get window messages.
+# The controls of a system dialog come as panes that take no automation pattern, and the dialog for saving ignores a name
+# set by a window message, so the field is told by its window class and gets the name from the keyboard.
 function Find-FileNameField($dialog) {
   Find-Inside $dialog { param($element) $element.Current.ClassName -eq 'Edit' -and $FILE_NAME_FIELDS_OF_SYSTEM_DIALOGS -contains $element.Current.AutomationId }
 }
@@ -93,10 +93,10 @@ function Find-FileDialog {
 
 function Confirm-FileDialogWith($path) {
   $dialog = Wait-Until 'a file dialog of the system' { Find-FileDialog }
-  $field = Find-FileNameField $dialog
-  [Blanketa.Mouse]::SendMessage([IntPtr]$field.Current.NativeWindowHandle, $WM_SETTEXT, [IntPtr]::Zero, $path) | Out-Null
-  $confirm = Find-Inside $dialog { param($element) $element.Current.ClassName -eq 'Button' -and $element.Current.AutomationId -eq $CONFIRMING_BUTTON_OF_SYSTEM_DIALOGS }
-  [Blanketa.Mouse]::PostMessage([IntPtr]$confirm.Current.NativeWindowHandle, $BM_CLICK, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
+  Click-On (Find-FileNameField $dialog)
+  [System.Windows.Forms.SendKeys]::SendWait('^a')
+  [System.Windows.Forms.SendKeys]::SendWait($path)
+  [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
   Wait-Until 'the file dialog to close' { -not (Find-FileDialog) } 20 | Out-Null
 }
 
@@ -111,19 +111,19 @@ Get-Process Blanketa -ErrorAction SilentlyContinue | Stop-Process -Force
 $script:Blanketa = Start-Process $App -PassThru -ArgumentList "`"$((Resolve-Path $Form).Path)`""
 try {
   Wait-Until 'the window of the app' { Get-FormWindow } 120 | Out-Null
-  Click-On (Wait-Until 'the notice that the form has no publisher' { Find-OnForm 'Pokra*ovat' } 120)
+  Click-OnForm (Wait-Until 'the notice that the form has no publisher' { Find-OnForm 'Pokra*ovat' } 120)
 
-  Click-On (Wait-Until 'the button that adds attachments' { Find-OnForm 'Nahrajte ze*' })
+  Click-OnForm (Wait-Until 'the button that adds attachments' { Find-OnForm 'Nahrajte ze*' })
   Confirm-FileDialogWith $chosen
   $attachment = Wait-Until 'the name of the attachment on the form' { Find-OnForm $ATTACHMENT_NAME }
   Save-Screenshot 'added'
 
-  Click-On $attachment
+  Click-OnForm $attachment
   Confirm-FileDialogWith $saved
   Wait-Until 'the saved attachment' { Test-Path $saved } 20 | Out-Null
   if ((Get-FileHash $saved).Hash -ne (Get-FileHash $chosen).Hash) { throw 'the saved attachment differs from the chosen file' }
 
-  Click-On (Wait-Until 'the button that removes the attachment' { Find-OnForm 'Odebrat*' })
+  Click-OnForm (Wait-Until 'the button that removes the attachment' { Find-OnForm 'Odebrat*' })
   Wait-Until 'the attachment to leave the form' { -not (Find-OnForm $ATTACHMENT_NAME) } 30 | Out-Null
   Save-Screenshot 'removed'
   Write-Host 'attachments ok: added, saved identical, removed'
