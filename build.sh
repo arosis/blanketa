@@ -1,6 +1,8 @@
 #!/bin/bash
 # Builds "Blanketa.app" into build/: Swift shell + bundled Python server + macsign.
 set -euo pipefail
+# The built app takes its rights from the caller; nothing in it may be writable by everyone.
+umask 022
 cd "$(dirname "$0")"
 VERSION=$(cat VERSION)
 V=vendor/zfo-editor-src/zfo-editor-0.3.2

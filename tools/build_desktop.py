@@ -20,6 +20,7 @@ VERSION = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
 EDITOR = "vendor/zfo-editor-src/zfo-editor-0.3.2"
 IS_WINDOWS = sys.platform == "win32"
 DIST = ROOT / "dist"
+PERMISSIONS_A_PACKAGE_MAY_NOT_GRANT = 0o022
 
 
 def data(source, target):
@@ -63,9 +64,6 @@ def package_windows():
                         str(ROOT / "packaging/windows/blanketa.iss")], check=True)
     else:
         print("Inno Setup (iscc) not found: installer skipped")
-
-
-PERMISSIONS_A_PACKAGE_MAY_NOT_GRANT = 0o022
 
 
 def package_linux():
