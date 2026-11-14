@@ -3,6 +3,7 @@
     .venv/bin/python -I -m unittest discover -s tests                     # all tests
     .venv/bin/python -I -m unittest discover -s tests -p test_pdf.py      # one file
 """
+import faulthandler
 import importlib.util
 import json
 import os
@@ -19,7 +20,15 @@ sys.path.insert(0, str(ROOT))
 os.environ["ZFO_OFFLINE"] = "1"  # tests never download trusted lists
 
 NS = {"d": "http://software602.cz/sample"}
+LONGEST_RUN_OF_ALL_TESTS_IN_SECONDS = 15 * 60
 ISDS_SAMPLES = ROOT / "samples-isds"
+
+def end_a_run_longer_than(seconds):
+    # A test that never ends says nothing by itself; this writes where every thread stands and ends the run with an error.
+    faulthandler.dump_traceback_later(seconds, exit=True)
+
+
+end_a_run_longer_than(LONGEST_RUN_OF_ALL_TESTS_IN_SECONDS)
 
 needs_node = unittest.skipUnless(shutil.which("node"), "needs Node.js; CI runners have it")
 
