@@ -3,7 +3,6 @@ import base64
 import hashlib
 import json
 import os
-import re
 import tempfile
 import time
 import unittest
@@ -829,12 +828,8 @@ class FilesTheUserChooses(unittest.TestCase):
 <fo:inline form602ct="btn" form602btnclick="checkdata()">Zkontrolovat</fo:inline></fo:block></fo:flow></fo:page-sequence></fo:root>"""
         page = etree.HTML(etree.tostring(app.XSLT(etree.ElementTree(etree.fromstring(form)), PATH_TO_JS="'/s/'", PATH_TO_CSS="'/s/'"),
                                          method="html", encoding="unicode"))
-        hidden_on_print = re.search(r"\.zfo-page button\[[^{]*\{ visibility: hidden; \}", ui_source("shell.html")).group(0)
-        marks = re.findall(r"button\[([\w-]+)\]", hidden_on_print)
-        buttons = page.xpath("//button")
-        self.assertEqual(len(buttons), 3)
-        for button in buttons:
-            self.assertTrue(any(mark in button.attrib for mark in marks), etree.tostring(button, encoding="unicode"))
+        self.assertIn(".zfo-page button { visibility: hidden; }", ui_source("shell.html").split("@media print {", 1)[1])
+        self.assertEqual(len(page.xpath("//button")), 3)
 
 
 GROUP_OF_ITEMS = '<d:b/><d:skupina><d:polozka kod=""><d:hodnota/><d:popis>vydaný</d:popis></d:polozka></d:skupina>'.encode()

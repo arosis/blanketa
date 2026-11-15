@@ -159,7 +159,9 @@
     .zfo-bar, .zfo-help-panel, .zfo-panel, .zfo-status, .zfo-notice, #pending_request { display: none !important; }
     .zfo-stage { overflow: visible; }
     .zfo-page { margin: 0 auto; box-shadow: none; border-radius: 0; zoom: 1 !important; }
-    .zfo-page button[zfo-app-event], .zfo-page button[data-form-button], .zfo-page .zfo-file-field { visibility: hidden; }
+    .zfo-page button { visibility: hidden; }
+    .ui-datepicker { display: none !important; }
+    .zfo-page .zfo-wizard-step { display: block !important; }
     .zfo-page .zfo-invalid { box-shadow: none !important; }
     .zfo-page, .zfo-page * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .zfo-page input[type=text], .zfo-page select, .zfo-page textarea { background-color: transparent !important; }
@@ -251,10 +253,12 @@
   .zfo-page td:has(> .ui-datepicker-trigger) { white-space: nowrap; }
   .zfo-page td > input.date-pick { width: calc(100% - 20px) !important; vertical-align: top; }
   .zfo-page .ui-datepicker-trigger {
-    box-sizing: border-box; width: 20px; height: 100%; min-height: 22px; margin: 0; padding: 0; vertical-align: top;
+    box-sizing: border-box; width: 20px; min-height: 22px; margin: 0; padding: 0; vertical-align: top;
     border: none; border-left: 1px solid rgba(0, 0, 0, .15); font-size: 0; cursor: pointer;
     background: var(--field) center / 14px 14px no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 14 14' fill='none' stroke='%23333' stroke-width='1.2'%3E%3Crect x='1.5' y='2.5' width='11' height='10' rx='1'/%3E%3Cpath d='M1.5 5.5h11M4.5 1v3M9.5 1v3'/%3E%3C/svg%3E");
   }
+  /* As tall as its cell; outside a table 100% would be the height of the page (the date fields of newer MPSV forms). */
+  .zfo-page td > .ui-datepicker-trigger { height: 100%; }
   .zfo-page .ui-datepicker-trigger:disabled { background-color: var(--field-readonly); cursor: default; opacity: .5; }
   /* A repeating block's +/- buttons sit in the margin beside the paper, so the block keeps its place on the page
      (some forms draw their text as a picture the fields have to line up with). */
