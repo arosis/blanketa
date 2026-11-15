@@ -158,6 +158,53 @@ class FormScripts(unittest.TestCase):
         engine.handle(doc, "recalc_form", "")
         self.assertEqual(doc._get_data_root().getroot()[0].get("a"), "2")
 
+    def test_a_function_named_with_a_space_before_its_bracket_is_still_called(self):
+        # The cadastre form writes If(DataXpath ({…}),0,1); Form Filler 4.81 evaluates the condition.
+        for condition, answer in (("1 = 1", "ano"), ("1 = 2", "ne")):
+            doc = engine.open_document((FORM_WITH_ATTRIBUTE % f"&quot;If(DataXpath ({{ {condition} }}),ano,ne)&quot;").encode())
+            engine.handle(doc, "recalc_form", "")
+            self.assertEqual(doc._get_data_root().getroot()[0].get("a"), answer)
+
+    def test_an_argument_left_empty_at_the_end_is_an_empty_text(self):
+        # The subsidy form of the Olomouc region writes If(…, FOP , ); Form Filler 4.81 stores FOP, or nothing.
+        for condition, answer in (("1 = 1", "FOP"), ("1 = 2", "")):
+            doc = engine.open_document((FORM_WITH_ATTRIBUTE.replace('a=""', 'a="dříve"') % f"&quot;If( DataXpath( {condition} ) , FOP , )&quot;").encode())
+            engine.handle(doc, "recalc_form", "")
+            self.assertEqual(doc._get_data_root().getroot()[0].get("a"), answer)
+
+    def test_a_word_before_a_bracket_that_names_no_function_stays_a_text(self):
+        doc = engine.open_document((FORM_WITH_ATTRIBUTE % "&quot;If(1 = 1, Cena (bez DPH), x)&quot;").encode())
+        engine.handle(doc, "recalc_form", "")
+        self.assertEqual(doc._get_data_root().getroot()[0].get("a"), "Cena (bez DPH)")
+
+    def calculated_in_an_attribute(self, calculate, element='<d:e a="7" b="1234567890"/>'):
+        doc = engine.open_document((FORM_WITH_ATTRIBUTE.replace('<d:e a=""/>', element) % calculate).encode())
+        engine.handle(doc, "recalc_form", "")
+        return doc._get_data_root().getroot()[0].get("a")
+
+    def test_an_attribute_is_no_part_of_the_text_of_its_element(self):
+        self.assertEqual(self.calculated_in_an_attribute("concat(&quot;[&quot;, .., &quot;]&quot;)"), "[]")
+        self.assertEqual(self.calculated_in_an_attribute("concat(., &quot;+&quot;, count(../*))"), "7+0")
+
+    def test_the_length_of_another_attribute_is_the_length_of_its_value(self):
+        self.assertEqual(self.calculated_in_an_attribute("string-length(../@b)"), "10")
+        self.assertEqual(self.calculated_in_an_attribute("string-length(..)", '<d:e a="7">čtyři<d:f>5</d:f></d:e>'), "6")
+
+    def test_an_attribute_whose_value_no_helper_can_hold_is_still_calculated(self):
+        self.assertEqual(self.calculated_in_an_attribute("concat(., &quot;!&quot;)", '<d:e a="?&gt;"/>'), "?>!")
+
+    def test_format_number_follows_the_decimal_format_the_form_declares(self):
+        # The subsidy form of the Olomouc region calculates a share this way; Form Filler 4.81 stores 28.57 for 30000 of 105000.
+        declared = '<xsl:decimal-format xmlns:xsl="http://www.w3.org/1999/XSL/Transform" name="vypocet" decimal-separator="." grouping-separator=" "/>'
+        form = FORM_WITH_ATTRIBUTE.replace("<fm:model>", declared + "<fm:model>")
+        for calculate, answer in (("format-number(30000 div 105000 * 100, &quot;##0.00&quot;, &quot;vypocet&quot;)", "28.57"),
+                                  ("format-number(1234567.5, &quot;# ##0.00&quot;, &quot;vypocet&quot;)", "1 234 567.50"),
+                                  ("format-number(1234.5, &quot;#,##0.00&quot;)", "1,234.50"),
+                                  ("format-number(../@b, &quot;0&quot;)", "8")):
+            doc = engine.open_document((form.replace('<d:e a=""/>', '<d:e a="" b="7.5"/>') % calculate).encode())
+            engine.handle(doc, "recalc_form", "")
+            self.assertEqual(doc._get_data_root().getroot()[0].get("a"), answer, calculate)
+
     def test_cadastre_form_agrees_with_form_filler(self):
         # samples/ref-filler was saved by Form Filler: with tisk=0 all three checks are 0.
         fo = zipfile.ZipFile(ROOT / "samples/cuzk/form.zfo").read("form.fo")
@@ -207,6 +254,88 @@ FORM_WITH_A_LIST_WITHOUT_VALUES = """<dsig:Signature xmlns:dsig="http://www.w3.o
 <fm:bind Id="okres" nodeset="d:okres" depends="okres0" calculate="&quot;GetListItemData( okresy , ../d:okres0 , @itemtext )&quot;"/></fm:bind>
 </fm:model><fm:enum name="okresy"><fm:list><fm:listitem itemtext="Blansko" value=""/><fm:listitem itemtext="Znojmo" value=""/></fm:list></fm:enum>
 </fm:formparams></fo:root></dsig:Object></dsig:Signature>"""
+
+
+FORM_WITH_A_CALCULATION_THAT_STOPS = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#" Id="_1"><dsig:Object Id="_2" MimeType="text/xml">
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:fm="http://software602.cz/forms" xmlns:d="http://software602.cz/sample">
+<fm:formparams><fm:model><fm:instance><d:root><d:rc/><d:narozen>1990-02-01</d:narozen></d:root></fm:instance>
+<fm:bind Id="k" nodeset="/d:root"><fm:bind Id="rc" nodeset="d:rc"/>
+<fm:bind Id="narozen" nodeset="d:narozen" depends="rc" calculate="concat('z čísla ', ../d:rc)" stoprecalc="../d:rc = ''"/></fm:bind>
+</fm:model></fm:formparams></fo:root></dsig:Object></dsig:Signature>"""
+
+
+class CalculationsAFormStops(unittest.TestCase):
+    """While stoprecalc of a bind holds, Form Filler 4.81 leaves its value alone: forms keep there what the user wrote."""
+
+    def setUp(self):
+        self.doc = engine.open_document(FORM_WITH_A_CALCULATION_THAT_STOPS.encode())
+
+    def test_the_whole_recalculation_keeps_what_the_user_wrote(self):
+        engine.handle(self.doc, "recalc_form", "")
+        self.assertEqual(self.doc.get_value("narozen"), "1990-02-01")
+
+    def test_a_changed_field_keeps_it_too(self):
+        self.doc.store_value("rc", "")
+        self.assertEqual(self.doc.get_value("narozen"), "1990-02-01")
+
+    def test_once_the_form_lets_it_go_the_value_is_calculated(self):
+        self.doc.store_value("rc", "855815/0007")
+        self.assertEqual(self.doc.get_value("narozen"), "z čísla 855815/0007")
+        engine.handle(self.doc, "recalc_form", "")
+        self.assertEqual(self.doc.get_value("narozen"), "z čísla 855815/0007")
+
+    def test_a_condition_nobody_can_evaluate_stops_nothing(self):
+        doc = engine.open_document(FORM_WITH_A_CALCULATION_THAT_STOPS.replace("../d:rc = ''", "Neznama(../d:rc)").encode())
+        engine.handle(doc, "recalc_form", "")
+        self.assertEqual(doc.get_value("narozen"), "z čísla ")
+
+    def test_an_empty_number_stops_as_the_zero_it_counts_for(self):
+        # The subsidy form of the Olomouc region stops its shares by p_celkem = 0; Form Filler 4.81 keeps them for an empty total.
+        number_field = ('<fo:page-sequence master-reference="p"><fo:flow flow-name="xsl-region-body"><fo:block>'
+                        '<fo:inline form602ct="num" form602bind="rc"/></fo:block></fo:flow></fo:page-sequence></fo:root>')
+        doc = engine.open_document(FORM_WITH_A_CALCULATION_THAT_STOPS.replace("../d:rc = ''", "../d:rc = 0").replace("</fo:root>", number_field).encode())
+        engine.handle(doc, "recalc_form", "")
+        self.assertEqual(doc.get_value("narozen"), "1990-02-01")
+        doc.store_value("rc", "")
+        self.assertEqual(doc.get_value("narozen"), "1990-02-01")
+        doc.store_value("rc", "5")
+        self.assertEqual(doc.get_value("narozen"), "z čísla 5")
+
+
+FORM_THAT_CLEARS_A_CHOICE_OTHER_BINDS_STOP_BY = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#" Id="_1"><dsig:Object Id="_2" MimeType="text/xml">
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:fm="http://software602.cz/forms" xmlns:d="http://software602.cz/sample">
+<fm:formparams><fm:model><fm:instance><d:root><d:nazev/><d:program pom="0" pom1="0">dotace</d:program><d:jmeno>Zkušební</d:jmeno></d:root></fm:instance>
+<fm:bind Id="k" nodeset="/d:root"><fm:bind Id="nazev" nodeset="d:nazev"/>
+<fm:bind Id="program" nodeset="d:program" depends="pom|nazev" calculate="''" stoprecalc="@pom=@pom1">
+<fm:bind Id="pom" nodeset="@pom" depends="nazev" calculate="../../d:nazev"/></fm:bind>
+<fm:bind Id="jmeno" nodeset="d:jmeno" depends="program" calculate="'nepožaduje se'" stoprecalc="../d:program != 'dotace'"/></fm:bind>
+</fm:model></fm:formparams></fo:root></dsig:Object></dsig:Signature>"""
+
+
+class OrderOfCalculations(unittest.TestCase):
+    def test_a_bind_is_calculated_once_after_the_binds_it_depends_on(self):
+        # As the subsidy form of the Olomouc region in Form Filler 4.81: the programme is cleared before the binds that stop by it.
+        doc = engine.open_document(FORM_THAT_CLEARS_A_CHOICE_OTHER_BINDS_STOP_BY.encode())
+        engine.handle(doc, "recalc_form", "")
+        self.assertEqual(doc.get_value("program"), "")
+        self.assertEqual(doc.get_value("jmeno"), "Zkušební")
+
+    def test_a_value_the_user_writes_is_followed_in_the_same_order(self):
+        doc = engine.open_document(FORM_THAT_CLEARS_A_CHOICE_OTHER_BINDS_STOP_BY.encode())
+        doc.store_value("nazev", "jiný")
+        self.assertEqual(doc.get_value("program"), "")
+        self.assertEqual(doc.get_value("jmeno"), "Zkušební")
+
+    def test_binds_that_depend_on_each_other_are_calculated_too(self):
+        circular = FORM_WITH_SYSTEM_BIND.replace("<d:seznam/>", "<d:seznam/><d:kruh/>").replace('depends="seznam"', 'depends="seznam|kruh"').replace(
+            "</fm:bind>\n</fm:model>", '<fm:bind Id="kruh" nodeset="d:kruh" depends="email" calculate="/d:root/d:email"/></fm:bind>\n</fm:model>')
+        doc = engine.open_document(circular.encode())
+        engine.handle(doc, "recalc_form", "")
+        self.assertEqual(doc.get_value("email"), "PrijemcePodani@example.cz")
+        self.assertEqual(doc.get_value("kruh"), "PrijemcePodani@example.cz")
+        doc.store_value("seznam", "Jiny")
+        self.assertEqual(doc.get_value("email"), "Jiny@example.cz")
+        self.assertEqual(doc.get_value("kruh"), "Jiny@example.cz")
 
 
 class ListsWhoseItemsCarryNoValue(unittest.TestCase):

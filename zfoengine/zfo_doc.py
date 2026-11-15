@@ -24,6 +24,7 @@ Module containing class that represents ZFO document with
 actions that could be performed with it.
 '''
 import copy
+import heapq
 import logging
 import os
 import re
@@ -171,6 +172,7 @@ class ZFO_document:
     # lowercase "call" unquoted, so print() must evaluate to the event name
     # (SendAppEvent maps "print" to app_events.print_)
     func_ns["print"] = lambda context, *args: "print"
+    func_ns["format-number"] = ext_xpath_evaluator._format_number
     
   def _create_file_binds_list(self):
     '''
@@ -1221,6 +1223,10 @@ class ZFO_document:
       for i in range(len(copies)):
         calc_copy = calculable_copies[i]
         copy = copies[i]        
+        # zfoengine: the copy where an empty number is zero decides, as for the calculation itself (the subsidy form of
+        # the Olomouc region stops by p_celkem = 0, which Form Filler 4.81 takes as true for an empty total)
+        if ev.stops_recalculation(self, bind, node=calc_copy):
+          continue
         # calculate over the model that goes to the original file        
         calculated = ev.eval_calculate(self, bind, node=copy, nsmap=nsmap)
         # evaluate over the model that has empty numbers set to zero
@@ -1260,11 +1266,58 @@ class ZFO_document:
           recalculate(self._get_dependent_binds(bind.get("Id")))
         log.debug("{0} recalculated".format(bind.get("Id")))
     
-    roots = only if only is not None else starting_at if starting_at is not None else self._get_binds_with_no_dependents()
+    if only is None and starting_at is None:
+      for bind in self._binds_after_those_they_depend_on():
+        results.update(calculate_one_bind(bind))
+      return results
+    roots = only if only is not None else starting_at
     # maybe keep track of calculated binds? Now, there is each bind
     # as many times how many dependents it has.
     recalculate(roots)
     return results
+
+  def _binds_after_those_they_depend_on(self):
+    # zfoengine: Form Filler 4.81 calculates a bind once, after the binds it depends on (seen in the subsidy form of the
+    # Olomouc region: a bind that clears the chosen programme runs before the binds that stoprecalc by the programme).
+    binds = self.root.xpath("//fm:bind", namespaces={"fm": ns.FM_URI})
+    position = {}
+    for index, bind in enumerate(binds):
+      position.setdefault(bind.get("Id"), index)
+    waits_for = []
+    dependents = [[] for _ in binds]
+    for index, bind in enumerate(binds):
+      needed = {position[name] for name in (bind.get("depends") or "").split("|") if name in position} - {index}
+      waits_for.append(len(needed))
+      for other in needed:
+        dependents[other].append(index)
+    ready = [index for index, count in enumerate(waits_for) if count == 0]
+    heapq.heapify(ready)
+    waiting = set(range(len(binds))) - set(ready)
+    ordered = []
+    while ready or waiting:
+      if not ready:
+        # binds that depend on each other: the first of them in the form goes on
+        heapq.heappush(ready, min(waiting))
+        waiting.discard(ready[0])
+      index = heapq.heappop(ready)
+      ordered.append(binds[index])
+      for dependent in dependents[index]:
+        waits_for[dependent] -= 1
+        if waits_for[dependent] == 0 and dependent in waiting:
+          waiting.discard(dependent)
+          heapq.heappush(ready, dependent)
+    return ordered
+
+  def _binds_to_calculate_after_a_change_of(self, bind_id):
+    reached = set()
+    found = [bind_id]
+    while found:
+      for dependent in self._get_dependent_binds(found.pop()):
+        if dependent.get("Id") not in reached:
+          reached.add(dependent.get("Id"))
+          found.append(dependent.get("Id"))
+    reached.discard(bind_id)
+    return [bind for bind in self._binds_after_those_they_depend_on() if bind.get("Id") in reached]
 
   def calculate_system_binds(self):
     # zfoengine: on opening only these: what depends on them was stored with them, and the form's downloaded lists, which
@@ -1276,11 +1329,7 @@ class ZFO_document:
     # are in the data before the user touches anything). A filled-in form keeps what was stored with it.
     if self._find_filled_data_object() is not None:
       return {}
-    try:
-      return self.recalc_form()
-    except RecursionError:
-      log.info("Binds of the form depend on each other, the form stays as published")
-      return {}
+    return self.recalc_form()
     
   
   def _calculated_over_the_file_data(self, bind, path):
@@ -1295,26 +1344,17 @@ class ZFO_document:
     Calculated values are returned in dictionary where
     keys are bind names.
     '''    
-    #changed_bind = self._find_bind_elem(bind_id)[0]
-    dependent_binds = self._get_dependent_binds(bind_id)
-    
     rep = tools.extract_repetition_parents_info(repe_data)
-    
-    working_queue = []
-    for db in dependent_binds:
-      working_queue.append(db)    
     results = {}
     # keep track of changed values
     change_log = []
     
-    for dependent_bind in working_queue:            
-      dependants = self._get_dependent_binds(dependent_bind.get("Id"))
-      log.debug("Adding %d new binds into working queue" % len(dependants))
-      for dep in dependants:
-        working_queue.append(dep)
+    for dependent_bind in self._binds_to_calculate_after_a_change_of(bind_id):
       # 'rep' is ok, if the rep data is bound to another bind, it is ignored
       path = self._get_abs_data_path(dependent_bind, rep) 
       
+      if ev.stops_recalculation(self, dependent_bind, path=path):
+        continue
       over_zero_filled = ev.eval_calculate(self, dependent_bind, path=path)
       if over_zero_filled is None:
         continue
