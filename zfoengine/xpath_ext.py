@@ -22,6 +22,7 @@
 '''
 Module with implementation of XPath extension used in ZFO by 602.
 '''
+import base64
 import copy
 import datetime
 import functools
@@ -330,31 +331,32 @@ class ExtendedXpathEvaluator:
     return ""
   
   def GetDataStr(self, context, xpath_exclude):
-    '''
-    Returns serialized data model, with xpath_exclude
-    nodes cut out.
-    '''
-    copied = copy.deepcopy(self._doc._get_data_root())
-    # zfoengine: fixed 'namesapces' typo and getroottree() on an ElementTree
-    excludes = copied.xpath(xpath_exclude, 
-                            namespaces=self._doc._get_used_ns_prefix(xpath_exclude))
-    for exclude in excludes:
-      exclude.getparent().remove(exclude)
-    res = etree.tostring(copied, pretty_print=False, encoding="unicode")
-    return res
-  
-  def GetHash(self, context, str, method):
-    '''
-    Returns hashed str. Method can be MD5 or SHA1
-    '''
-    if method.lower() == "md5":
-      alg = hashlib.md5()
-    if method.lower() == "sha1":
-      alg = hashlib.sha1()
-    
-    alg.update(str.encode("utf-8"))
-    return alg.hexdigest()
-  
+    # zfoengine: forms sum this text into a control sum the office can check, so it has to be the text Form Filler 4.81
+    # sums: the data without the white space between elements, the nodes of xpath_exclude taken out
+    data = copy.deepcopy(self._doc._get_data_root())
+    for left_out in data.xpath(xpath_exclude, namespaces=self._doc._get_used_ns_prefix(xpath_exclude)):
+      owner = left_out.getparent()
+      if owner is None:
+        continue
+      if etree.iselement(left_out):
+        owner.remove(left_out)
+      elif getattr(left_out, "is_attribute", False):
+        del owner.attrib[left_out.attrname]
+    for stand_in in data.xpath("//processing-instruction('%s') | //%s" % (tools.TEMPORAL_ELEM_TAG, tools.TEMPORAL_ELEM_TAG)):
+      stand_in.getparent().remove(stand_in)
+    for element in data.iter(etree.Element):
+      if not element.text or (len(element) and not element.text.strip()):
+        element.text = None
+      for child in element:
+        if not (child.tail or "").strip():
+          child.tail = None
+    return etree.tostring(data, encoding="unicode")
+
+  def GetHash(self, context, text, method):
+    # zfoengine: Form Filler 4.81 gives the digest in Base64 (forms keep its first characters), not in hexadecimal
+    digest = hashlib.new({"md5": "md5", "sha1": "sha1"}[method.lower()], text.encode("utf-8")).digest()
+    return base64.b64encode(digest).decode("ascii")
+
   def SignLevel(self, context, level):
     '''
     Returns true if number of signatures is equal to level.

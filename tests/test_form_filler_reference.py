@@ -11,6 +11,7 @@ from support import ROOT
 
 import app
 from zfoengine import api as engine
+from zfoengine import evaluate
 
 FORM_FILLER_DATA = ROOT / "samples/form-filler"
 DAY_FORM_FILLER_CALCULATED_THE_SUBSIDY_FORMS = "14.11.2026"
@@ -115,8 +116,7 @@ def values_of(data):
 
 
 def form_filled_with(sample, inputs):
-    published = zipfile.ZipFile(ROOT / "samples" / sample / "form.zfo").read("form.fo")
-    doc = engine.open_document(published)
+    doc = engine.open_document(published_form(sample))
     data = doc._get_data_root()
     for path, value in inputs.items():
         for found in data.xpath(path, namespaces={"d": data.getroot().nsmap["d"]}):
@@ -124,9 +124,17 @@ def form_filled_with(sample, inputs):
                 found.text = value
             else:
                 found.getparent().set(found.attrname, value)
-    form = app.publisher_layer(app.parse_fo(published))
-    etree.SubElement(form, f"{{{app.DS}}}Object").append(copy.deepcopy(engine.data_element(doc)))
+    return form_holding(sample, engine.data_element(doc))
+
+
+def form_holding(sample, data):
+    form = app.publisher_layer(app.parse_fo(published_form(sample)))
+    etree.SubElement(form, f"{{{app.DS}}}Object").append(copy.deepcopy(data))
     return etree.tostring(form)
+
+
+def published_form(sample):
+    return zipfile.ZipFile(ROOT / "samples" / sample / "form.zfo").read("form.fo")
 
 
 def calculated_by_blanketa(sample, inputs):
@@ -135,8 +143,26 @@ def calculated_by_blanketa(sample, inputs):
     return doc
 
 
+def opened_by_blanketa(sample, recalculated=0):
+    doc = engine.open_document(published_form(sample))
+    engine.calculate_a_form_nobody_filled_in(doc)
+    for _ in range(recalculated):
+        engine.handle(doc, "recalc_form", "")
+    return doc
+
+
+def data_form_filler_stored(scenario):
+    return etree.parse(str(FORM_FILLER_DATA / f"{scenario}.xml")).getroot()
+
+
 def stored_by_form_filler(scenario):
-    return values_of(etree.parse(str(FORM_FILLER_DATA / f"{scenario}.xml")).getroot())
+    return values_of(data_form_filler_stored(scenario))
+
+
+def control_sum_blanketa_gives(sample, data, path):
+    doc = engine.open_document(form_holding(sample, data))
+    bind = doc.root.xpath('//fm:bind[@Id="hash"]', namespaces={"fm": app.FM})[0]
+    return evaluate.eval_calculate(doc, bind, path=path)[2]
 
 
 def without(values, paths):
@@ -147,7 +173,9 @@ class FormAgreesWithFormFiller(unittest.TestCase):
     sample = None
 
     def agrees(self, scenario, inputs, apart_from=()):
-        doc = calculated_by_blanketa(self.sample, inputs)
+        self.holds_what_form_filler_stored(calculated_by_blanketa(self.sample, inputs), scenario, apart_from)
+
+    def holds_what_form_filler_stored(self, doc, scenario, apart_from=()):
         self.assertEqual(without(values_of(doc._get_data_root().getroot()), apart_from), without(stored_by_form_filler(scenario), apart_from))
         self.assertEqual(doc.script_problems, set())
 
@@ -167,8 +195,8 @@ class CadastreForm(FormAgreesWithFormFiller):
 
 
 class SubsidyFormOfTheOlomoucRegion(FormAgreesWithFormFiller):
-    """Blanketa does not calculate its control sum yet (arosis/blanketa#160). Where Form Filler stores NaN for a total over
-    numbers nobody wrote, Blanketa counts them as zeros."""
+    """Where Form Filler stores NaN for a total over numbers nobody wrote, Blanketa counts them as zeros. The control sum
+    covers the totals, so it differs with them."""
     sample = "olk-dotace"
     differs = (CONTROL_SUM_OF_THE_SUBSIDY_FORM, *TOTALS_OVER_NUMBERS_NOBODY_WROTE)
 
@@ -187,6 +215,24 @@ class SubsidyFormOfTheOlomoucRegion(FormAgreesWithFormFiller):
     def test_form_filler_stores_no_number_for_totals_over_numbers_nobody_wrote(self):
         stored = stored_by_form_filler("olk-shares-of-an-entrepreneur")
         self.assertEqual({stored[total] for total in TOTALS_OVER_NUMBERS_NOBODY_WROTE}, {"NaN"})
+
+
+    def test_over_the_data_form_filler_stored_the_control_sum_is_the_one_it_stored(self):
+        for scenario in ("olk-shares-of-an-entrepreneur", "olk-shares-of-a-person", "olk-values-the-form-keeps", "olk-programme-the-form-clears"):
+            with self.subTest(scenario):
+                stored = data_form_filler_stored(scenario)
+                self.assertEqual(control_sum_blanketa_gives(self.sample, stored, CONTROL_SUM_OF_THE_SUBSIDY_FORM), stored.get("hash"))
+
+
+class SubsidyFormOfTheSouthMoravianRegion(FormAgreesWithFormFiller):
+    """Its control sum covers the sum before it, so it tells how many times the form was calculated."""
+    sample = "jmk-dzup"
+
+    def test_opened(self):
+        self.holds_what_form_filler_stored(opened_by_blanketa(self.sample), "jmk-opened")
+
+    def test_opened_and_recalculated_three_times(self):
+        self.holds_what_form_filler_stored(opened_by_blanketa(self.sample, recalculated=3), "jmk-opened-and-recalculated-three-times")
 
 
 class EmploymentNoticeOfTheSocialSecurity(FormAgreesWithFormFiller):

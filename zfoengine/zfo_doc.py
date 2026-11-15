@@ -88,6 +88,8 @@ def _schema_type(bind, type_name, simple_types):
   pattern = restriction.find(XS + "pattern")
   return _xml_schema_name(restriction, restriction.get("base", "")), "" if pattern is None else pattern.get("value", "")
 
+TIMES_FORM_FILLER_CALCULATES_A_FORM_IT_OPENS = 3
+
 
 class ZFO_document:
   
@@ -1329,6 +1331,10 @@ class ZFO_document:
     # are in the data before the user touches anything). A filled-in form keeps what was stored with it.
     if self._find_filled_data_object() is not None:
       return {}
+    # zfoengine: a value calculated from its own last value shows that Form Filler 4.81 does it three times - the
+    # control sums of the South Moravian region open with the third of their chain, and F9 then moves them by one
+    for _ in range(TIMES_FORM_FILLER_CALCULATES_A_FORM_IT_OPENS - 1):
+      self.recalc_form()
     return self.recalc_form()
     
   
