@@ -106,7 +106,7 @@ class ExtendedXpathEvaluator:
     
     if len(args) == 0:
       return count_length(context.context_node)
-    # zfoengine: the length of a node-set is the length of its first node; the original measured the printed list
+    # zfoengine: the length of a node-set is the length of its first node, as XPath defines string-length
     if not isinstance(args[0], list):
       return len(str(args[0]))
     if len(args[0]) == 0:

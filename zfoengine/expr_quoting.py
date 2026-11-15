@@ -26,6 +26,8 @@ Module used to quote an xpath expressions.
 import logging
 import re
 
+from . import xpath_ext
+
 log = logging.getLogger("zfo.expr_quoting")
 
 def quote_expression(expr):
@@ -99,7 +101,11 @@ def _add_arg_quotes(func):
     oidx = arg.find('(')
     # this could be also an expr in () - therefore oidx > 0, to have at least one char before (    
     if oidx > 0:
-      arg_fname = arg[:oidx].strip()
+      arg_fname = arg[:oidx]
+      # zfoengine: forms write DataXpath ({…}) with a space before the bracket; any other word there is text, as in
+      # Cena (bez DPH)
+      if _is_function_of_602(arg_fname.strip()):
+        arg_fname = arg_fname.strip()
       bad_chars = re.findall(r'[^a-zA-Z\-_]', arg_fname)
       is_funcall = (len(bad_chars) == 0)
     else:
@@ -123,6 +129,10 @@ def _add_arg_quotes(func):
   return new_expr
 
   
+def _is_function_of_602(name):
+  return not name.startswith("_") and callable(getattr(xpath_ext.ExtendedXpathEvaluator, name, None))
+
+
 def _find_top_commas(str):
   '''
   Returns list of indexes of commas, that are not inside any parenthesis

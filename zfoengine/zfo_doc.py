@@ -1223,6 +1223,10 @@ class ZFO_document:
       for i in range(len(copies)):
         calc_copy = calculable_copies[i]
         copy = copies[i]        
+        # zfoengine: the copy where an empty number is zero decides, as for the calculation itself (the subsidy form of
+        # the Olomouc region stops by p_celkem = 0, which Form Filler 4.81 takes as true for an empty total)
+        if ev.stops_recalculation(self, bind, node=calc_copy):
+          continue
         # calculate over the model that goes to the original file        
         calculated = ev.eval_calculate(self, bind, node=copy, nsmap=nsmap)
         # evaluate over the model that has empty numbers set to zero
@@ -1275,7 +1279,6 @@ class ZFO_document:
   def _binds_after_those_they_depend_on(self):
     # zfoengine: Form Filler 4.81 calculates a bind once, after the binds it depends on (seen in the subsidy form of the
     # Olomouc region: a bind that clears the chosen programme runs before the binds that stoprecalc by the programme).
-    # The original went from each bind into its dependents at once, so a bind ran before some of what it depends on.
     binds = self.root.xpath("//fm:bind", namespaces={"fm": ns.FM_URI})
     position = {}
     for index, bind in enumerate(binds):
@@ -1305,6 +1308,17 @@ class ZFO_document:
           heapq.heappush(ready, dependent)
     return ordered
 
+  def _binds_to_calculate_after_a_change_of(self, bind_id):
+    reached = set()
+    found = [bind_id]
+    while found:
+      for dependent in self._get_dependent_binds(found.pop()):
+        if dependent.get("Id") not in reached:
+          reached.add(dependent.get("Id"))
+          found.append(dependent.get("Id"))
+    reached.discard(bind_id)
+    return [bind for bind in self._binds_after_those_they_depend_on() if bind.get("Id") in reached]
+
   def calculate_system_binds(self):
     # zfoengine: on opening only these: what depends on them was stored with them, and the form's downloaded lists, which
     # some of those binds read, are not there yet
@@ -1330,26 +1344,17 @@ class ZFO_document:
     Calculated values are returned in dictionary where
     keys are bind names.
     '''    
-    #changed_bind = self._find_bind_elem(bind_id)[0]
-    dependent_binds = self._get_dependent_binds(bind_id)
-    
     rep = tools.extract_repetition_parents_info(repe_data)
-    
-    working_queue = []
-    for db in dependent_binds:
-      working_queue.append(db)    
     results = {}
     # keep track of changed values
     change_log = []
     
-    for dependent_bind in working_queue:            
-      dependants = self._get_dependent_binds(dependent_bind.get("Id"))
-      log.debug("Adding %d new binds into working queue" % len(dependants))
-      for dep in dependants:
-        working_queue.append(dep)
+    for dependent_bind in self._binds_to_calculate_after_a_change_of(bind_id):
       # 'rep' is ok, if the rep data is bound to another bind, it is ignored
       path = self._get_abs_data_path(dependent_bind, rep) 
       
+      if ev.stops_recalculation(self, dependent_bind, path=path):
+        continue
       over_zero_filled = ev.eval_calculate(self, dependent_bind, path=path)
       if over_zero_filled is None:
         continue
