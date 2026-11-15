@@ -67,7 +67,7 @@ def _add_arg_quotes(func):
   open_parenth = _str.find("(")
   close_parenth = _closing_bracket(_str, open_parenth)
   
-  funcname = _str[0:open_parenth].strip() 
+  funcname = _name_as_602_knows_it(_str[0:open_parenth]) or _str[0:open_parenth].strip()
   funcargs = _str[open_parenth + 1: close_parenth].strip()
   
   log.debug("Escaping function name: %s" % funcname)
@@ -104,10 +104,7 @@ def _add_arg_quotes(func):
       arg_fname = arg[:oidx]
       # zfoengine: forms write DataXpath ({…}) with a space before the bracket and Get Hash(…) with one inside the name,
       # and Form Filler 4.81 calculates both; any other words there are text, as in Cena (bez DPH)
-      without_spaces = "".join(arg_fname.split())
-      if _is_function_of_602(without_spaces):
-        arg = without_spaces + arg[oidx:]
-        arg_fname = without_spaces
+      arg_fname = _name_as_602_knows_it(arg_fname) or arg_fname
       bad_chars = re.findall(r'[^a-zA-Z\-_]', arg_fname)
       is_funcall = (len(bad_chars) == 0)
     else:
@@ -151,8 +148,11 @@ def _closing_bracket(call, opening):
   return call.rfind(")")
 
 
-def _is_function_of_602(name):
-  return not name.startswith("_") and callable(getattr(xpath_ext.ExtendedXpathEvaluator, name, None))
+def _name_as_602_knows_it(written):
+  name = "".join(written.split())
+  if not name.startswith("_") and callable(getattr(xpath_ext.ExtendedXpathEvaluator, name, None)):
+    return name
+  return None
 
 
 def _find_top_commas(str):

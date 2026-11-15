@@ -339,6 +339,11 @@ class ControlSumOfAForm(unittest.TestCase):
         engine.handle(doc, "recalc_form", "")
         self.assertEqual(doc.get_value("hash"), control_sum_of(DATA_FORM_FILLER_SUMS % ""))
 
+    def test_an_element_the_form_leaves_out_is_not_summed(self):
+        doc = engine.open_document(FORM_WITH_A_CONTROL_SUM.replace("GetDataStr(@hash)", "GetDataStr(d:prazdne)").encode())
+        engine.handle(doc, "recalc_form", "")
+        self.assertEqual(doc.get_value("hash"), control_sum_of((DATA_FORM_FILLER_SUMS % ' hash=""').replace("<d:prazdne/>", "")))
+
     def test_a_sum_the_form_does_not_leave_out_counts_in_the_next_one(self):
         # Forms of the South Moravian region leave out ../@hash, which is not there, so each sum covers the one before it.
         doc = engine.open_document(FORM_WITH_A_CONTROL_SUM.replace("GetDataStr(@hash)", "GetDataStr(../@hash)").encode())
@@ -360,6 +365,7 @@ class ControlSumOfAForm(unittest.TestCase):
     def test_a_sum_written_as_the_south_moravian_forms_write_it_is_calculated(self):
         # Form Filler 4.81 calculates their Get Hash( and their one closing bracket too many.
         for as_written in ("DataXpath( StrCat( {substring('} ,Get Hash(GetDataStr(@hash),MD5), {'},{,},{1},{,},{5},{)}) )",
+                           "Str Cat({JMK},DataXpath(StrCat({substring('},GetHash(GetDataStr(@hash),MD5),{'},{,},{1},{,},{5},{)})))",
                            "DataXpath( StrCat( {concat('JMK',substring('} ,GetHash(GetDataStr(@hash),MD5), {'},{,},{1},{,},{5},{))}) ) )"):
             with self.subTest(as_written):
                 doc = engine.open_document(FORM_WITH_A_CONTROL_SUM.replace(
