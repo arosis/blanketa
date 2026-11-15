@@ -35,10 +35,13 @@ MOMENT_BOTH_ENGINES_TAKE_FOR_NOW = js602._make_time(2026.0, 10.0, 15.0, 10.0, 0.
 def forms_in(paths):
     for given in paths:
         for path in sorted(Path(given).rglob("*")) if Path(given).is_dir() else [Path(given)]:
-            if path.suffix.lower() not in (".zfo", ".fo"):
-                continue
-            content = path.read_bytes()
-            yield path, zipfile.ZipFile(path).read("form.fo") if content[:2] == b"PK" else content
+            if path.suffix.lower() in (".zfo", ".fo"):
+                yield path
+
+
+def form_in(path):
+    content = path.read_bytes()
+    return zipfile.ZipFile(path).read("form.fo") if content[:2] == b"PK" else content
 
 
 def scripts_of(doc):
@@ -101,8 +104,8 @@ def run_in_js602(doc, source, path, answers):
     return {"source": source, "path": path, "asked": asked, "outcome": outcome}
 
 
-def runs_of(path, content):
-    doc = engine.open_document(content)
+def runs_of(path):
+    doc = engine.open_document(form_in(path))
     engine.calculate_a_form_nobody_filled_in(doc)
     runs = []
     for bind, attribute, source in scripts_of(doc):
@@ -113,23 +116,20 @@ def runs_of(path, content):
 
 
 def node_in_a_container_without_network(image):
-    def node(folder):
-        return ["docker", "run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-                "--pids-limit", "128", "--memory", "2g", "--user", "65534:65534", "--volume", f"{folder}:/in:ro", image,
-                "node", "/in/replay.js", "/in/runs.json"]
-    return node
+    def run_node(folder, script, runs):
+        return subprocess.run(
+            ["docker", "run", "--rm", "--network", "none", "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+             "--pids-limit", "128", "--memory", "2g", "--user", "65534:65534", "--volume", f"{folder}:/in:ro", image,
+             "node", f"/in/{script}", f"/in/{runs}"], capture_output=True, encoding="utf-8")
+    return run_node
 
 
-def node_of_this_computer(folder):
-    return ["node", str(Path(folder) / "replay.js"), str(Path(folder) / "runs.json")]
-
-
-def replayed_in_v8(form, node):
+def replayed_in_v8(form, run_node):
     with tempfile.TemporaryDirectory() as folder:
         Path(folder).chmod(0o755)
         (Path(folder) / "replay.js").write_text(REPLAY.read_text(encoding="utf-8"), encoding="utf-8")
         (Path(folder) / "runs.json").write_text(json.dumps({"now": MOMENT_BOTH_ENGINES_TAKE_FOR_NOW, "form": form}), encoding="utf-8")
-        answer = subprocess.run(node(folder), capture_output=True, encoding="utf-8")
+        answer = run_node(folder, "replay.js", "runs.json")
     if answer.returncode:
         raise RuntimeError(f"V8 did not replay {form['form']}: {answer.stderr.strip()[-2000:]}")
     return json.loads(answer.stdout)
@@ -137,7 +137,7 @@ def replayed_in_v8(form, node):
 
 def compared(of_js602, of_v8):
     if of_js602[0] == "exhausted":
-        return "stopped by the step budget of js602"
+        return "finished by V8 only" if of_v8[0] in ("result", "nothing") else "stopped by the step budget of js602"
     if of_js602[0] == "unsupported" and of_js602[1] in QUESTIONS_THE_FORM_ITSELF_COULD_NOT_ANSWER:
         return "not answered by the form"
     if of_js602[0] == "unsupported":
@@ -164,26 +164,32 @@ def main():
     counts = Counter()
     differences = {}
     not_run_by_js602 = Counter()
-    for path, content in forms_in(arguments.forms):
+    v8_where_js602_stopped = Counter()
+    for path in forms_in(arguments.forms):
         try:
-            form = runs_of(path, content)
+            form = runs_of(path)
+            in_v8 = replayed_in_v8(form, node)
         except Exception as error:
-            unreadable.append(f"{path}: {error!r}")
+            unreadable.append(f"{path}: {error!r}"[:600])
             continue
         forms.append(form)
-        for run, of_v8 in zip(form["runs"], replayed_in_v8(form, node), strict=True):
+        for run, of_v8 in zip(form["runs"], in_v8, strict=True):
             verdict = compared(run["outcome"], of_v8)
             counts[verdict] += 1
             if verdict == "js602 does not run":
                 not_run_by_js602[f"{run['outcome'][1]}, V8 gives {json.dumps(of_v8, ensure_ascii=False)[:120]}"] += 1
-            elif verdict == "different":
+            elif verdict == "stopped by the step budget of js602":
+                v8_where_js602_stopped[of_v8[0]] += 1
+            elif verdict in ("different", "finished by V8 only"):
                 script = hashlib.sha256(run["source"].encode()).hexdigest()[:12]
                 differences.setdefault((script, json.dumps(run["outcome"], ensure_ascii=False), json.dumps(of_v8, ensure_ascii=False)), []).append(
                     (form["form"], run["bind"], run["attribute"], run["answers"]))
 
     print(f"{len(forms)} forms, {sum(len(form['runs']) for form in forms)} runs: " + ", ".join(f"{count} {what}" for what, count in counts.most_common()))
     for line in unreadable:
-        print("unreadable:", line)
+        print("not compared:", line)
+    if v8_where_js602_stopped:
+        print("where the step budget stopped js602, V8 ended with: " + ", ".join(f"{count} {how}" for how, count in v8_where_js602_stopped.most_common()))
     for reason, count in not_run_by_js602.most_common():
         print(f"js602 does not run ({count}): {reason}")
     for (script, of_js602, of_v8), where in sorted(differences.items(), key=lambda item: -len(item[1])):
@@ -191,7 +197,7 @@ def main():
         print(f"\ndifferent in {len(where)} runs, script {script}, first {form} {bind}/@{attribute} with answers {answers}")
         print("  js602:", of_js602)
         print("  V8:   ", of_v8)
-    return 1 if differences or not_run_by_js602 else 0
+    return 1 if differences or not_run_by_js602 or unreadable else 0
 
 
 if __name__ == "__main__":
