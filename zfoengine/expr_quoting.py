@@ -65,9 +65,9 @@ def _add_arg_quotes(func):
   # if there are quotes around, strip them
   _str = func.rstrip('"').lstrip('"')  
   open_parenth = _str.find("(")
-  close_parenth = _str.rfind(")")
+  close_parenth = _closing_bracket(_str, open_parenth)
   
-  funcname = _str[0:open_parenth].strip() 
+  funcname = _name_as_602_knows_it(_str[0:open_parenth]) or _str[0:open_parenth].strip()
   funcargs = _str[open_parenth + 1: close_parenth].strip()
   
   log.debug("Escaping function name: %s" % funcname)
@@ -102,10 +102,9 @@ def _add_arg_quotes(func):
     # this could be also an expr in () - therefore oidx > 0, to have at least one char before (    
     if oidx > 0:
       arg_fname = arg[:oidx]
-      # zfoengine: forms write DataXpath ({…}) with a space before the bracket; any other word there is text, as in
-      # Cena (bez DPH)
-      if _is_function_of_602(arg_fname.strip()):
-        arg_fname = arg_fname.strip()
+      # zfoengine: forms write DataXpath ({…}) with a space before the bracket and Get Hash(…) with one inside the name,
+      # and Form Filler 4.81 calculates both; any other words there are text, as in Cena (bez DPH)
+      arg_fname = _name_as_602_knows_it(arg_fname) or arg_fname
       bad_chars = re.findall(r'[^a-zA-Z\-_]', arg_fname)
       is_funcall = (len(bad_chars) == 0)
     else:
@@ -129,8 +128,31 @@ def _add_arg_quotes(func):
   return new_expr
 
   
-def _is_function_of_602(name):
-  return not name.startswith("_") and callable(getattr(xpath_ext.ExtendedXpathEvaluator, name, None))
+def _closing_bracket(call, opening):
+  # zfoengine: forms of the South Moravian region close their control sum with one bracket more than they open, and
+  # Form Filler 4.81 calculates it; the call ends where its own bracket closes, brackets left over after it are dropped
+  depth = 0
+  in_curly = False
+  for index in range(opening, len(call)):
+    char = call[index]
+    if in_curly:
+      in_curly = char != "}"
+    elif char == "{":
+      in_curly = True
+    elif char == "(":
+      depth += 1
+    elif char == ")":
+      depth -= 1
+      if depth == 0:
+        return index if not call[index + 1:].strip(" )") else call.rfind(")")
+  return call.rfind(")")
+
+
+def _name_as_602_knows_it(written):
+  name = "".join(written.split())
+  if not name.startswith("_") and callable(getattr(xpath_ext.ExtendedXpathEvaluator, name, None)):
+    return name
+  return None
 
 
 def _find_top_commas(str):

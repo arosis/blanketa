@@ -1,5 +1,6 @@
 """602 JavaScript in forms: the scripts offices publish, zfoengine/js602.py, and the same expressions in Node.js."""
 import base64
+import hashlib
 import json
 import os
 import re
@@ -310,6 +311,73 @@ FORM_THAT_CLEARS_A_CHOICE_OTHER_BINDS_STOP_BY = """<dsig:Signature xmlns:dsig="h
 <fm:bind Id="pom" nodeset="@pom" depends="nazev" calculate="../../d:nazev"/></fm:bind>
 <fm:bind Id="jmeno" nodeset="d:jmeno" depends="program" calculate="'nepožaduje se'" stoprecalc="../d:program != 'dotace'"/></fm:bind>
 </fm:model></fm:formparams></fo:root></dsig:Object></dsig:Signature>"""
+
+
+FORM_WITH_A_CONTROL_SUM = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#" Id="_1"><dsig:Object Id="_2" MimeType="text/xml">
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:fm="http://software602.cz/forms">
+<fm:formparams><fm:model><fm:instance><d:root rok="2026" hash="" xmlns:d="http://software602.cz/sample">
+  <d:jmeno>Žofie &amp; spol.</d:jmeno>
+  <d:prazdne/>
+</d:root></fm:instance>
+<fm:bind Id="k" nodeset="/d:root"><fm:bind Id="jmeno" nodeset="d:jmeno"/>
+<fm:bind Id="hash" nodeset="/d:root/@hash" depends="jmeno" calculate="&quot;DataXpath(StrCat({substring('},GetHash(GetDataStr(@hash),MD5),{'},{,},{1},{,},{5},{)}))&quot;"/></fm:bind>
+</fm:model></fm:formparams></fo:root></dsig:Object></dsig:Signature>"""
+DATA_FORM_FILLER_SUMS = '<d:root xmlns:d="http://software602.cz/sample" rok="2026"%s><d:jmeno>Žofie &amp; spol.</d:jmeno><d:prazdne/></d:root>'
+
+
+def control_sum_of(data):
+    return base64.b64encode(hashlib.md5(data.encode()).digest()).decode()[:5]
+
+
+class ControlSumOfAForm(unittest.TestCase):
+    """Form Filler 4.81 sums the data without the white space between elements, in UTF-8, and gives the MD5 in Base64."""
+
+    def test_it_is_summed_over_the_data_without_the_part_the_form_leaves_out(self):
+        doc = engine.open_document(FORM_WITH_A_CONTROL_SUM.encode())
+        engine.handle(doc, "recalc_form", "")
+        self.assertEqual(doc.get_value("hash"), control_sum_of(DATA_FORM_FILLER_SUMS % ""))
+        engine.handle(doc, "recalc_form", "")
+        self.assertEqual(doc.get_value("hash"), control_sum_of(DATA_FORM_FILLER_SUMS % ""))
+
+    def test_an_element_the_form_leaves_out_is_not_summed(self):
+        doc = engine.open_document(FORM_WITH_A_CONTROL_SUM.replace("GetDataStr(@hash)", "GetDataStr(d:prazdne)").encode())
+        engine.handle(doc, "recalc_form", "")
+        self.assertEqual(doc.get_value("hash"), control_sum_of((DATA_FORM_FILLER_SUMS % ' hash=""').replace("<d:prazdne/>", "")))
+
+    def test_a_sum_the_form_does_not_leave_out_counts_in_the_next_one(self):
+        # Forms of the South Moravian region leave out ../@hash, which is not there, so each sum covers the one before it.
+        doc = engine.open_document(FORM_WITH_A_CONTROL_SUM.replace("GetDataStr(@hash)", "GetDataStr(../@hash)").encode())
+        engine.handle(doc, "recalc_form", "")
+        first = control_sum_of(DATA_FORM_FILLER_SUMS % ' hash=""')
+        self.assertEqual(doc.get_value("hash"), first)
+        engine.handle(doc, "recalc_form", "")
+        self.assertEqual(doc.get_value("hash"), control_sum_of(DATA_FORM_FILLER_SUMS % f' hash="{first}"'))
+
+    def test_a_form_nobody_filled_in_opens_with_the_third_sum_as_in_form_filler(self):
+        # Form Filler 4.81 opens two forms of the South Moravian region with the third sum of this chain; F9 moves it by one.
+        doc = engine.open_document(FORM_WITH_A_CONTROL_SUM.replace("GetDataStr(@hash)", "GetDataStr(../@hash)").encode())
+        engine.calculate_a_form_nobody_filled_in(doc)
+        third = ""
+        for _ in range(3):
+            third = control_sum_of(DATA_FORM_FILLER_SUMS % f' hash="{third}"')
+        self.assertEqual(doc.get_value("hash"), third)
+
+    def test_a_sum_written_as_the_south_moravian_forms_write_it_is_calculated(self):
+        # Form Filler 4.81 calculates their Get Hash( and their one closing bracket too many.
+        for as_written in ("DataXpath( StrCat( {substring('} ,Get Hash(GetDataStr(@hash),MD5), {'},{,},{1},{,},{5},{)}) )",
+                           "Str Cat({JMK},DataXpath(StrCat({substring('},GetHash(GetDataStr(@hash),MD5),{'},{,},{1},{,},{5},{)})))",
+                           "DataXpath( StrCat( {concat('JMK',substring('} ,GetHash(GetDataStr(@hash),MD5), {'},{,},{1},{,},{5},{))}) ) )"):
+            with self.subTest(as_written):
+                doc = engine.open_document(FORM_WITH_A_CONTROL_SUM.replace(
+                    "DataXpath(StrCat({substring('},GetHash(GetDataStr(@hash),MD5),{'},{,},{1},{,},{5},{)}))", as_written).encode())
+                engine.handle(doc, "recalc_form", "")
+                self.assertEqual(doc.get_value("hash").removeprefix("JMK"), control_sum_of(DATA_FORM_FILLER_SUMS % ""))
+
+    def test_the_data_stay_as_they_were(self):
+        doc = engine.open_document(FORM_WITH_A_CONTROL_SUM.encode())
+        engine.handle(doc, "recalc_form", "")
+        self.assertEqual(doc.get_value("jmeno"), "Žofie & spol.")
+        self.assertEqual(doc._get_data_root().getroot().get("rok"), "2026")
 
 
 class OrderOfCalculations(unittest.TestCase):
