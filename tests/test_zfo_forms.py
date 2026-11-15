@@ -92,6 +92,11 @@ class StepsOfAWizard(unittest.TestCase):
         for part in ("div-typ-a", "div-typ-b"):
             self.assertNotIn("zfo-wizard-step", self.classes_of_part(part))
 
+    def test_a_bind_whose_name_only_ends_like_the_wizard_one_is_not_a_wizard(self):
+        form = etree.fromstring(FORM_WITH_A_WIZARD.replace("UserData.Pom.Wizard.Krok", "UserData.JinyWizard.Krok").encode())
+        form_scripts.mark_steps_of_the_wizard(form)
+        self.assertEqual(form.xpath("//@blanketa-wizard-step"), [])
+
     def test_printing_shows_every_step_and_leaves_other_hidden_parts_hidden(self):
         print_rules = ui_source("shell.html").split("@media print {", 1)[1]
         self.assertIn(".zfo-page .zfo-wizard-step { display: block !important; }", print_rules)
