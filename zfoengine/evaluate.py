@@ -109,6 +109,21 @@ def eval_script(zfo_doc, source, path=None, node=None):
   return None
 
 
+def stops_recalculation(zfo_doc, bind, path=None, node=None):
+  # zfoengine: while a bind's stoprecalc holds, Form Filler 4.81 leaves its value as it is (forms keep there what the
+  # user wrote in place of a calculated value); an expression that cannot be read stops nothing
+  expr = (bind.get("stoprecalc") or "").strip()
+  if not expr:
+    return False
+  try:
+    if node is None:
+      return bool(eval_expression_path(zfo_doc, expr, path))
+    return bool(eval_expression_node(zfo_doc, expr, node, zfo_doc._get_used_ns_prefix(expr)))
+  except Exception as e:
+    log.error("Unable to evaluate stoprecalc of %s (not stopping): %s" % (bind.get("Id"), e))
+    return False
+
+
 def eval_calculate(zfo_doc, bind, path=None, node=None, nsmap=None):
   '''
   Evaluates calculate attribute on a bind.
@@ -123,6 +138,8 @@ def eval_calculate(zfo_doc, bind, path=None, node=None, nsmap=None):
   if xpath_expr is None:
     return None
   if xpath_expr.strip() == "":
+    return None
+  if stops_recalculation(zfo_doc, bind, path, node):
     return None
   
   if js602.is_script(xpath_expr):

@@ -24,6 +24,7 @@ Module containing class that represents ZFO document with
 actions that could be performed with it.
 '''
 import copy
+import heapq
 import logging
 import os
 import re
@@ -171,6 +172,7 @@ class ZFO_document:
     # lowercase "call" unquoted, so print() must evaluate to the event name
     # (SendAppEvent maps "print" to app_events.print_)
     func_ns["print"] = lambda context, *args: "print"
+    func_ns["format-number"] = ext_xpath_evaluator._format_number
     
   def _create_file_binds_list(self):
     '''
@@ -1260,11 +1262,48 @@ class ZFO_document:
           recalculate(self._get_dependent_binds(bind.get("Id")))
         log.debug("{0} recalculated".format(bind.get("Id")))
     
-    roots = only if only is not None else starting_at if starting_at is not None else self._get_binds_with_no_dependents()
+    if only is None and starting_at is None:
+      for bind in self._binds_after_those_they_depend_on():
+        results.update(calculate_one_bind(bind))
+      return results
+    roots = only if only is not None else starting_at
     # maybe keep track of calculated binds? Now, there is each bind
     # as many times how many dependents it has.
     recalculate(roots)
     return results
+
+  def _binds_after_those_they_depend_on(self):
+    # zfoengine: Form Filler 4.81 calculates a bind once, after the binds it depends on (seen in the subsidy form of the
+    # Olomouc region: a bind that clears the chosen programme runs before the binds that stoprecalc by the programme).
+    # The original went from each bind into its dependents at once, so a bind ran before some of what it depends on.
+    binds = self.root.xpath("//fm:bind", namespaces={"fm": ns.FM_URI})
+    position = {}
+    for index, bind in enumerate(binds):
+      position.setdefault(bind.get("Id"), index)
+    waits_for = []
+    dependents = [[] for _ in binds]
+    for index, bind in enumerate(binds):
+      needed = {position[name] for name in (bind.get("depends") or "").split("|") if name in position} - {index}
+      waits_for.append(len(needed))
+      for other in needed:
+        dependents[other].append(index)
+    ready = [index for index, count in enumerate(waits_for) if count == 0]
+    heapq.heapify(ready)
+    waiting = set(range(len(binds))) - set(ready)
+    ordered = []
+    while ready or waiting:
+      if not ready:
+        # binds that depend on each other: the first of them in the form goes on
+        heapq.heappush(ready, min(waiting))
+        waiting.discard(ready[0])
+      index = heapq.heappop(ready)
+      ordered.append(binds[index])
+      for dependent in dependents[index]:
+        waits_for[dependent] -= 1
+        if waits_for[dependent] == 0 and dependent in waiting:
+          waiting.discard(dependent)
+          heapq.heappush(ready, dependent)
+    return ordered
 
   def calculate_system_binds(self):
     # zfoengine: on opening only these: what depends on them was stored with them, and the form's downloaded lists, which
@@ -1276,11 +1315,7 @@ class ZFO_document:
     # are in the data before the user touches anything). A filled-in form keeps what was stored with it.
     if self._find_filled_data_object() is not None:
       return {}
-    try:
-      return self.recalc_form()
-    except RecursionError:
-      log.info("Binds of the form depend on each other, the form stays as published")
-      return {}
+    return self.recalc_form()
     
   
   def _calculated_over_the_file_data(self, bind, path):

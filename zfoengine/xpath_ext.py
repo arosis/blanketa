@@ -57,6 +57,35 @@ class ExtendedXpathEvaluator:
     Initialize evaluator. Set the working document.
     '''
     self._doc = doc
+    self._number_formatter = None
+
+  def _format_number(self, context, number, picture, decimal_format=""):
+    # zfoengine: format-number belongs to XSLT, so XPath alone does not know it; forms calculate with it and with a
+    # decimal format they declare (xsl:decimal-format in the subsidy form of the Olomouc region), which libxslt reads
+    if self._number_formatter is None:
+      xsl = "{%s}" % ns.XSLT_URI
+      sheet = etree.Element(xsl + "stylesheet", version="1.0", nsmap={"xsl": ns.XSLT_URI})
+      for declared in self._doc.root.iter(xsl + "decimal-format"):
+        sheet.append(copy.deepcopy(declared))
+      for name in ("number", "picture", "format"):
+        etree.SubElement(sheet, xsl + "param", name=name)
+      etree.SubElement(sheet, xsl + "output", method="text")
+      choice = etree.SubElement(etree.SubElement(sheet, xsl + "template", match="/"), xsl + "choose")
+      etree.SubElement(etree.SubElement(choice, xsl + "when", test="$format = ''"), xsl + "value-of",
+                       select="format-number(number($number), $picture)")
+      etree.SubElement(etree.SubElement(choice, xsl + "otherwise"), xsl + "value-of",
+                       select="format-number(number($number), $picture, $format)")
+      self._number_formatter = etree.XSLT(sheet, access_control=etree.XSLTAccessControl.DENY_ALL)
+
+    def text(value):
+      if isinstance(value, list):
+        value = value[0] if len(value) else ""
+      if etree.iselement(value):
+        value = value.xpath("string(.)")
+      return js602.number_text(value) if isinstance(value, float) else str(value)
+
+    return str(self._number_formatter(etree.Element("none"), number=etree.XSLT.strparam(text(number)),
+                                      picture=etree.XSLT.strparam(text(picture)), format=etree.XSLT.strparam(text(decimal_format))))
     
   def TempNodeContextStringLength(self, context, *args):
     """
@@ -70,17 +99,23 @@ class ExtendedXpathEvaluator:
       if node.tail is not None:
         l = l + len(node.tail.strip())
       for child in node:
-        if child.tag != "some-foo-tmp-elem-whose-name-is-not-among-children":
+        # zfoengine: the helper is a processing instruction, or a child element for a value that one cannot hold
+        if isinstance(child.tag, str) and child.tag != "some-foo-tmp-elem-whose-name-is-not-among-children":
           l = l + count_length(child)
       return l
     
     if len(args) == 0:
       return count_length(context.context_node)
+    # zfoengine: the length of a node-set is the length of its first node; the original measured the printed list
+    if not isinstance(args[0], list):
+      return len(str(args[0]))
+    if len(args[0]) == 0:
+      return 0
     elem = args[0][0]
     if etree.iselement(elem):
       return count_length(elem)
     else:
-      return len(str(args[0]))
+      return len(str(elem))
     
   def RCCheck(self, context, rc):
     '''

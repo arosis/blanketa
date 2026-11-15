@@ -203,8 +203,13 @@ def create_temp_elem(parent, elem_text):
   Do this workaround to run xpath expression on an attribute.
   '''
   log.debug("Creating temporal element")
-  tmp = etree.Element(TEMPORAL_ELEM_TAG)
-  tmp.text = "%s" % elem_text
+  # zfoengine: a processing instruction holds the value as an attribute does - outside the text and the children of its
+  # element, which forms read with .. from the attribute; only a value it cannot hold falls back to a child element
+  try:
+    tmp = etree.ProcessingInstruction(TEMPORAL_ELEM_TAG, "%s" % elem_text)
+  except ValueError:
+    tmp = etree.Element(TEMPORAL_ELEM_TAG)
+    tmp.text = "%s" % elem_text
   parent.append(tmp)
   return tmp
 

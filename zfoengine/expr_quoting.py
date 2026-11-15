@@ -81,7 +81,8 @@ def _add_arg_quotes(func):
     last = comma + 1
     arg = arg.strip()#.rstrip("}").lstrip("{")
     args.append(arg)
-  if last < len(funcargs):
+  # zfoengine: forms write If(…, FOP , ) - what follows the last comma is an argument even when it is empty
+  if last < len(funcargs) or commas:
     arg = funcargs[last:].strip()
     #arg = arg.rstrip("}").lstrip("{")
     args.append(arg)
@@ -98,7 +99,7 @@ def _add_arg_quotes(func):
     oidx = arg.find('(')
     # this could be also an expr in () - therefore oidx > 0, to have at least one char before (    
     if oidx > 0:
-      arg_fname = arg[:oidx]
+      arg_fname = arg[:oidx].strip()
       bad_chars = re.findall(r'[^a-zA-Z\-_]', arg_fname)
       is_funcall = (len(bad_chars) == 0)
     else:
