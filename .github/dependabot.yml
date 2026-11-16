@@ -9,10 +9,6 @@ updates:
     directory: /
     schedule: {interval: weekly, day: monday}
     open-pull-requests-limit: 5
-    ignore:
-      # pyHanko 0.38 (its opentype extra) accepts uharfbuzz below 0.56 only; lift this with the next pyHanko.
-      - dependency-name: uharfbuzz
-        versions: [">=0.56"]
     groups:
       # Every pyobjc framework requires pyobjc-core of its own version, so a single one cannot move alone.
       pyobjc:
