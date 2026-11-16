@@ -33,12 +33,30 @@ Hotové balíčky vytváří GitHub Actions (`.github/workflows/build.yml`) při
 
 | Systém | Soubor | Instalace |
 |---|---|---|
-| macOS | `Blanketa-<verze>-macos.dmg` (nebo `.zip`) | přetáhnout do Aplikací; poprvé otevřít přes pravé tlačítko → Otevřít (není notarizovaná) |
-| Windows 10/11 | `Blanketa-<verze>-setup.exe` | instalátor bez práv správce; nabídne otevírání `.zfo` a `.fo` v Blanketě. Přenosná verze: `…-windows-x64.zip` |
+| macOS | `Blanketa-<verze>-macos.dmg` (nebo `.zip`) | přetáhnout do Aplikací; první otevření macOS zablokuje, postup je [níže](#první-spuštění-na-macos) |
+| Windows 10/11 | `Blanketa-<verze>-setup.exe` | instalátor bez práv správce; nabídne otevírání `.zfo` a `.fo` v Blanketě. Windows před spuštěním mohou varovat, postup je [níže](#první-spuštění-na-windows). Přenosná verze: `…-windows-x64.zip` |
 | Ubuntu 22.04 a novější, Debian 12 a novější, Mint 21 a novější | `blanketa_<verze>_amd64.deb` | `sudo apt install ./blanketa_<verze>_amd64.deb` |
 | jiný Linux s glibc 2.35 a novější | `blanketa-<verze>-linux-amd64.tar.gz` | rozbalit a spustit `Blanketa/install.sh` (bez roota, do domovské složky) |
 
 Windows potřebují Microsoft Edge WebView2 (Windows 10/11 ho mají; instalátor jinak nabídne stažení).
+
+Blanketa není podepsaná certifikátem vydavatele: na Macu není notarizovaná u Applu a instalátor pro Windows nemá placený podpis. Oba systémy proto při prvním spuštění varují. Varování neznamená, že v aplikaci něco našly, jen že vydavatele neznají. Balíčky stahujte jen ze [stránky vydání](https://github.com/arosis/blanketa/releases) tohoto repozitáře.
+
+### První spuštění na macOS
+
+1. Přetáhněte Blanketu do Aplikací a otevřete ji. macOS oznámí, že Apple nemůže zkontrolovat, zda aplikace neobsahuje škodlivý software. Klikněte na „Hotovo“, ne na „Přesunout do Koše“.
+2. Otevřete nabídku Apple → Nastavení systému → Soukromí a zabezpečení a sjeďte dolů k části Zabezpečení.
+3. U zprávy o zablokované Blanketě klikněte na „Přesto otevřít“ a potvrďte heslem nebo Touch ID. Tlačítko je tam asi hodinu od pokusu o otevření; když zmizí, otevřete Blanketu znovu.
+4. V dalším okně zvolte „Otevřít“.
+
+Stačí to udělat jednou, příště se Blanketa otevře rovnou. Po instalaci nové verze Blankety je potřeba postup zopakovat. Na macOS 14 a starším stačí kliknout na Blanketu pravým tlačítkem, zvolit Otevřít a potvrdit.
+
+### První spuštění na Windows
+
+1. Prohlížeč může stažený instalátor označit jako neobvyklý nebo nebezpečný. V seznamu stažených souborů u něj zvolte jeho ponechání.
+2. Po spuštění instalátoru se může objevit modré okno „Systém Windows ochránil váš počítač“. Klikněte na „Další informace“ a pak na „Přesto spustit“.
+
+Totéž platí pro `Blanketa.exe` z přenosné verze. Když tlačítko „Přesto spustit“ chybí, blokuje neznámé aplikace správce počítače nebo funkce Inteligentní řízení aplikací (Smart App Control) a Blanketu na takovém počítači spustit nejde.
 
 ## Co umí
 
@@ -199,7 +217,7 @@ Kontrola podpisu bez okna (používá ji i CI):
 - Výrazy XPath ve formuláři se k počítači uživatele nedostanou: proměnné prostředí, jméno uživatele a cesta k souboru jsou pro ně prázdné a šablony XSLT nesmějí číst ani zapisovat soubory. Události aplikace (`SendAppEvent`) spouští jen tlačítko, na které uživatel klikne.
 - Odesílání na portály (submit) není podporované.
 - PDF formuláře XFA nejsou podporované; Blanketa na ně při otevření upozorní.
-- Aplikace není notarizovaná (macOS) ani podepsaná certifikátem vydavatele (Windows SmartScreen ji při prvním spuštění může varovat).
+- Aplikace není notarizovaná (macOS) ani podepsaná certifikátem vydavatele (Windows), takže oba systémy při prvním spuštění varují; jak ji přesto otevřít, popisuje [Stažení a instalace](#stažení-a-instalace).
 - Tokeny přes PKCS#11 zatím nejsou podporované (jen soubory `.pfx`).
 
 ## Důvěryhodnost podpisů
