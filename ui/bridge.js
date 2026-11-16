@@ -161,7 +161,14 @@ window.zfoRevocation = (() => {
     const asked = statesByCertificate.get(signature.certificate), kept = signature.status_in_file;
     return isSettled(asked) || !isSettled(kept) ? asked : kept;
   };
-  const sourceInFile = state => `Stav je uložený v souboru: ${state.from_file.kind === 'crl' ? 'seznam zrušených certifikátů' : 'odpověď vydavatele'} z ${formatDate(state.from_file.issued_at)}.`;
+  const keptStatement = state => {
+    const isList = state.from_file.kind === 'crl', issued = formatDate(state.from_file.issued_at);
+    const source = `${isList ? 'seznam zrušených certifikátů' : 'odpověď vydavatele'} z ${issued}`;
+    if (state.status !== 'good') return `Stav je uložený v souboru: ${source}.`;
+    if (!state.from_file.before_signing) return `V době podpisu nebyl certifikát zrušený. Stav je uložený v souboru: ${source}.`;
+    // Made before the signature, so it could not know of a revocation between its issue and the signing.
+    return `Podle ${isList ? 'seznamu zrušených certifikátů' : 'odpovědi vydavatele'} z ${issued}, ${isList ? 'který v době podpisu platil' : 'která v době podpisu platila'}, certifikát zrušený nebyl. Stav je uložený v souboru a vznikl před podpisem.`;
+  };
   return {
     ask(session, signatures, redraw) {
       const missing = [...new Set(signatures.map(signature => signature.certificate))].filter(id => id && !statesByCertificate.has(id));
@@ -202,7 +209,7 @@ window.zfoRevocation = (() => {
     line(signature) {
       const state = stateOf(signature), kept = signature.status_in_file;
       if (!state) return '';
-      const text = state.from_file ? `${state.status === 'good' ? 'V době podpisu nebyl certifikát zrušený. ' : ''}${sourceInFile(state)}`
+      const text = state.from_file ? keptStatement(state)
         : state.status === 'pending' ? 'Ověřuje se, zda certifikát nebyl zrušen…'
         : state.status === 'good' ? 'Certifikát není zrušený.'
         : state.status === 'unknown' ? `Zda je certifikát zrušený, se nepodařilo ověřit. ${escapeHtml(state.reason || '')} ${escapeHtml(kept?.reason || '')}` : '';
