@@ -334,6 +334,7 @@ def render_zfo_page(name, blank=False, data=None, lists_waited_for=False):
     form_scripts.name_file_fields_for_page(doc)
     form_scripts.name_what_attachments_show(doc)
     form_scripts.name_repeating_sections_by_bind(doc)
+    form_scripts.mark_steps_of_the_wizard(doc)
     for hidden in doc.xpath("//dsig:SignatureProperties | //dsig:Object[not(@Id)]", namespaces={"dsig": DS}):
         hidden.getparent().remove(hidden)
     html = etree.tostring(XSLT(etree.ElementTree(doc), PATH_TO_JS="'/static/scripts/'",

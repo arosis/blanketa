@@ -54,6 +54,65 @@ SWITCHED_FORM = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig
 </fo:multi-switch></fo:root></dsig:Object></dsig:Signature>"""
 
 
+FORM_WITH_A_WIZARD = """<dsig:Signature xmlns:dsig="http://www.w3.org/2000/09/xmldsig#" Id="_1"><dsig:Object Id="_2" MimeType="text/xml">
+<fo:root xmlns:fo="http://www.w3.org/1999/XSL/Format" xmlns:fm="http://software602.cz/forms" xmlns:d="http://software602.cz/sample">
+<fm:formparams><fm:model><fm:instance><d:root><d:krok>0</d:krok><d:typ>a</d:typ></d:root></fm:instance>
+<fm:bind Id="k" nodeset="/d:root"><fm:bind Id="UserData.Pom.Wizard.Krok" nodeset="d:krok"/><fm:bind Id="typ" nodeset="d:typ"/></fm:bind></fm:model></fm:formparams>
+<fo:layout-master-set><fo:simple-page-master master-name="p" page-height="297mm" page-width="210mm"><fo:region-body/></fo:simple-page-master></fo:layout-master-set>
+<fo:page-sequence master-reference="p"><fo:flow flow-name="xsl-region-body">
+<fo:multi-switch form602ct="swi"><fm:data-switch form602ct="dsw" form602bindref="UserData.Pom.Wizard.Krok"/>
+<fo:multi-case case-name="0" form602ct="cas"><fo:block>Úvod</fo:block></fo:multi-case>
+<fo:multi-case case-name="1" form602ct="cas"><fo:block>Žadatel</fo:block>
+<fo:multi-switch form602ct="swi"><fm:data-switch form602ct="dsw" form602bindref="typ"/>
+<fo:multi-case case-name="a" form602ct="cas"><fo:block>Osoba</fo:block></fo:multi-case>
+<fo:multi-case case-name="b" form602ct="cas"><fo:block>Firma</fo:block></fo:multi-case></fo:multi-switch></fo:multi-case>
+</fo:multi-switch></fo:flow></fo:page-sequence></fo:root></dsig:Object></dsig:Signature>"""
+
+
+class StepsOfAWizard(unittest.TestCase):
+    """Newer MPSV forms show one step at a time; the page marks the steps so that printing can show them all."""
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        path = Path(folder.name) / "form.fo"
+        path.write_text(FORM_WITH_A_WIZARD, encoding="utf-8")
+        for patcher in (mock.patch.dict(app.FORMS, {"wizard": path}), mock.patch.object(app, "zfo_signatures", return_value=[])):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.page = etree.HTML(app.render_zfo_page("wizard"))
+
+    def classes_of_part(self, name):
+        return self.page.xpath(f'//div[@name="{name}"]')[0].get("class", "").split()
+
+    def test_every_step_is_marked(self):
+        for step in ("div-UserData.Pom.Wizard.Krok-0", "div-UserData.Pom.Wizard.Krok-1"):
+            self.assertIn("zfo-wizard-step", self.classes_of_part(step))
+
+    def test_a_part_the_form_switches_by_a_value_of_the_user_is_not_a_step(self):
+        for part in ("div-typ-a", "div-typ-b"):
+            self.assertNotIn("zfo-wizard-step", self.classes_of_part(part))
+
+    def test_a_bind_whose_name_only_ends_like_the_wizard_one_is_not_a_wizard(self):
+        form = etree.fromstring(FORM_WITH_A_WIZARD.replace("UserData.Pom.Wizard.Krok", "UserData.JinyWizard.Krok").encode())
+        form_scripts.mark_steps_of_the_wizard(form)
+        self.assertEqual(form.xpath("//@blanketa-wizard-step"), [])
+
+    def test_printing_shows_every_step_and_leaves_other_hidden_parts_hidden(self):
+        print_rules = ui_source("shell.html").split("@media print {", 1)[1]
+        self.assertIn(".zfo-page .zfo-wizard-step { display: block !important; }", print_rules)
+
+    def test_the_calendar_button_of_a_date_outside_a_table_is_not_as_tall_as_the_page(self):
+        shell = ui_source("shell.html")
+        every_calendar_button = re.search(r"\.zfo-page \.ui-datepicker-trigger \{[^}]*\}", shell).group(0)
+        self.assertNotIn("height: 100%", every_calendar_button.replace("min-height", ""))
+        self.assertIn(".zfo-page td > .ui-datepicker-trigger { height: 100%; }", shell)
+
+    def test_printing_leaves_out_what_the_user_only_clicks(self):
+        print_rules = ui_source("shell.html").split("@media print {", 1)[1]
+        self.assertIn(".zfo-page button { visibility: hidden; }", print_rules)
+        self.assertIn(".ui-datepicker { display: none !important; }", print_rules)
+
+
 class SwitchedParts(unittest.TestCase):
     """The value of a switch picks the part of the form shown, as Form Filler picks it."""
     def shown(self, value, starting=""):

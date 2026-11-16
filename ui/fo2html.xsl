@@ -244,6 +244,13 @@
     </button>
   </xsl:template>
 
+  <!-- Printing shows every step of a wizard, the screen only the one the form is at. -->
+  <xsl:template match="fo:multi-case[@blanketa-wizard-step]">
+    <div name="{concat('div-', ../fm:data-switch/@form602bindref, '-', @case-name)}" class="zfo-wizard-step">
+      <xsl:apply-templates/>
+    </div>
+  </xsl:template>
+
   <!-- A section named only by its bind has buttons of the form's own, the page's + and - would double them. -->
   <xsl:template match="fo:block[@blanketa-section-by-bind]">
     <div name="div-rep-container">

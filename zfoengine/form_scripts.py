@@ -41,6 +41,7 @@ ATTACHMENT_FIELD_TYPE = "bin"
 # The newer MPSV forms, written for FormApps Server: a button hands a chosen file to its script (bib) or adds each chosen
 # file to a repeating section (btm), and a link shows the file an attachment holds (bil).
 UPLOAD_BUTTON_TYPE, FILE_LIST_BUTTON_TYPE, ATTACHMENT_LINK_TYPE = "bib", "btm", "bil"
+BIND_OF_THE_WIZARD_STEP = ["Wizard", "Krok"]
 SIZE_OF_ATTACHMENT_FORMAT = "attch-size-kB"
 NAME_OF_UNNAMED_ATTACHMENT = "priloha"
 FIELD_ONLY_GIVES_ITS_FILE = "save"  # form602menu of a field that hands its file back to the user and takes none
@@ -155,6 +156,16 @@ def button_elements(root):
 def name_buttons_for_page(root):
   for position, element in enumerate(button_elements(root)):
     element.set("blanketa-button", str(position))
+
+
+def mark_steps_of_the_wizard(root):
+  # Forms written for FormApps Server (newer MPSV forms) keep the step of their wizard in a bind of this name and show
+  # one step at a time; other switches show what the user chose, so they are not told by their size or position.
+  for switch in root.iter("{%s}multi-switch" % ns.FO_URI):
+    by = switch.find("{%s}data-switch" % ns.FM_URI)
+    if by is not None and (by.get("form602bindref") or "").split(".")[-2:] == BIND_OF_THE_WIZARD_STEP:
+      for step in switch.findall("{%s}multi-case" % ns.FO_URI):
+        step.set("blanketa-wizard-step", "true")
 
 
 def name_repeating_sections_by_bind(root):
