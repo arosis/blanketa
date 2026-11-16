@@ -1366,9 +1366,9 @@ pycparser==3.12 ; implementation_name != 'PyPy' and platform_python_implementati
     # via
     #   -c requirements.txt
     #   cffi
-pyhanko==0.38.0 \
-    --hash=sha256:267d6d3fa460b0f0e9c5362a2d7979dccbe1e6b1f8d89ba0818dd0c45b5f300e \
-    --hash=sha256:60abfdf6114e4ad64bb413491848af4a276231b563cb9f268e8dbfbcd47e586f
+pyhanko==0.38.1 \
+    --hash=sha256:27348b2bb5c6756402102a930b3404a1ccce4d1102f81e56399df268dd90f70d \
+    --hash=sha256:723fdf1a6e27be72d0d7fbf65deccf03aeaa6fafbdddc5c698b6b2eba06c543d
     # via
     #   -c requirements.txt
     #   -r deps/runtime.in
@@ -1395,9 +1395,9 @@ pyinstaller==6.22.3 \
     # via
     #   -c requirements.txt
     #   -r deps/runtime.in
-pyinstaller-hooks-contrib==2026.9 \
-    --hash=sha256:2748767901acb5cecd1304652b6c7add5bffcff1d71d01207fe24a5d42942a56 \
-    --hash=sha256:fb3e67dd64122561724c48ad0366ac9e8c16e638b63bf7d85de03bf3fdbf06c3
+pyinstaller-hooks-contrib==2026.10 \
+    --hash=sha256:7e906c659522e592a1680f30f709ffb6333277141a695926aa7190592205c5e3 \
+    --hash=sha256:dfc3cde20a7ce6c92e803016e66eed4b7050467e2c5f886a3745d89b258c6d6d
     # via
     #   -c requirements.txt
     #   pyinstaller
