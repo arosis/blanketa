@@ -374,7 +374,7 @@ def _revocation_kept_in_signature(signature):
                 archive = asn1_pdf.RevocationInfoArchival.load(attribute["values"][0].dump())
                 return {kind: [item.dump() for item in archive[name]] if archive[name].native else []
                         for kind, name in (("lists", "crl"), ("answers", "ocsp"))}
-    except Exception:  # noqa: S110 - a damaged attribute only means the signature carries no status
+    except Exception:  # a damaged attribute only means the signature carries no status
         pass
     return NOTHING_KEPT
 

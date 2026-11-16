@@ -17,6 +17,7 @@ import trustlist
 
 REMEMBER_SECONDS = 600  # several signatures share an issuer; a dead server must not cost a timeout for each of them
 EXPIRED_ON_CRL = x509.ObjectIdentifier("2.5.29.60")
+UNREADABLE = (ValueError, TypeError, UnsupportedAlgorithm, x509.InvalidVersion)
 
 _lock = threading.Lock()
 _lists_in_memory = {}
@@ -56,7 +57,7 @@ def _parse_usable_list(data, authority, now):
     try:
         crl = x509.load_der_x509_crl(data)
         return crl if _is_current_complete_list(crl, authority, now) else None
-    except (ValueError, TypeError, UnsupportedAlgorithm, x509.InvalidVersion):
+    except UNREADABLE:
         return None
 
 
@@ -133,17 +134,17 @@ def check_certificate_revocation(der, trust_folder, folder):
                             if certificate.not_valid_after_utc < now else
                             "Seznam zrušených certifikátů se nepodařilo načíst. Zkontrolujte připojení k internetu.")
         return _revocation_status(certificate, crl, now)
-    except (ValueError, TypeError, UnsupportedAlgorithm, x509.InvalidVersion):  # a hostile form's certificate must not break the panel
+    except UNREADABLE:  # a hostile form's certificate must not break the panel
         return _unknown_status("Certifikát je poškozený, nelze ho ověřit.")
 
 
-UNREADABLE = (ValueError, TypeError, UnsupportedAlgorithm, x509.InvalidVersion)
-FROM_ANOTHER_TIME = object()
+OLDER_THAN_THE_SIGNATURE = object()
 
 
-def _speaks_about(moment, issued, following):
-    # A statement says nothing past its end, and one without an end says nothing past the moment it was made.
-    return moment < following if following is not None else moment <= issued
+def _was_issued_since(issued, moment):
+    # A statement made before the signature says nothing about it, even while it was still in force: whoever signs with
+    # a stolen key after the revocation can attach the last list that did not know of it yet.
+    return moment <= issued
 
 
 def _statement_from_file(status, kind, issued):
@@ -155,13 +156,13 @@ def _what_kept_list_says(certificate, authority, data, proven_at):
         crl = x509.load_der_x509_crl(data)
         if not _is_complete_list_of(crl, authority):
             return None
-        if not _speaks_about(proven_at, crl.last_update_utc, crl.next_update_utc):
-            return FROM_ANOTHER_TIME
+        if not _was_issued_since(crl.last_update_utc, proven_at):
+            return OLDER_THAN_THE_SIGNATURE
         status = _revocation_status(certificate, crl, crl.last_update_utc)
     except UNREADABLE:
         return None
     if status["status"] == "unknown":
-        status = _unknown_status("Seznam zrušených certifikátů uložený v souboru vyšel až po skončení platnosti certifikátu "
+        status = _unknown_status("Seznam zrušených certifikátů uložený v souboru vyšel až po skončení platnosti certifikátu "
                                  "a nemusí ho uvádět.")
     return _statement_from_file(status, "crl", crl.last_update_utc)
 
@@ -202,8 +203,8 @@ def _is_about(single, certificate, authority):
 
 
 def _what_single_answer_says(certificate, single, proven_at):
-    if not _speaks_about(proven_at, single.this_update_utc, single.next_update_utc):
-        return FROM_ANOTHER_TIME
+    if not _was_issued_since(single.this_update_utc, proven_at):
+        return OLDER_THAN_THE_SIGNATURE
     if single.certificate_status == ocsp.OCSPCertStatus.REVOKED:
         status = {"status": "revoked", "revoked_at": single.revocation_time_utc.isoformat(),
                   "suspended": single.revocation_reason == x509.ReasonFlags.certificate_hold, "reason": ""}
@@ -211,7 +212,7 @@ def _what_single_answer_says(certificate, single, proven_at):
         return None
     elif certificate.not_valid_after_utc < single.this_update_utc:
         # Responders answer "good" about a certificate they no longer keep track of.
-        status = _unknown_status("Odpověď vydavatele uložená v souboru vznikla až po skončení platnosti certifikátu.")
+        status = _unknown_status("Odpověď vydavatele uložená v souboru vznikla až po skončení platnosti certifikátu.")
     else:
         status = {"status": "good", "revoked_at": None, "suspended": False, "reason": ""}
     return _statement_from_file(status, "ocsp", single.this_update_utc)
@@ -240,22 +241,22 @@ def _strongest_statement(statements):
         return max(good, key=lambda statement: statement["from_file"]["issued_at"])
     if said:
         return said[0]
-    return _unknown_status("Stav certifikátu uložený v souboru je z jiné doby než podpis." if FROM_ANOTHER_TIME in statements else
-                           "Stav uložený v souboru se netýká tohoto certifikátu nebo ho nepodepsal jeho vydavatel.")
+    return _unknown_status("Stav certifikátu uložený v souboru je starší než podpis." if OLDER_THAN_THE_SIGNATURE in statements else
+                           "Stav uložený v souboru se netýká tohoto certifikátu nebo ho nepodepsal jeho vydavatel.")
 
 
 def check_revocation_kept_in_file(der, kept, proven_at, trust_folder):
     # Whoever made the file chose what it carries, so a statement counts only with its authority's signature and only
     # about a moment a time stamp proves: an old "good" proves nothing about a signature made after a revocation.
     if proven_at is None:
-        return _unknown_status("Stav certifikátu uložený v souboru nejde použít, protože čas podpisu nepotvrzuje důvěryhodné časové razítko.")
+        return _unknown_status("Stav certifikátu uložený v souboru nejde použít, protože čas podpisu nepotvrzuje kvalifikované časové razítko.")
     try:
         certificate = trustlist.load_certificate_leniently(der)
         authority = trustlist.issuing_authority(der, trust_folder)
     except UNREADABLE:
         return _unknown_status("Certifikát je poškozený, nelze ho ověřit.")
     if authority is None:
-        return _unknown_status("Stav certifikátu uložený v souboru nejde ověřit: vydavatel certifikátu není v důvěryhodném "
+        return _unknown_status("Stav certifikátu uložený v souboru nejde ověřit: vydavatel certifikátu není v důvěryhodném "
                                "seznamu EU, nebo se seznam nepodařilo načíst.")
     return _strongest_statement([*(_what_kept_list_says(certificate, authority, data, proven_at) for data in kept["lists"]),
                                  *(_what_kept_answer_says(certificate, authority, data, proven_at) for data in kept["answers"])])

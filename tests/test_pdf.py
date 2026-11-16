@@ -396,13 +396,13 @@ class RevocationKeptInAFile(unittest.TestCase):
         judged.assert_not_called()
 
     def test_genuine_list_in_a_stamped_file_says_the_certificate_was_good(self):
-        signed_at = datetime.now(timezone.utc)
+        signed_at = datetime.now(timezone.utc) - timedelta(days=1)
 
         def stamped(signature):
             signature.pop("stamps")
             signature.update(proof={"kind": "signature", "at": signed_at.isoformat()}, stamp_problem="", stamp_unverifiable=False)
 
-        pdf = self.with_document_store(SignatureFieldNames().signed(), [self.revocation_list(signed_at - timedelta(hours=1))])
+        pdf = self.with_document_store(SignatureFieldNames().signed(), [self.revocation_list(signed_at + timedelta(hours=1))])
         with (mock.patch.object(app, "judge_time_stamps", stamped),
               mock.patch.object(app.certstore, "trust_verdicts", return_value=[{"trusted": True, "unverifiable": False, "source": "eu"}]),
               mock.patch.object(trustlist, "issuing_authority", return_value=SignatureFieldNames.CERT)):

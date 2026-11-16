@@ -51,7 +51,10 @@ def fo_seeds():
 
 
 def pdf_seeds():
-    return [p.read_bytes() for p in sorted((ROOT / "samples-pdf").rglob("*.pdf"))]
+    sys.path.insert(0, str(ROOT / "tests"))
+    from test_pdf import RevocationKeptInAFile as kept
+    return [*(p.read_bytes() for p in sorted((ROOT / "samples-pdf").rglob("*.pdf"))),
+            kept.with_document_store(kept.SIGNED, [kept.revocation_list()], [b"answer"])]
 
 
 def certificate_seeds():
@@ -207,6 +210,12 @@ def fuzz_revocation_list(data):
         raise AssertionError("a list signed by someone else was accepted")
 
 
+def fuzz_issuer_answer(data):
+    helpers = test_revocation()
+    if revocation._what_kept_answer_says(helpers.certificate(), helpers.AUTHORITY, data, helpers.SIGNED) is not None:
+        raise AssertionError("an answer signed by someone else was accepted")
+
+
 def test_revocation():
     sys.path.insert(0, str(ROOT / "tests"))
     import test_revocation as helpers
@@ -224,6 +233,11 @@ def revocation_list_seeds():
     return [helpers.crl(key=helpers.OTHER_KEY)]
 
 
+def issuer_answer_seeds():
+    helpers = test_revocation()
+    return [helpers.answer(by=helpers.responder(key=helpers.OTHER_KEY), key=helpers.RESPONDER_KEY)]
+
+
 TARGETS = {
     "zfo-signatures": (fuzz_zfo_signatures, fo_seeds),
     "zfo-description": (fuzz_zfo_description, fo_seeds),
@@ -236,6 +250,7 @@ TARGETS = {
     "certificate": (fuzz_certificate, certificate_seeds),
     "trust-list": (fuzz_trust_list, trust_list_seeds),
     "revocation-list": (fuzz_revocation_list, revocation_list_seeds),
+    "issuer-answer": (fuzz_issuer_answer, issuer_answer_seeds),
 }
 
 

@@ -161,7 +161,7 @@ window.zfoRevocation = (() => {
     const asked = statesByCertificate.get(signature.certificate), kept = signature.status_in_file;
     return isSettled(asked) || !isSettled(kept) ? asked : kept;
   };
-  const sourceInFile = state => `Stav je uložený v souboru: ${state.from_file.kind === 'crl' ? 'seznam zrušených certifikátů' : 'odpověď vydavatele'} z ${formatDate(state.from_file.issued_at)}.`;
+  const sourceInFile = state => `Stav je uložený v souboru: ${state.from_file.kind === 'crl' ? 'seznam zrušených certifikátů' : 'odpověď vydavatele'} z ${formatDate(state.from_file.issued_at)}.`;
   return {
     ask(session, signatures, redraw) {
       const missing = [...new Set(signatures.map(signature => signature.certificate))].filter(id => id && !statesByCertificate.has(id));
@@ -202,7 +202,7 @@ window.zfoRevocation = (() => {
     line(signature) {
       const state = stateOf(signature), kept = signature.status_in_file;
       if (!state) return '';
-      const text = state.from_file ? `${state.status === 'good' ? 'V době podpisu nebyl certifikát zrušený. ' : ''}${sourceInFile(state)}`
+      const text = state.from_file ? `${state.status === 'good' ? 'V době podpisu nebyl certifikát zrušený. ' : ''}${sourceInFile(state)}`
         : state.status === 'pending' ? 'Ověřuje se, zda certifikát nebyl zrušen…'
         : state.status === 'good' ? 'Certifikát není zrušený.'
         : state.status === 'unknown' ? `Zda je certifikát zrušený, se nepodařilo ověřit. ${escapeHtml(state.reason || '')} ${escapeHtml(kept?.reason || '')}` : '';
