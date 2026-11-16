@@ -194,6 +194,7 @@ class Revocation(unittest.TestCase):
 
 
 SIGNED = NOW - timedelta(days=30)
+SIGNED_TO_THE_SECOND = SIGNED.replace(microsecond=0)
 RESPONDER_KEY = ec.generate_private_key(ec.SECP256R1())
 
 
@@ -234,6 +235,7 @@ class StatusKeptInAFile(unittest.TestCase):
         verdict = self.check([self.list_issued_after_the_signing()])
         self.assertEqual(verdict["status"], "good")
         self.assertEqual(verdict["from_file"]["kind"], "crl")
+        self.assertFalse(verdict["from_file"]["before_signing"])
         self.assertEqual(datetime.fromisoformat(verdict["from_file"]["issued_at"]), (SIGNED + timedelta(hours=1)).replace(microsecond=0))
 
     def test_list_works_for_a_certificate_that_has_expired_since(self):
@@ -244,11 +246,41 @@ class StatusKeptInAFile(unittest.TestCase):
         expired = certificate(end=NOW - timedelta(days=1))
         self.assertEqual(self.check([crl()], cert=expired)["status"], "unknown")
 
-    def test_list_issued_before_the_signature_proves_nothing_even_while_in_force(self):
-        in_force = crl(last=SIGNED - timedelta(hours=1), following=SIGNED + timedelta(days=1))
-        verdict = self.check([in_force])
+    def list_in_force_at_the_signing(self, revoked=()):
+        return crl(revoked, last=SIGNED - timedelta(hours=1), following=SIGNED + timedelta(days=1))
+
+    def test_list_issued_before_the_signing_but_in_force_at_it_is_marked_as_earlier(self):
+        verdict = self.check([self.list_in_force_at_the_signing()])
+        self.assertEqual(verdict["status"], "good")
+        self.assertTrue(verdict["from_file"]["before_signing"])
+
+    def test_statement_issued_after_the_signing_is_preferred_to_an_earlier_one(self):
+        verdict = self.check([self.list_in_force_at_the_signing(), self.list_issued_after_the_signing()], [answer(issued=SIGNED - timedelta(hours=1), following=SIGNED + timedelta(days=1))])
+        self.assertFalse(verdict["from_file"]["before_signing"])
+
+    def test_revocation_on_a_list_in_force_at_the_signing_is_reported(self):
+        verdict = self.check([self.list_in_force_at_the_signing([(77, SIGNED - timedelta(days=2), None)])])
+        self.assertEqual(verdict["status"], "revoked")
+
+    def test_list_whose_force_ends_exactly_at_the_signing_proves_nothing(self):
+        verdict = self.check([crl(last=SIGNED_TO_THE_SECOND - timedelta(days=1), following=SIGNED_TO_THE_SECOND)], proven_at=SIGNED_TO_THE_SECOND)
         self.assertEqual(verdict["status"], "unknown")
-        self.assertIn("starší než podpis", verdict["reason"])
+
+    def test_list_issued_exactly_at_the_signing_is_not_marked_as_earlier(self):
+        verdict = self.check([crl(last=SIGNED_TO_THE_SECOND, following=SIGNED + timedelta(days=1))], proven_at=SIGNED_TO_THE_SECOND)
+        self.assertEqual(verdict["status"], "good")
+        self.assertFalse(verdict["from_file"]["before_signing"])
+
+    def test_suspension_on_a_list_in_force_at_the_signing_outweighs_a_later_list_without_it(self):
+        suspended = self.list_in_force_at_the_signing([(77, SIGNED - timedelta(days=2), x509.ReasonFlags.certificate_hold)])
+        verdict = self.check([suspended, self.list_issued_after_the_signing()])
+        self.assertEqual(verdict["status"], "revoked")
+        self.assertTrue(verdict["suspended"])
+
+    def test_list_out_of_force_at_the_signing_proves_nothing(self):
+        verdict = self.check([crl(last=SIGNED - timedelta(days=9), following=SIGNED - timedelta(days=1))])
+        self.assertEqual(verdict["status"], "unknown")
+        self.assertIn("už neplatil", verdict["reason"])
 
     def test_revocation_on_a_kept_list_is_reported(self):
         when = (SIGNED - timedelta(days=2)).replace(microsecond=0)
@@ -280,11 +312,19 @@ class StatusKeptInAFile(unittest.TestCase):
         self.assertEqual(verdict["status"], "good")
         self.assertEqual(verdict["from_file"]["kind"], "ocsp")
 
-    def test_answer_given_before_the_signing_proves_nothing_even_while_in_force(self):
-        in_force = answer(issued=SIGNED - timedelta(hours=1), following=SIGNED + timedelta(days=1))
-        verdict = self.check(answers=[in_force])
+    def test_answer_given_before_the_signing_but_in_force_at_it_is_marked_as_earlier(self):
+        verdict = self.check(answers=[answer(issued=SIGNED - timedelta(hours=1), following=SIGNED + timedelta(days=1))])
+        self.assertEqual(verdict["status"], "good")
+        self.assertTrue(verdict["from_file"]["before_signing"])
+
+    def test_answer_given_before_the_signing_without_an_end_proves_nothing(self):
+        verdict = self.check(answers=[answer(issued=SIGNED - timedelta(hours=1))])
         self.assertEqual(verdict["status"], "unknown")
-        self.assertIn("starší než podpis", verdict["reason"])
+        self.assertIn("už neplatil", verdict["reason"])
+
+    def test_answer_that_ended_before_the_signing_proves_nothing(self):
+        ended = answer(issued=SIGNED - timedelta(days=3), following=SIGNED - timedelta(days=2))
+        self.assertEqual(self.check(answers=[ended])["status"], "unknown")
 
     def test_answer_of_a_responder_named_by_the_authority_is_good(self):
         by = responder()

@@ -138,17 +138,17 @@ def check_certificate_revocation(der, trust_folder, folder):
         return _unknown_status("Certifikát je poškozený, nelze ho ověřit.")
 
 
-OLDER_THAN_THE_SIGNATURE = object()
+OUT_OF_FORCE_AT_THE_SIGNING = object()
 
 
-def _was_issued_since(issued, moment):
-    # A statement made before the signature says nothing about it, even while it was still in force: whoever signs with
-    # a stolen key after the revocation can attach the last list that did not know of it yet.
-    return moment <= issued
+def _was_out_of_force_at(moment, issued, in_force_until):
+    return issued < moment and (in_force_until is None or in_force_until <= moment)
 
 
-def _statement_from_file(status, kind, issued):
-    return {**status, "from_file": {"kind": kind, "issued_at": issued.isoformat()}}
+def _statement_from_file(status, kind, issued, proven_at):
+    # A statement made before the signature is no proof, even while it was still in force: whoever signs with a stolen
+    # key after the revocation can attach the last list that did not know of it yet. The page says it in weaker words.
+    return {**status, "from_file": {"kind": kind, "issued_at": issued.isoformat(), "before_signing": issued < proven_at}}
 
 
 def _what_kept_list_says(certificate, authority, data, proven_at):
@@ -156,15 +156,15 @@ def _what_kept_list_says(certificate, authority, data, proven_at):
         crl = x509.load_der_x509_crl(data)
         if not _is_complete_list_of(crl, authority):
             return None
-        if not _was_issued_since(crl.last_update_utc, proven_at):
-            return OLDER_THAN_THE_SIGNATURE
+        if _was_out_of_force_at(proven_at, crl.last_update_utc, crl.next_update_utc):
+            return OUT_OF_FORCE_AT_THE_SIGNING
         status = _revocation_status(certificate, crl, crl.last_update_utc)
     except UNREADABLE:
         return None
     if status["status"] == "unknown":
         status = _unknown_status("Seznam zrušených certifikátů uložený v souboru vyšel až po skončení platnosti certifikátu "
                                  "a nemusí ho uvádět.")
-    return _statement_from_file(status, "crl", crl.last_update_utc)
+    return _statement_from_file(status, "crl", crl.last_update_utc, proven_at)
 
 
 def _key_made_signature(key, signature, signed, digest):
@@ -203,8 +203,8 @@ def _is_about(single, certificate, authority):
 
 
 def _what_single_answer_says(certificate, single, proven_at):
-    if not _was_issued_since(single.this_update_utc, proven_at):
-        return OLDER_THAN_THE_SIGNATURE
+    if _was_out_of_force_at(proven_at, single.this_update_utc, single.next_update_utc):
+        return OUT_OF_FORCE_AT_THE_SIGNING
     if single.certificate_status == ocsp.OCSPCertStatus.REVOKED:
         status = {"status": "revoked", "revoked_at": single.revocation_time_utc.isoformat(),
                   "suspended": single.revocation_reason == x509.ReasonFlags.certificate_hold, "reason": ""}
@@ -215,7 +215,7 @@ def _what_single_answer_says(certificate, single, proven_at):
         status = _unknown_status("Odpověď vydavatele uložená v souboru vznikla až po skončení platnosti certifikátu.")
     else:
         status = {"status": "good", "revoked_at": None, "suspended": False, "reason": ""}
-    return _statement_from_file(status, "ocsp", single.this_update_utc)
+    return _statement_from_file(status, "ocsp", single.this_update_utc, proven_at)
 
 
 def _what_kept_answer_says(certificate, authority, data, proven_at):
@@ -238,10 +238,10 @@ def _strongest_statement(statements):
         return min(revoked, key=lambda statement: statement["revoked_at"])
     good = [statement for statement in said if statement["status"] == "good"]
     if good:
-        return max(good, key=lambda statement: statement["from_file"]["issued_at"])
+        return max(good, key=lambda statement: (not statement["from_file"]["before_signing"], statement["from_file"]["issued_at"]))
     if said:
         return said[0]
-    return _unknown_status("Stav certifikátu uložený v souboru je starší než podpis." if OLDER_THAN_THE_SIGNATURE in statements else
+    return _unknown_status("Stav certifikátu uložený v souboru v době podpisu už neplatil." if OUT_OF_FORCE_AT_THE_SIGNING in statements else
                            "Stav uložený v souboru se netýká tohoto certifikátu nebo ho nepodepsal jeho vydavatel.")
 
 

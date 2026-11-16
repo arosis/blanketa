@@ -529,7 +529,7 @@ class RevocationVerdict(unittest.TestCase):
 @needs_node
 class StatusKeptInAFileOnThePage(unittest.TestCase):
     """Runs ui/bridge.js for a signature stamped on 1 January whose file says the certificate was good then."""
-    KEPT = {"status": "good", "from_file": {"kind": "crl", "issued_at": "2026-01-01T00:00:00+00:00"}}
+    KEPT = {"status": "good", "from_file": {"kind": "crl", "issued_at": "2026-01-01T00:00:00+00:00", "before_signing": False}}
     SCRIPT = """
     const [sig, asked] = JSON.parse(process.argv[1]), r = window.zfoRevocation;
     window.fetch = async () => ({ok: true, json: async () => ({c: asked})});
@@ -564,11 +564,20 @@ class StatusKeptInAFileOnThePage(unittest.TestCase):
         self.assertIn("před časem z časového razítka", state)
         self.assertIn("Stav je uložený v\u00a0souboru: odpověď vydavatele z\u00a0", line)
 
+    def test_status_issued_before_the_signing_is_said_in_weaker_words_with_its_time(self):
+        for kind, words, in_force in (("crl", "Podle seznamu zrušených certifikátů", "který v době podpisu platil"),
+                                      ("ocsp", "Podle odpovědi vydavatele", "která v době podpisu platila")):
+            kept = {"status": "good", "from_file": {"kind": kind, "issued_at": "2026-01-01T12:00:00+00:00", "before_signing": True}}
+            line = self.shown({"status": "unknown", "reason": ""}, kept)[1]
+            self.assertRegex(line, words + r" z 1\. 1\. 2026\s\d{1,2}:\d{2}, " + in_force + ", certifikát zrušený nebyl\\. "
+                             "Stav je uložený v souboru a vznikl před podpisem\\.")
+            self.assertNotIn("V době podpisu nebyl", line)
+
     def test_unusable_status_in_the_file_is_said(self):
-        kept = {"status": "unknown", "reason": "Stav certifikátu uložený v souboru je starší než podpis."}
+        kept = {"status": "unknown", "reason": "Stav certifikátu uložený v souboru v době podpisu už neplatil."}
         before, line, _, _ = self.shown({"status": "unknown", "reason": "Certifikát už vypršel."}, kept)
         self.assertEqual(before, "")
-        self.assertIn("Certifikát už vypršel. Stav certifikátu uložený v souboru je starší než podpis.", line)
+        self.assertIn("Certifikát už vypršel. Stav certifikátu uložený v souboru v době podpisu už neplatil.", line)
 
 
 @needs_node

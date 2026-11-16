@@ -153,6 +153,7 @@ document.addEventListener('click', event => {
 window.zfoRevocation = (() => {
   const statesByCertificate = new Map();
   const formatDate = iso => new Date(iso).toLocaleDateString('cs-CZ');
+  const formatDateTime = iso => new Date(iso).toLocaleString('cs-CZ', {dateStyle: 'medium', timeStyle: 'short'});
   const escapeHtml = text => String(text).replace(/[&<>"]/g, character => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[character]));
   const isSettled = state => state?.status === 'good' || state?.status === 'revoked';
   // What the issuer says today counts first. Once the certificate has expired the issuer may not say anything, and then
@@ -161,7 +162,14 @@ window.zfoRevocation = (() => {
     const asked = statesByCertificate.get(signature.certificate), kept = signature.status_in_file;
     return isSettled(asked) || !isSettled(kept) ? asked : kept;
   };
-  const sourceInFile = state => `Stav je uložený v souboru: ${state.from_file.kind === 'crl' ? 'seznam zrušených certifikátů' : 'odpověď vydavatele'} z ${formatDate(state.from_file.issued_at)}.`;
+  const statementMadeBeforeSigning = (isList, issued) =>
+    `Podle ${isList ? 'seznamu zrušených certifikátů' : 'odpovědi vydavatele'} z ${formatDateTime(issued)}, ${isList ? 'který v době podpisu platil' : 'která v době podpisu platila'}, certifikát zrušený nebyl. Stav je uložený v souboru a vznikl před podpisem.`;
+  const keptStatement = state => {
+    const isList = state.from_file.kind === 'crl';
+    if (state.status === 'good' && state.from_file.before_signing) return statementMadeBeforeSigning(isList, state.from_file.issued_at);
+    const source = `${isList ? 'seznam zrušených certifikátů' : 'odpověď vydavatele'} z ${formatDate(state.from_file.issued_at)}`;
+    return `${state.status === 'good' ? `V době podpisu nebyl certifikát zrušený. ` : ''}Stav je uložený v souboru: ${source}.`;
+  };
   return {
     ask(session, signatures, redraw) {
       const missing = [...new Set(signatures.map(signature => signature.certificate))].filter(id => id && !statesByCertificate.has(id));
@@ -202,7 +210,7 @@ window.zfoRevocation = (() => {
     line(signature) {
       const state = stateOf(signature), kept = signature.status_in_file;
       if (!state) return '';
-      const text = state.from_file ? `${state.status === 'good' ? 'V době podpisu nebyl certifikát zrušený. ' : ''}${sourceInFile(state)}`
+      const text = state.from_file ? keptStatement(state)
         : state.status === 'pending' ? 'Ověřuje se, zda certifikát nebyl zrušen…'
         : state.status === 'good' ? 'Certifikát není zrušený.'
         : state.status === 'unknown' ? `Zda je certifikát zrušený, se nepodařilo ověřit. ${escapeHtml(state.reason || '')} ${escapeHtml(kept?.reason || '')}` : '';
