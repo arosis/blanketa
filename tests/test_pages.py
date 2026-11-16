@@ -564,13 +564,14 @@ class StatusKeptInAFileOnThePage(unittest.TestCase):
         self.assertIn("před časem z časového razítka", state)
         self.assertIn("Stav je uložený v\u00a0souboru: odpověď vydavatele z\u00a0", line)
 
-    def test_status_issued_before_the_signing_is_said_in_weaker_words(self):
-        for kind, words in (("crl", "Podle seznamu zrušených certifikátů z\u00a01. 1. 2026, který v\u00a0době podpisu platil, certifikát zrušený nebyl."),
-                            ("ocsp", "Podle odpovědi vydavatele z\u00a01. 1. 2026, která v\u00a0době podpisu platila, certifikát zrušený nebyl.")):
-            kept = {"status": "good", "from_file": {"kind": kind, "issued_at": "2026-01-01T00:00:00+00:00", "before_signing": True}}
+    def test_status_issued_before_the_signing_is_said_in_weaker_words_with_its_time(self):
+        for kind, words, in_force in (("crl", "Podle seznamu zrušených certifikátů", "který v době podpisu platil"),
+                                      ("ocsp", "Podle odpovědi vydavatele", "která v době podpisu platila")):
+            kept = {"status": "good", "from_file": {"kind": kind, "issued_at": "2026-01-01T12:00:00+00:00", "before_signing": True}}
             line = self.shown({"status": "unknown", "reason": ""}, kept)[1]
-            self.assertIn(words + " Stav je uložený v\u00a0souboru a\u00a0vznikl před podpisem.", line)
-            self.assertNotIn("V\u00a0době podpisu nebyl", line)
+            self.assertRegex(line, words + r" z 1\. 1\. 2026\s\d{1,2}:\d{2}, " + in_force + ", certifikát zrušený nebyl\\. "
+                             "Stav je uložený v souboru a vznikl před podpisem\\.")
+            self.assertNotIn("V době podpisu nebyl", line)
 
     def test_unusable_status_in_the_file_is_said(self):
         kept = {"status": "unknown", "reason": "Stav certifikátu uložený v souboru v době podpisu už neplatil."}

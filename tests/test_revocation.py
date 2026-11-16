@@ -194,6 +194,7 @@ class Revocation(unittest.TestCase):
 
 
 SIGNED = NOW - timedelta(days=30)
+SIGNED_TO_THE_SECOND = SIGNED.replace(microsecond=0)
 RESPONDER_KEY = ec.generate_private_key(ec.SECP256R1())
 
 
@@ -260,6 +261,21 @@ class StatusKeptInAFile(unittest.TestCase):
     def test_revocation_on_a_list_in_force_at_the_signing_is_reported(self):
         verdict = self.check([self.list_in_force_at_the_signing([(77, SIGNED - timedelta(days=2), None)])])
         self.assertEqual(verdict["status"], "revoked")
+
+    def test_list_whose_force_ends_exactly_at_the_signing_proves_nothing(self):
+        verdict = self.check([crl(last=SIGNED_TO_THE_SECOND - timedelta(days=1), following=SIGNED_TO_THE_SECOND)], proven_at=SIGNED_TO_THE_SECOND)
+        self.assertEqual(verdict["status"], "unknown")
+
+    def test_list_issued_exactly_at_the_signing_is_not_marked_as_earlier(self):
+        verdict = self.check([crl(last=SIGNED_TO_THE_SECOND, following=SIGNED + timedelta(days=1))], proven_at=SIGNED_TO_THE_SECOND)
+        self.assertEqual(verdict["status"], "good")
+        self.assertFalse(verdict["from_file"]["before_signing"])
+
+    def test_suspension_on_a_list_in_force_at_the_signing_outweighs_a_later_list_without_it(self):
+        suspended = self.list_in_force_at_the_signing([(77, SIGNED - timedelta(days=2), x509.ReasonFlags.certificate_hold)])
+        verdict = self.check([suspended, self.list_issued_after_the_signing()])
+        self.assertEqual(verdict["status"], "revoked")
+        self.assertTrue(verdict["suspended"])
 
     def test_list_out_of_force_at_the_signing_proves_nothing(self):
         verdict = self.check([crl(last=SIGNED - timedelta(days=9), following=SIGNED - timedelta(days=1))])

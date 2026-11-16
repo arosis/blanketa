@@ -153,6 +153,7 @@ document.addEventListener('click', event => {
 window.zfoRevocation = (() => {
   const statesByCertificate = new Map();
   const formatDate = iso => new Date(iso).toLocaleDateString('cs-CZ');
+  const formatDateTime = iso => new Date(iso).toLocaleString('cs-CZ', {dateStyle: 'medium', timeStyle: 'short'});
   const escapeHtml = text => String(text).replace(/[&<>"]/g, character => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[character]));
   const isSettled = state => state?.status === 'good' || state?.status === 'revoked';
   // What the issuer says today counts first. Once the certificate has expired the issuer may not say anything, and then
@@ -161,13 +162,13 @@ window.zfoRevocation = (() => {
     const asked = statesByCertificate.get(signature.certificate), kept = signature.status_in_file;
     return isSettled(asked) || !isSettled(kept) ? asked : kept;
   };
+  const statementMadeBeforeSigning = (isList, issued) =>
+    `Podle ${isList ? 'seznamu zrušených certifikátů' : 'odpovědi vydavatele'} z ${formatDateTime(issued)}, ${isList ? 'který v době podpisu platil' : 'která v době podpisu platila'}, certifikát zrušený nebyl. Stav je uložený v souboru a vznikl před podpisem.`;
   const keptStatement = state => {
-    const isList = state.from_file.kind === 'crl', issued = formatDate(state.from_file.issued_at);
-    const source = `${isList ? 'seznam zrušených certifikátů' : 'odpověď vydavatele'} z ${issued}`;
-    if (state.status !== 'good') return `Stav je uložený v souboru: ${source}.`;
-    if (!state.from_file.before_signing) return `V době podpisu nebyl certifikát zrušený. Stav je uložený v souboru: ${source}.`;
-    // Made before the signature, so it could not know of a revocation between its issue and the signing.
-    return `Podle ${isList ? 'seznamu zrušených certifikátů' : 'odpovědi vydavatele'} z ${issued}, ${isList ? 'který v době podpisu platil' : 'která v době podpisu platila'}, certifikát zrušený nebyl. Stav je uložený v souboru a vznikl před podpisem.`;
+    const isList = state.from_file.kind === 'crl';
+    if (state.status === 'good' && state.from_file.before_signing) return statementMadeBeforeSigning(isList, state.from_file.issued_at);
+    const source = `${isList ? 'seznam zrušených certifikátů' : 'odpověď vydavatele'} z ${formatDate(state.from_file.issued_at)}`;
+    return `${state.status === 'good' ? `V době podpisu nebyl certifikát zrušený. ` : ''}Stav je uložený v souboru: ${source}.`;
   };
   return {
     ask(session, signatures, redraw) {
