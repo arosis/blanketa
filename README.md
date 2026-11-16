@@ -210,6 +210,10 @@ Systémy české kvalifikované autority (PostSignum, I.CA, eIdentity) většino
 
 U PDF Blanketa čte časové razítko v podpisu i razítko celého dokumentu. Čas potvrdí jen neporušené razítko služby, která byla v tu chvíli kvalifikovaná podle důvěryhodného seznamu EU, a to certifikátem určeným jen pro časová razítka. Když vydavatel certifikát zrušil, rozhoduje o platnosti podpisu právě tento čas. Razítko dokumentu pokrývá jen podpisy, které už v souboru byly, a pozdější razítko dokumentu podpis po zrušení certifikátu nezneplatní, jen čas nepotvrdí. Zda nebyl zrušen certifikát samotného razítka, se nekontroluje.
 
+### Stav certifikátu uložený v PDF
+
+Po skončení platnosti certifikátu ho vydavatel v aktuálním seznamu zrušených certifikátů uvádět nemusí, takže stav už nejde zjistit. PDF si ho ale může nést z doby podpisu (PAdES-LT): jako seznam zrušených certifikátů nebo jako odpověď vydavatele (OCSP), v úložišti dokumentu (`/DSS`) nebo přímo v podpisu. Blanketa takový stav použije, když ho podepsal vydavatel certifikátu z důvěryhodného seznamu EU (u odpovědi také jím pověřený certifikát), když čas podpisu potvrzuje kvalifikované časové razítko a když stav o tomto čase vypovídá: platil v něm, nebo vznikl později a certifikát tehdy ještě platil. Starší stav nebo stav bez potvrzeného času se nepoužije a panel podpisů to řekne. Co vydavatel říká dnes, má přednost; stav ze souboru se uplatní, až když dnešní stav zjistit nejde. Nic se kvůli tomu nestahuje. Prodlužování platnosti řetězem razítek dokumentu (PAdES-LTA) Blanketa nevyhodnocuje a zda nebyl zrušen certifikát pověřený k odpovědím, nekontroluje.
+
 U ZFO se čas podpisu dál bere z formuláře, tedy od podepisujícího. Vzorek ZFO s razítkem se nepodařilo najít a formát není veřejně popsaný, proto si ho Blanketa nedomýšlí.
 
 Vzorové soubory v `samples-pdf/razitka/` vytváří `tools/make-timestamp-samples.py` s testovací autoritou.

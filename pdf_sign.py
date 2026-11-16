@@ -4,6 +4,7 @@ import struct
 from datetime import timezone
 from pathlib import Path
 
+from asn1crypto import pdf as asn1_pdf
 from asn1crypto import x509 as asn1_x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding
@@ -32,6 +33,10 @@ logging.getLogger("pyhanko").setLevel(logging.CRITICAL)
 logging.getLogger("pyhanko_certvalidator").setLevel(logging.CRITICAL)
 SIGNATURE_TIME_STAMP_TOKEN_OID = "1.2.840.113549.1.9.16.2.14"
 DOCUMENT_TIME_STAMP_TYPE = "/DocTimeStamp"
+ADOBE_REVOCATION_ARCHIVE_OID = "1.2.840.113583.1.1.8"
+# A document store is not covered by any signature, so anyone can fill it: what is read from it stays bounded.
+MOST_KEPT_STATEMENTS_OF_A_KIND = 32
+NOTHING_KEPT = {"lists": [], "answers": []}
 STAMP_FONT = Path("/System/Library/Fonts/Supplemental/Arial.ttf")
 MULTI_SELECT = 1 << 21
 
@@ -353,9 +358,36 @@ def _document_stamp_entry(signature, stamp, status):
     }
 
 
+def _revocation_kept_in_document(reader):
+    try:
+        store = reader.root["/DSS"] if "/DSS" in reader.root else {}
+        return {kind: [reference.get_object().data for reference in list(store[name])[:MOST_KEPT_STATEMENTS_OF_A_KIND]] if name in store else []
+                for kind, name in (("lists", "/CRLs"), ("answers", "/OCSPs"))}
+    except Exception:  # a hostile store only means the file carries no status
+        return NOTHING_KEPT
+
+
+def _revocation_kept_in_signature(signature):
+    try:
+        for attribute in signature.signer_info["signed_attrs"]:
+            if attribute["type"].dotted == ADOBE_REVOCATION_ARCHIVE_OID:
+                archive = asn1_pdf.RevocationInfoArchival.load(attribute["values"][0].dump())
+                return {kind: [item.dump() for item in archive[name]] if archive[name].native else []
+                        for kind, name in (("lists", "crl"), ("answers", "ocsp"))}
+    except Exception:  # noqa: S110 - a damaged attribute only means the signature carries no status
+        pass
+    return NOTHING_KEPT
+
+
+def _kept_revocation(signature, in_document):
+    in_signature = _revocation_kept_in_signature(signature)
+    return {kind: list(dict.fromkeys(in_document[kind] + in_signature[kind]))[:MOST_KEPT_STATEMENTS_OF_A_KIND] for kind in NOTHING_KEPT}
+
+
 def describe_signatures(pdf):
     reader = _open_for_validation(pdf)
     result = []
+    revocation_in_document = _revocation_kept_in_document(reader)
     found = reader.embedded_signatures
     document_stamps = [(signature, *_document_stamp(signature)) for signature in found if _is_document_stamp(signature)]
     for signature in found:
@@ -379,6 +411,7 @@ def describe_signatures(pdf):
             "field": signature.field_name,
             "covers_whole": coverage == "ENTIRE_FILE",
             "der": cert.dump(),
+            "kept_revocation": _kept_revocation(signature, revocation_in_document),
             "stamps": [stamp for stamp in (_signature_stamp(signature), *(dict(details) for later, details, status in document_stamps
                                                                     if _stamp_covers(later, status, signature)))
                        if stamp is not None],

@@ -154,7 +154,14 @@ window.zfoRevocation = (() => {
   const statesByCertificate = new Map();
   const formatDate = iso => new Date(iso).toLocaleDateString('cs-CZ');
   const escapeHtml = text => String(text).replace(/[&<>"]/g, character => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[character]));
-  const stateOf = signature => statesByCertificate.get(signature.certificate);
+  const isSettled = state => state?.status === 'good' || state?.status === 'revoked';
+  // What the issuer says today counts first. Once the certificate has expired the issuer may not say anything, and then
+  // the status the file carries from the time of signing (signature.status_in_file) is all there is.
+  const stateOf = signature => {
+    const asked = statesByCertificate.get(signature.certificate), kept = signature.status_in_file;
+    return isSettled(asked) || !isSettled(kept) ? asked : kept;
+  };
+  const sourceInFile = state => `Stav je uložený v souboru: ${state.from_file.kind === 'crl' ? 'seznam zrušených certifikátů' : 'odpověď vydavatele'} z ${formatDate(state.from_file.issued_at)}.`;
   return {
     ask(session, signatures, redraw) {
       const missing = [...new Set(signatures.map(signature => signature.certificate))].filter(id => id && !statesByCertificate.has(id));
@@ -193,11 +200,12 @@ window.zfoRevocation = (() => {
         : `Certifikát byl ${what} ${formatDate(state.revoked_at)}; čas podpisu uvádí podepisující a není potvrzený`;
     },
     line(signature) {
-      const state = stateOf(signature);
+      const state = stateOf(signature), kept = signature.status_in_file;
       if (!state) return '';
-      const text = state.status === 'pending' ? 'Ověřuje se, zda certifikát nebyl zrušen…'
+      const text = state.from_file ? `${state.status === 'good' ? 'V době podpisu nebyl certifikát zrušený. ' : ''}${sourceInFile(state)}`
+        : state.status === 'pending' ? 'Ověřuje se, zda certifikát nebyl zrušen…'
         : state.status === 'good' ? 'Certifikát není zrušený.'
-        : state.status === 'unknown' ? `Zda je certifikát zrušený, se nepodařilo ověřit. ${escapeHtml(state.reason || '')}` : '';
+        : state.status === 'unknown' ? `Zda je certifikát zrušený, se nepodařilo ověřit. ${escapeHtml(state.reason || '')} ${escapeHtml(kept?.reason || '')}` : '';
       return text ? `<div class="meta">${text}</div>` : '';
     },
   };
