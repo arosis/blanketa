@@ -34,7 +34,7 @@ Hotové balíčky vytváří GitHub Actions (`.github/workflows/build.yml`) při
 | Systém | Soubor | Instalace |
 |---|---|---|
 | macOS | `Blanketa-<verze>-macos.dmg` (nebo `.zip`) | přetáhnout do Aplikací; první otevření macOS zablokuje, postup je [níže](#první-spuštění-na-macos) |
-| Windows 10/11 | `Blanketa-<verze>-setup.exe` | instalátor bez práv správce; nabídne otevírání `.zfo` a `.fo` v Blanketě. Windows před spuštěním mohou varovat, postup je [níže](#první-spuštění-na-windows). Přenosná verze: `…-windows-x64.zip` |
+| Windows 10/11 | `Blanketa-<verze>-setup.exe` | instalátor bez práv správce; nabídne otevírání `.zfo` a `.fo` v Blanketě. Windows před spuštěním mohou varovat, postup je [níže](#první-spuštění-na-windows). Přenosná verze: `…-windows-x64.zip` |
 | Ubuntu 22.04 a novější, Debian 12 a novější, Mint 21 a novější | `blanketa_<verze>_amd64.deb` | `sudo apt install ./blanketa_<verze>_amd64.deb` |
 | jiný Linux s glibc 2.35 a novější | `blanketa-<verze>-linux-amd64.tar.gz` | rozbalit a spustit `Blanketa/install.sh` (bez roota, do domovské složky) |
 
@@ -46,8 +46,7 @@ Blanketa není podepsaná certifikátem vydavatele: na Macu není notarizovaná 
 
 1. Přetáhněte Blanketu do Aplikací a otevřete ji. macOS oznámí, že Apple nemůže zkontrolovat, zda aplikace neobsahuje škodlivý software. Klikněte na „Hotovo“, ne na „Přesunout do Koše“.
 2. Otevřete nabídku Apple → Nastavení systému → Soukromí a zabezpečení a sjeďte dolů k části Zabezpečení.
-3. U zprávy o zablokované Blanketě klikněte na „Přesto otevřít“ a potvrďte heslem nebo Touch ID. Tlačítko je tam asi hodinu od pokusu o otevření; když zmizí, otevřete Blanketu znovu.
-4. V dalším okně zvolte „Otevřít“.
+3. U zprávy o zablokované Blanketě klikněte na „Přesto otevřít“. Systém se zeptá ještě jednou a vyžádá heslo nebo Touch ID; potvrďte volbou „Otevřít“. Tlačítko „Přesto otevřít“ je v nastavení asi hodinu od pokusu o otevření; když zmizí, otevřete Blanketu znovu.
 
 Stačí to udělat jednou, příště se Blanketa otevře rovnou. Po instalaci nové verze Blankety je potřeba postup zopakovat. Na macOS 14 a starším stačí kliknout na Blanketu pravým tlačítkem, zvolit Otevřít a potvrdit.
 
@@ -56,7 +55,7 @@ Stačí to udělat jednou, příště se Blanketa otevře rovnou. Po instalaci n
 1. Prohlížeč může stažený instalátor označit jako neobvyklý nebo nebezpečný. V seznamu stažených souborů u něj zvolte jeho ponechání.
 2. Po spuštění instalátoru se může objevit modré okno „Systém Windows ochránil váš počítač“. Klikněte na „Další informace“ a pak na „Přesto spustit“.
 
-Totéž platí pro `Blanketa.exe` z přenosné verze. Když tlačítko „Přesto spustit“ chybí, blokuje neznámé aplikace správce počítače nebo funkce Inteligentní řízení aplikací (Smart App Control) a Blanketu na takovém počítači spustit nejde.
+Totéž platí pro `Blanketa.exe` z přenosné verze. Když tlačítko „Přesto spustit“ chybí, blokuje neznámé aplikace správce počítače nebo funkce Inteligentní řízení aplikací (Smart App Control) a Blanketu na takovém počítači nejde spustit, dokud ji správce nepovolí nebo dokud tu funkci nevypnete.
 
 ## Co umí
 
