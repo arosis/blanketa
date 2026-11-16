@@ -159,11 +159,15 @@ def judge_time_stamps(signature):
 
 def add_trust_verdicts(signatures):
     ders = [signature.pop("der") for signature in signatures]
+    kept_revocation = [signature.pop("kept_revocation", None) for signature in signatures]
     for signature in signatures:
         judge_time_stamps(signature)
-    for signature, der, verdict in zip(signatures, ders, certstore.trust_verdicts(ders), strict=True):
+    for signature, der, kept, verdict in zip(signatures, ders, kept_revocation, certstore.trust_verdicts(ders), strict=True):
         signature.update(trusted=verdict["trusted"], reason=verdict.get("reason", ""), trust_source=verdict["source"],
                          unverifiable=verdict["unverifiable"], certificate=hashlib.sha256(der).hexdigest())
+        if kept and any(kept.values()):
+            proven_at = datetime.fromisoformat(signature["proof"]["at"]) if signature["proof"] else None
+            signature["status_in_file"] = certstore.revocation_status_kept_in_file(der, kept, proven_at)
         SHOWN_CERTIFICATES_BY_ID[signature["certificate"]] = der
     return signatures
 

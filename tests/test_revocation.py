@@ -8,6 +8,7 @@ from unittest import mock
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.x509 import ocsp
 
 import revocation
 import trustlist
@@ -190,3 +191,129 @@ class Revocation(unittest.TestCase):
             for _ in range(3):
                 revocation.check_certificate_revocation(der(certificate()), self.folder, self.folder / "crl")
         self.assertEqual(calls, [URL, SECOND_URL])
+
+
+SIGNED = NOW - timedelta(days=30)
+RESPONDER_KEY = ec.generate_private_key(ec.SECP256R1())
+
+
+def responder(key=KEY, usages=(x509.ExtendedKeyUsageOID.OCSP_SIGNING,), end=None):
+    return (x509.CertificateBuilder().subject_name(name("Responder")).issuer_name(AUTHORITY.subject)
+            .public_key(RESPONDER_KEY.public_key()).serial_number(5).not_valid_before(NOW - timedelta(days=100))
+            .not_valid_after(end or NOW + timedelta(days=100))
+            .add_extension(x509.ExtendedKeyUsage(list(usages)), critical=False).sign(key, hashes.SHA256()))
+
+
+def answer(about=None, status=ocsp.OCSPCertStatus.GOOD, issued=None, following=None, revoked_at=None, reason=None,
+           by=None, key=KEY):
+    builder = ocsp.OCSPResponseBuilder().add_response(
+        about or certificate(), AUTHORITY, hashes.SHA1(), status, issued or SIGNED + timedelta(minutes=5),
+        following, revoked_at, reason).responder_id(ocsp.OCSPResponderEncoding.HASH, by or AUTHORITY)
+    if by is not None:
+        builder = builder.certificates([by])
+    return builder.sign(key, hashes.SHA256()).public_bytes(serialization.Encoding.DER)
+
+
+class StatusKeptInAFile(unittest.TestCase):
+    """Lists and answers a PDF carries from the time it was signed. SIGNED is the time a stamp proves."""
+
+    def setUp(self):
+        self.authority = AUTHORITY
+        patcher = mock.patch.object(trustlist, "issuing_authority", lambda *_: self.authority)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def check(self, lists=(), answers=(), cert=None, proven_at=SIGNED):
+        kept = {"lists": list(lists), "answers": list(answers)}
+        return revocation.check_revocation_kept_in_file(der(cert or certificate()), kept, proven_at, Path("unused"))
+
+    def list_issued_after_the_signing(self, revoked=()):
+        return crl(revoked, last=SIGNED + timedelta(hours=1), following=SIGNED + timedelta(days=1))
+
+    def test_list_issued_after_the_signing_says_the_certificate_was_good(self):
+        verdict = self.check([self.list_issued_after_the_signing()])
+        self.assertEqual(verdict["status"], "good")
+        self.assertEqual(verdict["from_file"]["kind"], "crl")
+        self.assertEqual(datetime.fromisoformat(verdict["from_file"]["issued_at"]), (SIGNED + timedelta(hours=1)).replace(microsecond=0))
+
+    def test_list_works_for_a_certificate_that_has_expired_since(self):
+        expired = certificate(end=NOW - timedelta(days=1))
+        self.assertEqual(self.check([self.list_issued_after_the_signing()], cert=expired)["status"], "good")
+
+    def test_later_list_issued_after_the_certificate_expired_proves_nothing(self):
+        expired = certificate(end=NOW - timedelta(days=1))
+        self.assertEqual(self.check([crl()], cert=expired)["status"], "unknown")
+
+    def test_list_issued_before_the_signature_proves_nothing_even_while_in_force(self):
+        in_force = crl(last=SIGNED - timedelta(hours=1), following=SIGNED + timedelta(days=1))
+        verdict = self.check([in_force])
+        self.assertEqual(verdict["status"], "unknown")
+        self.assertIn("starší než podpis", verdict["reason"])
+
+    def test_revocation_on_a_kept_list_is_reported(self):
+        when = (SIGNED - timedelta(days=2)).replace(microsecond=0)
+        verdict = self.check([self.list_issued_after_the_signing([(77, when, None)])])
+        self.assertEqual(verdict["status"], "revoked")
+        self.assertEqual(datetime.fromisoformat(verdict["revoked_at"]), when)
+
+    def test_revocation_wins_over_a_good_statement(self):
+        revoked = self.list_issued_after_the_signing([(77, SIGNED - timedelta(days=2), None)])
+        self.assertEqual(self.check([self.list_issued_after_the_signing(), revoked], [answer()])["status"], "revoked")
+
+    def test_forged_list_is_not_believed(self):
+        forged = crl(key=OTHER_KEY, last=SIGNED + timedelta(hours=1), following=SIGNED + timedelta(days=1))
+        verdict = self.check([forged, b"not a list"])
+        self.assertEqual(verdict["status"], "unknown")
+        self.assertIn("nepodepsal", verdict["reason"])
+
+    def test_without_a_proven_time_nothing_is_believed(self):
+        verdict = self.check([self.list_issued_after_the_signing()], proven_at=None)
+        self.assertEqual(verdict["status"], "unknown")
+        self.assertIn("razítko", verdict["reason"])
+
+    def test_issuer_outside_the_trusted_lists_is_not_believed(self):
+        self.authority = None
+        self.assertEqual(self.check([self.list_issued_after_the_signing()])["status"], "unknown")
+
+    def test_answer_given_after_the_signing_is_good(self):
+        verdict = self.check(answers=[answer()])
+        self.assertEqual(verdict["status"], "good")
+        self.assertEqual(verdict["from_file"]["kind"], "ocsp")
+
+    def test_answer_given_before_the_signing_proves_nothing_even_while_in_force(self):
+        in_force = answer(issued=SIGNED - timedelta(hours=1), following=SIGNED + timedelta(days=1))
+        verdict = self.check(answers=[in_force])
+        self.assertEqual(verdict["status"], "unknown")
+        self.assertIn("starší než podpis", verdict["reason"])
+
+    def test_answer_of_a_responder_named_by_the_authority_is_good(self):
+        by = responder()
+        self.assertEqual(self.check(answers=[answer(by=by, key=RESPONDER_KEY)])["status"], "good")
+
+    def test_responder_must_be_named_by_the_authority_for_answering(self):
+        for by in (responder(key=OTHER_KEY), responder(usages=[x509.ExtendedKeyUsageOID.CLIENT_AUTH]),
+                   responder(end=SIGNED - timedelta(days=5))):
+            verdict = self.check(answers=[answer(by=by, key=RESPONDER_KEY)])
+            self.assertEqual(verdict["status"], "unknown", by)
+
+    def test_forged_answer_is_not_believed(self):
+        genuine = answer()
+        forged = genuine[:-1] + bytes([genuine[-1] ^ 1])
+        self.assertEqual(self.check(answers=[forged, b"not an answer"])["status"], "unknown")
+
+    def test_answer_about_another_certificate_is_not_used(self):
+        other = answer(about=certificate(serial=78))
+        self.assertEqual(self.check(answers=[other])["status"], "unknown")
+
+    def test_revocation_in_an_answer_is_reported(self):
+        when = (SIGNED - timedelta(days=2)).replace(microsecond=0)
+        revoked = answer(status=ocsp.OCSPCertStatus.REVOKED, revoked_at=when,
+                         reason=x509.ReasonFlags.certificate_hold)
+        verdict = self.check(answers=[revoked])
+        self.assertEqual(verdict["status"], "revoked")
+        self.assertTrue(verdict["suspended"])
+        self.assertEqual(datetime.fromisoformat(verdict["revoked_at"]), when)
+
+    def test_answer_given_after_the_certificate_expired_proves_nothing(self):
+        expired = certificate(end=NOW - timedelta(days=1))
+        self.assertEqual(self.check(answers=[answer(about=expired, issued=NOW)], cert=expired)["status"], "unknown")

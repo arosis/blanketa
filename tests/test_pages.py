@@ -527,6 +527,51 @@ class RevocationVerdict(unittest.TestCase):
 
 
 @needs_node
+class StatusKeptInAFileOnThePage(unittest.TestCase):
+    """Runs ui/bridge.js for a signature stamped on 1 January whose file says the certificate was good then."""
+    KEPT = {"status": "good", "from_file": {"kind": "crl", "issued_at": "2026-01-01T00:00:00+00:00"}}
+    SCRIPT = """
+    const [sig, asked] = JSON.parse(process.argv[1]), r = window.zfoRevocation;
+    window.fetch = async () => ({ok: true, json: async () => ({c: asked})});
+    const before = r.line(sig);
+    r.ask('s', [sig], () => {});
+    setTimeout(() => console.log(JSON.stringify([before, r.line(sig), r.revoked(sig), r.state(sig)])), 50);
+    """
+
+    def shown(self, asked, kept=None, proof_at="2026-01-01T00:00:00+00:00"):
+        sig = {"certificate": "c", "signed_at": proof_at, "proof": {"kind": "signature", "at": proof_at},
+               "status_in_file": kept or self.KEPT}
+        return json.loads(run_ui_scripts(["bridge.js"], self.SCRIPT, json.dumps([sig, asked])))
+
+    def test_status_from_the_file_shows_before_the_issuer_is_asked(self):
+        self.assertIn("V\u00a0době podpisu nebyl certifikát zrušený. Stav je uložený v\u00a0souboru: seznam zrušených certifikátů", self.shown({})[0])
+
+    def test_status_from_the_file_stands_in_when_the_issuer_says_nothing(self):
+        before, line, revoked, _ = self.shown({"status": "unknown", "reason": "Certifikát už vypršel."})
+        self.assertEqual(line, before)
+        self.assertFalse(revoked)
+
+    def test_what_the_issuer_says_today_comes_first(self):
+        self.assertIn("Certifikát není zrušený.", self.shown({"status": "good"})[1])
+        _, line, revoked, state = self.shown({"status": "revoked", "revoked_at": "2025-06-01T00:00:00+00:00"})
+        self.assertTrue(revoked)
+        self.assertNotIn("uložený", line + state)
+
+    def test_revocation_kept_in_the_file_makes_the_signature_invalid(self):
+        kept = {"status": "revoked", "revoked_at": "2025-12-01T00:00:00+00:00", "from_file": {"kind": "ocsp", "issued_at": "2026-01-01T00:00:00+00:00"}}
+        _, line, revoked, state = self.shown({"status": "unknown", "reason": ""}, kept)
+        self.assertTrue(revoked)
+        self.assertIn("před časem z časového razítka", state)
+        self.assertIn("Stav je uložený v\u00a0souboru: odpověď vydavatele z\u00a0", line)
+
+    def test_unusable_status_in_the_file_is_said(self):
+        kept = {"status": "unknown", "reason": "Stav certifikátu uložený v souboru je starší než podpis."}
+        before, line, _, _ = self.shown({"status": "unknown", "reason": "Certifikát už vypršel."}, kept)
+        self.assertEqual(before, "")
+        self.assertIn("Certifikát už vypršel. Stav certifikátu uložený v souboru je starší než podpis.", line)
+
+
+@needs_node
 class ButtonFramesOnThePage(unittest.TestCase):
     """Runs the test of ui/shell.html that tells whether the form itself draws a frame around its button."""
 

@@ -4,9 +4,13 @@ import unittest
 from datetime import datetime, timedelta, timezone
 from unittest import mock
 
+from asn1crypto import cms
+from asn1crypto import crl as asn1_crl
+from asn1crypto import pdf as asn1_pdf
 from cryptography import x509
-from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
+from pyhanko.pdf_utils import generic
 from pyhanko.pdf_utils.incremental_writer import IncrementalPdfFileWriter
 from pyhanko.sign import fields, signers
 from pypdf import PdfReader, PdfWriter
@@ -22,6 +26,7 @@ from support import ROOT
 import app
 import pdf_form_data
 import pdf_sign
+import trustlist
 
 
 class SignatureFieldNames(unittest.TestCase):
@@ -323,3 +328,83 @@ class TimeStamps(unittest.TestCase):
         sig, _ = self.judge([self.stamp(intact=False), self.stamp()], {"qualified": True, "unverifiable": False, "reason": ""})
         self.assertIsNotNone(sig["proof"])
         self.assertEqual(sig["stamp_problem"], "")
+
+
+class RevocationKeptInAFile(unittest.TestCase):
+    """A PDF may carry revocation lists and issuer's answers from the time it was signed (PAdES-LT)."""
+    SIGNED = (ROOT / "samples-pdf/razitka/razitko-v-podpisu.pdf").read_bytes()
+
+    @staticmethod
+    def with_document_store(pdf, lists=(), answers=()):
+        writer = IncrementalPdfFileWriter(io.BytesIO(pdf), strict=False)
+        store = generic.DictionaryObject({
+            generic.pdf_name(name): generic.ArrayObject([writer.add_object(generic.StreamObject(stream_data=data)) for data in kept])
+            for name, kept in (("/CRLs", lists), ("/OCSPs", answers))})
+        writer.root[generic.pdf_name("/DSS")] = writer.add_object(store)
+        writer.update_root()
+        out = io.BytesIO()
+        writer.write(out)
+        return out.getvalue()
+
+    @staticmethod
+    def revocation_list(issued=None):
+        issued = issued or datetime.now(timezone.utc)
+        return (x509.CertificateRevocationListBuilder().issuer_name(SignatureFieldNames.NAME).last_update(issued)
+                .next_update(issued + timedelta(days=1)).sign(SignatureFieldNames.KEY, hashes.SHA256()).public_bytes(serialization.Encoding.DER))
+
+    def test_signature_of_a_file_without_any_carries_nothing(self):
+        self.assertEqual(pdf_sign.describe_signatures(self.SIGNED)[0]["kept_revocation"], {"lists": [], "answers": []})
+
+    def test_document_store_is_read_and_the_signature_stays_intact(self):
+        found = pdf_sign.describe_signatures(self.with_document_store(self.SIGNED, [b"list"], [b"answer", b"answer"]))[0]
+        self.assertEqual(found["kept_revocation"], {"lists": [b"list"], "answers": [b"answer"]})
+        self.assertTrue(found["intact"])
+        self.assertFalse(found["modified"])
+
+    def test_only_a_bounded_number_is_read(self):
+        many = [b"list %d" % number for number in range(100)]
+        found = pdf_sign.describe_signatures(self.with_document_store(self.SIGNED, many))[0]
+        self.assertEqual(found["kept_revocation"]["lists"], many[:32])
+
+    def test_damaged_store_carries_nothing(self):
+        damaged = self.with_document_store(self.SIGNED, [b"list"]).replace(b"/CRLs [", b"/CRLs 7 %")
+        self.assertEqual(pdf_sign.describe_signatures(damaged)[0]["kept_revocation"]["lists"], [])
+
+    def test_lists_kept_inside_the_signature_are_read(self):
+        kept = self.revocation_list()
+        archive = asn1_pdf.RevocationInfoArchival({"crl": [asn1_crl.CertificateList.load(kept)]})
+        attribute = cms.CMSAttribute({"type": "adobe_revocation_info_archival", "values": [archive]})
+        signature = mock.Mock(signer_info={"signed_attrs": cms.CMSAttributes([attribute])})
+        self.assertEqual(pdf_sign._revocation_kept_in_signature(signature), {"lists": [kept], "answers": []})
+
+    def test_status_is_judged_at_the_time_the_stamp_proves(self):
+        trust = [{"trusted": True, "unverifiable": False, "source": "eu"}]
+        said = {"status": "good", "revoked_at": None, "suspended": False, "reason": "", "from_file": {"kind": "crl", "issued_at": "x"}}
+        with (mock.patch.object(app.certstore, "stamp_trust_verdict", return_value={"qualified": True, "unverifiable": False, "reason": ""}),
+              mock.patch.object(app.certstore, "trust_verdicts", return_value=trust),
+              mock.patch.object(app.certstore, "revocation_status_kept_in_file", return_value=said) as judged):
+            signature = app.pdf_signatures(self.with_document_store(self.SIGNED, [b"list"]))[0]
+        self.assertEqual(signature["status_in_file"], said)
+        self.assertNotIn("kept_revocation", signature)
+        self.assertEqual(judged.call_args.args[1:], ({"lists": [b"list"], "answers": []}, datetime(2026, 1, 15, 10, 0, tzinfo=timezone.utc)))
+
+    def test_file_without_kept_status_is_not_judged(self):
+        with (mock.patch.object(app.certstore, "trust_verdicts", return_value=[{"trusted": True, "unverifiable": False, "source": "eu"}]),
+              mock.patch.object(app.certstore, "revocation_status_kept_in_file") as judged):
+            signature = app.pdf_signatures(self.SIGNED)[0]
+        self.assertNotIn("status_in_file", signature)
+        judged.assert_not_called()
+
+    def test_genuine_list_in_a_stamped_file_says_the_certificate_was_good(self):
+        signed_at = datetime.now(timezone.utc) - timedelta(days=1)
+
+        def stamped(signature):
+            signature.pop("stamps")
+            signature.update(proof={"kind": "signature", "at": signed_at.isoformat()}, stamp_problem="", stamp_unverifiable=False)
+
+        pdf = self.with_document_store(SignatureFieldNames().signed(), [self.revocation_list(signed_at + timedelta(hours=1))])
+        with (mock.patch.object(app, "judge_time_stamps", stamped),
+              mock.patch.object(app.certstore, "trust_verdicts", return_value=[{"trusted": True, "unverifiable": False, "source": "eu"}]),
+              mock.patch.object(trustlist, "issuing_authority", return_value=SignatureFieldNames.CERT)):
+            status = app.pdf_signatures(pdf)[0]["status_in_file"]
+        self.assertEqual((status["status"], status["from_file"]["kind"]), ("good", "crl"))

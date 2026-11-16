@@ -199,6 +199,10 @@ def stamp_trust_verdict(der, moment):
     return trustlist.check_stamp_certificate(der, moment, config_dir() / "trustlists")
 
 
+def revocation_status_kept_in_file(der, kept, proven_at):
+    return revocation.check_revocation_kept_in_file(der, kept, proven_at, config_dir() / "trustlists")
+
+
 def revocation_status(der):
     # May download the issuer's list, so never call it while rendering a page.
     return revocation.check_certificate_revocation(der, config_dir() / "trustlists", config_dir() / "crl")
