@@ -1,5 +1,5 @@
 ; Inno Setup installer for Blanketa on Windows (built by tools/build_desktop.py):
-;   iscc /DVersion=0.2.1 /DSource=dist\Blanketa /Odist packaging\windows\blanketa.iss
+;   iscc /DVersion=0.3.0 /DSource=dist\Blanketa /Odist packaging\windows\blanketa.iss
 ; Installs for the current user without admin rights (or for everyone if chosen), adds Blanketa to
 ; "Otevřít v programu" for .zfo, .fo, .pdf and ASiC containers and, as optional tasks, makes it the default for .zfo and .fo files and for ASiC containers.
 
