@@ -1410,9 +1410,9 @@ uharfbuzz==0.57.0 \
     --hash=sha256:e3901acbed68995516ba272bb3ff3777adb07d832b328941da7915dd6cd145fd \
     --hash=sha256:ee112dc87b4e78a8c2d8e475d214d29788aacce0daa0192806d4778b671dc658
     # via pyhanko
-uritools==6.1.3 \
-    --hash=sha256:136f113e76e53f85bf2d9cce0c3d40ceec775d0409e7d6de9b28f046a7d42838 \
-    --hash=sha256:3a498e7e85ef3249343d5710618d641a414da0fbae6d23053ada7976ee83ea5f
+uritools==7.0.0 \
+    --hash=sha256:110b773e3f8fbaebcdcbe1377d04e418b1985adf69deeca4ed569f3e328cbf48 \
+    --hash=sha256:41a5d1c0ff82d73fc3c59a34e8103f699791d41fff9e3bd272a055249641b889
     # via pyhanko-certvalidator
 yarl==1.25.1 \
     --hash=sha256:0136d640dfa9b0523853e411430a99f8a91eca85774c6420285a33b755bc6de3 \
