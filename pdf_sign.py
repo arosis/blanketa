@@ -254,7 +254,7 @@ def empty_signature_field(pdf):
     return None
 
 
-def sign_pdf(pdf, key, cert, reason=None, location=None, placement=None):
+def sign_pdf(pdf, key, cert, reason=None, location=None, placement=None, time_stamper=None):
     writer = IncrementalPdfFileWriter(io.BytesIO(pdf), strict=False)
     if writer.prev.encrypted:
         writer.encrypt("")
@@ -269,7 +269,8 @@ def sign_pdf(pdf, key, cert, reason=None, location=None, placement=None):
     stamp = TextStampStyle(stamp_text="Elektronicky podepsal(a):\n%(signer)s\nDatum: %(ts)s",
                            timestamp_format="%d. %m. %Y %H:%M:%S %Z",
                            text_box_style=TextBoxStyle(font=GlyphAccumulatorFactory(STAMP_FONT)) if STAMP_FONT.exists() else TextBoxStyle())
-    pdf_signer = signers.PdfSigner(metadata, ExternalKeySigner(key, cert), new_field_spec=new_field, stamp_style=stamp)
+    pdf_signer = signers.PdfSigner(metadata, ExternalKeySigner(key, cert), new_field_spec=new_field, stamp_style=stamp,
+                                   timestamper=time_stamper)
     return pdf_signer.sign_pdf(writer).getvalue()
 
 

@@ -161,7 +161,7 @@ const savedStatus = (verb, path) => {
 const postChangedValues = async (path, extra = '', more = {}) => {
   document.activeElement?.blur();
   const response = await fetch(`${path}?s=${SESSION}${extra}`, {method: 'POST', body: JSON.stringify({values: changedFieldValues(), ...more})});
-  if (!response.ok) throw new Error(await response.text());
+  if (!response.ok) throw Object.assign(new Error(await response.text()), {status: response.status});
   return response.json();
 };
 const showSavedDocument = async (result, verb) => {
@@ -246,12 +246,55 @@ const importData = () => {
 let signatureField = info.signature_field;
 const signMode = () => queryOne('[data-sign-mode] input:checked').value;
 try { const mode = localStorage.getItem('zfo-sign-mode'); if (mode) queryOne(`[data-sign-mode] input[value="${mode}"]`).checked = true; } catch {}
-const signWith = async placement => {
-  setStatus('Podepisuji… (token si může vyžádat PIN)');
+const TIME_STAMP_UNAVAILABLE = 424;
+const timeStamp = (() => {
+  const box = queryOne('[data-time-stamp]');
+  const enabled = box.querySelector('[data-time-stamp-enabled]');
+  const url = box.querySelector('[data-time-stamp-url]');
+  const user = box.querySelector('[data-time-stamp-user]');
+  const passwordRow = box.querySelector('[data-time-stamp-password]');
+  const service = () => box.querySelector('[name="time-stamp-service"]:checked').value;
+  const show = () => {
+    const own = service() === 'own';
+    box.querySelector('[data-time-stamp-details]').hidden = !enabled.checked;
+    for (const row of box.querySelectorAll('[data-time-stamp-own]')) row.hidden = !own;
+    passwordRow.hidden = !(own && user.value.trim());
+  };
+  const stored = pageData.time_stamp;
+  enabled.checked = stored.enabled;
+  box.querySelector(`[name="time-stamp-service"][value="${stored.service}"]`).checked = true;
+  url.value = stored.url;
+  user.value = stored.user;
+  box.addEventListener('input', show);
+  show();
+  return {
+    store: async () => {
+      const response = await fetch('/time-stamp-settings?s=' + SESSION, {method: 'POST', body: JSON.stringify(
+        {enabled: enabled.checked, service: service(), url: url.value, user: user.value})});
+      if (!response.ok) throw new Error(await response.text());
+    },
+    wanted: () => (enabled.checked ? {password: passwordRow.hidden ? null : passwordRow.querySelector('input').value} : undefined),
+  };
+})();
+const stampFailedDialog = queryOne('[data-stamp-failed]');
+const signWithoutStampIfWanted = (reason, placement) => {
+  queryOne('[data-stamp-failed-reason]').textContent = reason;
+  stampFailedDialog.returnValue = '';
+  stampFailedDialog.addEventListener('close', () => {
+    if (stampFailedDialog.returnValue === 'sign') signWith(placement, null);
+    else setStatus('Podepisování zrušeno');
+  }, {once: true});
+  stampFailedDialog.showModal();
+};
+const signWith = async (placement, stamp = timeStamp.wanted()) => {
+  setStatus(stamp ? 'Podepisuji a žádám o časové razítko…' : 'Podepisuji… (token si může vyžádat PIN)');
   try {
     await showSavedDocument(await postChangedValues('/pdf-save', '&cert=' + encodeURIComponent(certSelect.value),
-                           {placement, password: certificates.password()}), 'Podepsáno a uloženo jako');
-  } catch (error) { setStatus('Chyba: ' + error.message); }
+                           {placement, password: certificates.password(), time_stamp: stamp}), 'Podepsáno a uloženo jako');
+  } catch (error) {
+    if (error.status === TIME_STAMP_UNAVAILABLE) signWithoutStampIfWanted(error.message, placement);
+    else setStatus('Chyba: ' + error.message);
+  }
 };
 const MIN_DRAGGED_BOX_PX = 12, SIGNATURE_WIDTH_PT = 180, SIGNATURE_HEIGHT_PT = 60;
 let placing = null;
@@ -341,6 +384,7 @@ const actions = {
   sign: async () => {
     if (!certSelect.value) { setStatus('Vyber certifikát pro podpis.'); actions.save(); return; }
     try { localStorage.setItem('zfo-cert', certSelect.value); localStorage.setItem('zfo-sign-mode', signMode()); } catch {}
+    try { await timeStamp.store(); } catch (error) { setStatus('Chyba: ' + error.message); actions.save(); return; }
     if (!signatureField && signMode() === 'place') startPlacing();
     else signWith(null);
   },

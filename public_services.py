@@ -1,5 +1,5 @@
-# Downloads from public services whose address this program chooses itself: ARES (lookups.py) and MPSV's code lists
-# (codelists.py). Never from an address a form or a page gives.
+# Requests to services whose address this program chooses itself: ARES (lookups.py) and MPSV's code lists
+# (codelists.py); and to the time stamp service the user set up (time_stamps.py). Never to an address a form gives.
 import ssl
 import urllib.request
 

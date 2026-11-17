@@ -1,0 +1,115 @@
+import base64
+import json
+import urllib.error
+import urllib.request
+from urllib.parse import urlsplit
+
+from asn1crypto import cms, core, tsp
+from pyhanko.sign.timestamps import TimeStamper
+from pyhanko.sign.timestamps.common_utils import TimestampRequestError
+
+import certstore
+import public_services
+
+PUBLIC_QUALIFIED_SERVICE = "http://timestamp.sectigo.com/qualified"
+PUBLIC_SERVICE, OWN_SERVICE = "public", "own"
+SETTINGS_FILE = "time-stamps.json"
+ROOM_FOR_TOKEN = 16 * 1024
+LONGEST_REPLY = 256 * 1024
+SECONDS_TO_WAIT = 20
+NO_SETTINGS = {"enabled": False, "service": PUBLIC_SERVICE, "url": "", "user": ""}
+
+
+class TimeStampUnavailable(RuntimeError):
+    pass
+
+
+def settings():
+    try:
+        stored = json.loads((certstore.config_dir() / SETTINGS_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return dict(NO_SETTINGS)
+    if not isinstance(stored, dict):
+        return dict(NO_SETTINGS)
+    return {name: stored[name] if isinstance(stored.get(name), type(default)) else default
+            for name, default in NO_SETTINGS.items()}
+
+
+def store_settings(wanted):
+    service = OWN_SERVICE if wanted.get("service") == OWN_SERVICE else PUBLIC_SERVICE
+    url = str(wanted.get("url") or "").strip()
+    user = str(wanted.get("user") or "").strip()
+    if service == OWN_SERVICE and wanted.get("enabled"):
+        _refuse_unusable_address(url, user)
+    stored = {"enabled": bool(wanted.get("enabled")), "service": service, "url": url, "user": user}
+    (certstore.config_dir() / SETTINGS_FILE).write_text(json.dumps(stored, ensure_ascii=False), encoding="utf-8")
+    return stored
+
+
+def _refuse_unusable_address(url, user):
+    address = urlsplit(url)
+    if address.scheme not in ("http", "https") or not address.hostname:
+        raise ValueError("Adresa služby časových razítek musí začínat http:// nebo https://.")
+    if address.username or address.password:
+        raise ValueError("Jméno a heslo do adresy služby nepatří, jméno zadejte zvlášť.")
+    if user and address.scheme != "https":
+        raise ValueError("Služba s přihlášením musí mít adresu začínající https://, jinak by heslo šlo sítí nechráněné.")
+
+
+def service_time_stamper(password=None):
+    chosen = settings()
+    if chosen["service"] == PUBLIC_SERVICE:
+        return ServiceTimeStamper(PUBLIC_QUALIFIED_SERVICE)
+    _refuse_unusable_address(chosen["url"], chosen["user"])
+    return ServiceTimeStamper(chosen["url"], chosen["user"], password)
+
+
+class _Reply(core.Sequence):
+    # RFC 3161 leaves the token out of a refusal; asn1crypto's TimeStampResp cannot be read without one.
+    _fields = [("status", tsp.PKIStatusInfo), ("time_stamp_token", cms.ContentInfo, {"optional": True})]
+
+
+class ServiceTimeStamper(TimeStamper):
+    def __init__(self, url, user="", password=None):
+        super().__init__()
+        self.url = url
+        self.user = user
+        self.password = password
+
+    async def async_dummy_response(self, md_algorithm):
+        # pyHanko would ask the service for a throwaway token just to measure it; a paid service charges for that one too.
+        return cms.ContentInfo({"content_type": "data", "content": bytes(ROOM_FOR_TOKEN)})
+
+    async def async_timestamp(self, message_digest, md_algorithm):
+        try:
+            token = await super().async_timestamp(message_digest, md_algorithm)
+        except (TimestampRequestError, ValueError, KeyError, TypeError) as error:
+            raise TimeStampUnavailable("Služba časových razítek razítko nevydala.") from error
+        if len(token.dump()) > ROOM_FOR_TOKEN:
+            raise TimeStampUnavailable("Časové razítko od této služby je větší, než kolik místa na ně Blanketa v podpisu nechává.")
+        return token
+
+    async def async_request_tsa_response(self, req):
+        headers = {"Content-Type": "application/timestamp-query", "Accept": "application/timestamp-reply"}
+        if self.user:
+            credentials = f"{self.user}:{self.password or ''}".encode()
+            headers["Authorization"] = "Basic " + base64.b64encode(credentials).decode("ascii")
+        request = urllib.request.Request(self.url, data=req.dump(), headers=headers)
+        try:
+            with public_services.opener().open(request, timeout=SECONDS_TO_WAIT) as response:
+                reply = response.read(LONGEST_REPLY + 1)
+        except urllib.error.HTTPError as error:
+            if error.code in (401, 403):
+                raise TimeStampUnavailable("Služba časových razítek odmítla přihlášení. Zkontrolujte jméno a heslo.") from error
+            raise TimeStampUnavailable(f"Služba časových razítek odpověděla chybou {error.code}.") from error
+        except (OSError, ValueError) as error:
+            raise TimeStampUnavailable("Službu časových razítek se nepodařilo zastihnout.") from error
+        if len(reply) > LONGEST_REPLY:
+            raise TimeStampUnavailable("Služba časových razítek poslala příliš dlouhou odpověď.")
+        try:
+            granted = _Reply.load(reply)["status"]["status"].native == "granted"
+        except (ValueError, TypeError, KeyError) as error:
+            raise TimeStampUnavailable("Služba časových razítek neposlala časové razítko.") from error
+        if not granted:
+            raise TimeStampUnavailable("Služba časových razítek razítko nevydala.")
+        return tsp.TimeStampResp.load(reply)
