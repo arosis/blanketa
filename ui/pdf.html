@@ -15,6 +15,11 @@ __SHELL_STYLE__
   .annotationLayer .textWidgetAnnotation :is(input, textarea):focus { background-color: rgba(10, 100, 214, .14); }
   .zfo-sign-mode { border: 0; padding: 0; margin: 0 0 16px; display: grid; gap: 8px; }
   .zfo-dialog .zfo-sign-mode label { display: flex; align-items: center; gap: 8px; font-weight: 400; }
+  .zfo-time-stamp { border: 0; padding: 0; margin: 16px 0 0; display: grid; gap: 8px; }
+  .zfo-dialog .zfo-time-stamp label.zfo-choice { display: flex; align-items: center; gap: 8px; font-weight: 400; }
+  .zfo-time-stamp [data-time-stamp-details] { display: grid; gap: 8px; padding-left: 24px; }
+  .zfo-time-stamp [hidden] { display: none; }
+  .zfo-dialog .zfo-time-stamp p { margin: 0; font-size: 12px; }
   body.zfo-placing .pdfViewer .page { cursor: crosshair; }
   body.zfo-placing :is(.annotationLayer, .textLayer) { pointer-events: none; }
   .zfo-import-report ul { max-height: 160px; overflow: auto; margin: 4px 0 12px; padding-left: 20px; user-select: text; -webkit-user-select: text; }
@@ -104,9 +109,37 @@ __SHELL_STYLE__
       <label><input type="radio" name="mode" value="invisible">Neviditelný podpis</label>
     </fieldset>
     <label>Certifikát<span data-cert-slot></span></label>
+    <fieldset class="zfo-time-stamp" data-time-stamp>
+      <label class="zfo-choice"><input type="checkbox" data-time-stamp-enabled>Připojit časové razítko</label>
+      <div data-time-stamp-details hidden>
+        <label class="zfo-choice"><input type="radio" name="time-stamp-service" value="public" checked>Veřejná služba Sectigo (kvalifikovaná razítka)</label>
+        <label class="zfo-choice"><input type="radio" name="time-stamp-service" value="own">Vlastní služba</label>
+        <label data-time-stamp-own hidden>Adresa služby
+          <input type="url" class="zfo-cert" data-time-stamp-url placeholder="https://" autocomplete="off"></label>
+        <label data-time-stamp-own hidden>Jméno (jen když ho služba vyžaduje)
+          <input type="text" class="zfo-cert" data-time-stamp-user autocomplete="off"></label>
+        <label data-time-stamp-password hidden>Heslo ke službě
+          <input type="password" class="zfo-cert" autocomplete="off"></label>
+        <p>Službě se pošle jen otisk podpisu, ne dokument. Poskytovatel se dozví vaši IP adresu a čas podpisu.
+          Veřejná služba je bez záruky dostupnosti; heslo ke službě se neukládá. Zda je razítko kvalifikované,
+          ukáže po podpisu panel podpisů.</p>
+      </div>
+    </fieldset>
     <div class="zfo-dialog-buttons">
       <button class="zfo-btn" value="cancel">Zrušit</button>
       <button class="zfo-btn primary" value="sign">Podepsat a uložit</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="zfo-dialog" data-stamp-failed>
+  <form method="dialog">
+    <h2>Časové razítko se nepodařilo získat</h2>
+    <p data-stamp-failed-reason></p>
+    <p>Podpis zatím nevznikl. Bez razítka čas podpisu uvádí jen váš počítač.</p>
+    <div class="zfo-dialog-buttons">
+      <button class="zfo-btn" value="cancel">Zrušit</button>
+      <button class="zfo-btn primary" value="sign">Podepsat bez razítka</button>
     </div>
   </form>
 </dialog>

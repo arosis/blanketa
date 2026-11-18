@@ -83,7 +83,8 @@ Totéž platí pro `Blanketa.exe` z přenosné verze. Když tlačítko „Přes
 - Podpis PAdES (pyHanko):
   - do připraveného podpisového pole s razítkem;
   - nebo na místo, které uživatel vyznačí tažením myši;
-  - nebo neviditelně.
+  - nebo neviditelně;
+  - volitelně s kvalifikovaným časovým razítkem (viz [Časová razítka](#časová-razítka)).
 - Panel podpisů: totéž co u ZFO a navíc časová razítka (viz [Časová razítka](#časová-razítka)).
 - Tisk vyplněného souboru v plné kvalitě.
 
@@ -126,6 +127,7 @@ Stránky jsou na všech systémech stejné; s aplikací kolem sebe mluví přes 
 | `pdf_sign.py` | vyplnění a podpis PDF, ověření podpisů |
 | `certstore.py` | podpisové identity na všech systémech: klíčenka (`keychain.py` + `macsign`), úložiště Windows (`winsign.ps1`), soubory `.pfx`; důvěryhodnost certifikátů podle systému |
 | `trustlist.py`, `revocation.py` | důvěryhodné seznamy EU a seznamy zrušených certifikátů |
+| `time_stamps.py` | služba časových razítek při podepisování PDF a její nastavení |
 | `desktop.py` | okna aplikace pro Windows a Linux |
 | `linux_print.py` | náhled tisku PDF na Linuxu (PDFium) |
 | `ui/bridge.js` | spojení stránek s aplikací (macOS / Windows a Linux / prohlížeč), sdílený výběr certifikátu |
@@ -226,6 +228,8 @@ Systémy české kvalifikované autority (PostSignum, I.CA, eIdentity) většino
 ### Časová razítka
 
 U PDF Blanketa čte časové razítko v podpisu i razítko celého dokumentu. Čas potvrdí jen neporušené razítko služby, která byla v tu chvíli kvalifikovaná podle důvěryhodného seznamu EU, a to certifikátem určeným jen pro časová razítka. Když vydavatel certifikát zrušil, rozhoduje o platnosti podpisu právě tento čas. Razítko dokumentu pokrývá jen podpisy, které už v souboru byly, a pozdější razítko dokumentu podpis po zrušení certifikátu nezneplatní, jen čas nepotvrdí. Zda nebyl zrušen certifikát samotného razítka, se nekontroluje.
+
+Razítko jde připojit i při podepisování PDF: v dialogu podpisu se zaškrtne „Připojit časové razítko“ a vybere služba. Předvolená je veřejná služba Sectigo (`http://timestamp.sectigo.com/qualified`), která vydává kvalifikovaná razítka bez přihlášení, ale bez záruky dostupnosti a za podmínek jejího provozovatele. Kdo má smlouvu s jiným poskytovatelem (například PostSignum nebo I.CA), zadá adresu jeho služby a případně jméno; heslo se zadává při každém podpisu a neukládá se, a služba s přihlášením musí mít adresu `https://`. Službě odchází jen otisk podpisu (desítky bajtů), ne dokument; poskytovatel se dozví IP adresu a čas. Volba je vypnutá, dokud ji uživatel nezapne. U vlastní služby Blanketa předem neví, zda je kvalifikovaná; ukáže to po podpisu panel podpisů. Když razítko získat nejde nebo služba orazítkuje něco jiného než tento podpis, Blanketa nic neuloží, řekne proč a nabídne podpis bez razítka. Vznikne podpis s razítkem (PAdES-B-T); stav certifikátu pro dlouhodobé ověření (PAdES-LT) Blanketa k podpisu nepřikládá. Přihlášení ke službě certifikátem není podporované. Formuláře ZFO se podepisují bez razítka.
 
 ### Stav certifikátu uložený v PDF
 

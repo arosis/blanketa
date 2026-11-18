@@ -29,6 +29,7 @@ import lookups
 import pdf_form_data
 import pdf_sign
 import ruian
+import time_stamps
 import zfo_sign
 import zfo_verify
 from zfoengine import api as engine
@@ -60,6 +61,7 @@ MAX_SESSIONS = 8
 MAX_FILES_PREPARED_TO_SAVE = 4  # of one form; the user may ask for several attachments before a host fetched the first
 PLAIN_TEXT = "text/plain"
 PLAIN_TEXT_UTF8 = "text/plain; charset=utf-8"
+TIME_STAMP_UNAVAILABLE = 424
 HTML_UTF8 = "text/html; charset=utf-8"
 JSON = "application/json"
 STATIC_CONTENT_TYPES = {".js": "text/javascript", ".css": "text/css", ".png": "image/png"}
@@ -197,7 +199,8 @@ def render_pdf_page(name):
     pdf = form_path(name).read_bytes()
     session = new_session({"name": name, "pdf": pdf})
     return page_with_data(PDF_PAGE, {"session": session, "file": form_path(name).name,
-                                     "signatures": pdf_signatures(pdf), "info": pdf_info(pdf)})
+                                     "signatures": pdf_signatures(pdf), "info": pdf_info(pdf),
+                                     "time_stamp": time_stamps.settings()})
 
 
 def container_signatures(signatures):
@@ -232,11 +235,13 @@ def render_message_page(name):
                                          "signatures": signatures, "submitted": isds_message.submission_stamp(message)})
 
 
-def save_pdf(session, values, identity_id=None, placement=None, password=None):
+def save_pdf(session, values, identity_id=None, placement=None, password=None, time_stamp=None):
     name = session["name"]
     pdf = filled_pdf(session, values)
     if identity_id:
-        pdf = pdf_sign.sign_pdf(pdf, *certstore.load_identity(identity_id, password), placement=placement)
+        time_stamper = None if time_stamp is None else time_stamps.service_time_stamper(time_stamp.get("password"))
+        pdf = pdf_sign.sign_pdf(pdf, *certstore.load_identity(identity_id, password), placement=placement,
+                                time_stamper=time_stamper)
         target = output_path(name)
     else:
         target = form_path(name) if SINGLE_FILE else ROOT / "out" / f"{name}-ulozeny.pdf"
@@ -744,7 +749,9 @@ class Handler(BaseHTTPRequestHandler):
             values = request.get("values") or {}
             result = (write_pdf_for_printing(session, values) if url.path == "/pdf-print"
                       else save_pdf(session, values, first_query_value(url.query, "cert") or None,
-                                    request.get("placement"), request.get("password")))
+                                    request.get("placement"), request.get("password"), request.get("time_stamp")))
+        except time_stamps.TimeStampUnavailable as error:
+            return self._send_response(TIME_STAMP_UNAVAILABLE, str(error).encode(), PLAIN_TEXT_UTF8)
         except (LookupError, RuntimeError, ValueError, OSError) as error:
             return self._send_error_message(error)
         return self._send_json(result)
@@ -755,6 +762,13 @@ class Handler(BaseHTTPRequestHandler):
         except (LookupError, ValueError) as error:
             return self._send_error_message(error)
         return self._send_response(200, pdf, "application/pdf")
+
+    def _store_time_stamp_settings(self, body):
+        try:
+            stored = time_stamps.store_settings(json.loads(body or b"{}"))
+        except (ValueError, OSError) as error:
+            return self._send_error_message(error)
+        return self._send_json(stored)
 
     def _export_or_import_data(self, session, path, body):
         try:
@@ -800,6 +814,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._save_or_print_pdf(session, url, body)
             if url.path == "/pdf-print-document":
                 return self._send_pdf_for_printing(session, body)
+            if url.path == "/time-stamp-settings":
+                return self._store_time_stamp_settings(body)
             if url.path in ("/export-data", "/import-data"):
                 return self._export_or_import_data(session, url.path, body)
             if url.path in ("/pdf-export-data", "/pdf-import-data"):
