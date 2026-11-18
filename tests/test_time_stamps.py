@@ -1,83 +1,33 @@
 """A time stamp requested from a service while a PDF is being signed."""
-import asyncio
 import base64
+import hashlib
 import http.client
 import json
+import socket
 import tempfile
 import threading
 import unittest
-from datetime import datetime, timedelta, timezone
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
-from asn1crypto import keys as asn1_keys
 from asn1crypto import tsp
-from asn1crypto import x509 as asn1_x509
-from cryptography import x509
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
-from pyhanko.sign.timestamps import DummyTimeStamper
-from pyhanko_certvalidator.registry import SimpleCertificateStore
 from support import ROOT
+from time_stamp_service import CERT, KEY, STAMPED_AT, running_service, token_for
 
 import app
 import pdf_sign
 import time_stamps
 
 BLANK = (ROOT / "samples-pdf/zadost.pdf").read_bytes()
-STAMPED_AT = datetime(2026, 3, 2, 9, 30, tzinfo=timezone.utc)
 REJECTION_WITHOUT_A_TOKEN = bytes.fromhex("30053003020102")
-
-
-def issue(name, stamping=False):
-    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
-    subject = x509.Name([x509.NameAttribute(x509.NameOID.COUNTRY_NAME, "CZ"), x509.NameAttribute(x509.NameOID.COMMON_NAME, name)])
-    now = datetime.now(timezone.utc)
-    builder = (x509.CertificateBuilder().subject_name(subject).issuer_name(subject).public_key(key.public_key())
-               .serial_number(x509.random_serial_number()).not_valid_before(now - timedelta(days=1))
-               .not_valid_after(now + timedelta(days=365)))
-    if stamping:
-        builder = builder.add_extension(x509.ExtendedKeyUsage([x509.ExtendedKeyUsageOID.TIME_STAMPING]), critical=True)
-    return key, builder.sign(key, hashes.SHA256())
-
-
-KEY, CERT = issue("Testovaci Podepisujici")
-SERVICE_KEY, SERVICE_CERT = issue("Blanketa TEST TSA", stamping=True)
-ISSUES_TOKENS = DummyTimeStamper(
-    tsa_cert=asn1_x509.Certificate.load(SERVICE_CERT.public_bytes(serialization.Encoding.DER)),
-    tsa_key=asn1_keys.PrivateKeyInfo.load(SERVICE_KEY.private_bytes(
-        serialization.Encoding.DER, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())),
-    certs_to_embed=SimpleCertificateStore(), fixed_dt=STAMPED_AT)
-
-
-class Service(BaseHTTPRequestHandler):
-    def do_POST(self):
-        body = self.rfile.read(int(self.headers["Content-Length"]))
-        self.server.asked.append((dict(self.headers), body))
-        status, reply = self.server.answer(body)
-        self.send_response(status)
-        self.send_header("Content-Length", str(len(reply)))
-        self.end_headers()
-        self.wfile.write(reply)
-
-    def log_message(self, *_):
-        pass
-
-
-def token_for(body):
-    return 200, asyncio.run(ISSUES_TOKENS.async_request_tsa_response(tsp.TimeStampReq.load(body))).dump()
 
 
 class ServiceRunning(unittest.TestCase):
     def setUp(self):
-        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Service)
-        self.server.asked = []
-        self.server.answer = token_for
-        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.server, self.url = running_service()
         self.addCleanup(self.server.server_close)
         self.addCleanup(self.server.shutdown)
-        self.url = f"http://127.0.0.1:{self.server.server_address[1]}/tsa"
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         patcher = mock.patch.object(time_stamps.certstore, "config_dir", return_value=Path(folder.name))
@@ -134,7 +84,7 @@ class StampWhileSigning(ServiceRunning):
 class ServiceThatFails(ServiceRunning):
     def test_refused_login_says_to_check_name_and_password(self):
         self.server.answer = lambda _body: (401, b"")
-        self.assertIn("jméno a heslo", self.refusal(user="uzivatel", password="spatne"))
+        self.assertIn("jméno a heslo", self.refusal(user="uzivatel", password="spatne"))
 
     def test_error_of_the_service_names_its_code(self):
         self.server.answer = lambda _body: (503, b"")
@@ -160,6 +110,38 @@ class ServiceThatFails(ServiceRunning):
         self.server.shutdown()
         self.server.server_close()
         self.assertIn("nepodařilo zastihnout", self.refusal())
+
+    def test_service_that_does_not_speak_http_is_reported(self):
+        listening = socket.create_server(("127.0.0.1", 0))
+        self.addCleanup(listening.close)
+
+        def answer_without_http():
+            connection, _ = listening.accept()
+            connection.recv(4096)
+            connection.sendall(b"NOT HTTP AT ALL\r\n\r\n")
+            connection.close()
+
+        threading.Thread(target=answer_without_http, daemon=True).start()
+        self.url = f"http://127.0.0.1:{listening.getsockname()[1]}/tsa"
+        self.assertIn("nepodařilo zastihnout", self.refusal())
+
+    def test_address_with_a_space_is_reported(self):
+        self.url = self.url.replace("/tsa", "/t sa")
+        self.assertIn("nepodařilo zastihnout", self.refusal())
+
+    def test_reply_that_drips_is_given_up(self):
+        self.server.seconds_between_bytes = 0.05
+        with mock.patch.object(time_stamps, "SECONDS_TO_WAIT", 0.3), mock.patch.object(time_stamps, "BYTES_READ_AT_ONCE", 1):
+            self.assertIn("neodpověděla včas", self.refusal())
+
+    def test_stamp_over_something_else_is_refused(self):
+        def stamp_of_another_document(body):
+            request = tsp.TimeStampReq.load(body)
+            request["message_imprint"]["hashed_message"] = hashlib.sha256(b"jiny dokument").digest()
+            return token_for(request.dump())
+
+        self.server.answer = stamp_of_another_document
+        self.assertIn("něco jiného", self.refusal())
 
     def test_redirect_is_not_followed(self):
         self.server.answer = lambda _body: (302, b"")
@@ -188,6 +170,15 @@ class Settings(ServiceRunning):
         (time_stamps.certstore.config_dir() / time_stamps.SETTINGS_FILE).write_text(
             '{"enabled": "yes", "service": 5, "url": null, "user": "uzivatel"}', encoding="utf-8")
         self.assertEqual(time_stamps.settings(), {"enabled": False, "service": "public", "url": "", "user": "uzivatel"})
+
+    def test_unknown_service_falls_back_to_the_public_one(self):
+        (time_stamps.certstore.config_dir() / time_stamps.SETTINGS_FILE).write_text(
+            '{"enabled": true, "service": "jina\\"]", "url": "", "user": ""}', encoding="utf-8")
+        self.assertEqual(time_stamps.settings()["service"], "public")
+
+    def test_settings_that_are_no_object_are_refused(self):
+        with self.assertRaises(ValueError):
+            time_stamps.store_settings(["enabled"])
 
     def test_own_service_needs_a_web_address(self):
         for address in ("", "tsa.example.cz", "file:///etc/passwd", "ftp://tsa.example.cz"):

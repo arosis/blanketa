@@ -22,6 +22,7 @@ from pypdf import PdfWriter  # noqa: E402
 import asic_verify  # noqa: E402
 import certstore  # noqa: E402
 import pdf_sign  # noqa: E402
+import time_stamps  # noqa: E402
 import zfo_sign  # noqa: E402
 import zfo_verify  # noqa: E402
 
@@ -50,6 +51,17 @@ def main(source, password=None):
     assert sigs and sigs[-1]["intact"] and pdf_sign.form_fields(pdf).get("jmeno") == "Jana Nováková", \
         "encrypted PDF does not fill or verify"
 
+    sys.path.insert(0, str(ROOT / "tests"))
+    import time_stamp_service
+    service, address = time_stamp_service.running_service()
+    pdf = pdf_sign.sign_pdf((ROOT / "samples-pdf/zadost.pdf").read_bytes(), key, cert,
+                            time_stamper=time_stamps.ServiceTimeStamper(address))
+    service.shutdown()
+    sigs = pdf_sign.describe_signatures(pdf)
+    print("pdf with a time stamp:", [(s["intact"], [(stamp["intact"], stamp["issuer"]) for stamp in s["stamps"]]) for s in sigs])
+    assert sigs[-1]["intact"] and [(stamp["intact"], stamp["issuer"]) for stamp in sigs[-1]["stamps"]] \
+        == [(True, time_stamp_service.SERVICE_NAME)], "PDF signature with a time stamp does not verify"
+
     fo = zipfile.ZipFile(ROOT / "samples/cuzk/form.zfo").read("form.fo")
     signed = zfo_sign.sign_form(fo, key, cert, "sha256")
     root = etree.parse(io.BytesIO(signed), etree.XMLParser(huge_tree=True)).getroot()
@@ -57,7 +69,6 @@ def main(source, password=None):
     print("zfo:", [(l["subject"], l["intact"]) for l in layers])
     assert layers[0]["intact"] and layers[0]["subject"] == found[0]["subject"], "ZFO signature does not verify"
 
-    sys.path.insert(0, str(ROOT / "tests"))
     import asic_samples
     files = {"smlouva.pdf": b"%PDF-1.7 selftest"}
     signatures = asic_samples.signatures_xml(asic_samples.xades_signature(files, key=key, cert=cert))

@@ -766,7 +766,7 @@ class Handler(BaseHTTPRequestHandler):
     def _store_time_stamp_settings(self, body):
         try:
             stored = time_stamps.store_settings(json.loads(body or b"{}"))
-        except (ValueError, OSError, AttributeError) as error:
+        except (ValueError, OSError) as error:
             return self._send_error_message(error)
         return self._send_json(stored)
 

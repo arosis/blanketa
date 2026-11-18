@@ -1,5 +1,7 @@
 import base64
+import http.client
 import json
+import time
 import urllib.error
 import urllib.request
 from urllib.parse import urlsplit
@@ -17,6 +19,7 @@ SETTINGS_FILE = "time-stamps.json"
 ROOM_FOR_TOKEN = 16 * 1024
 LONGEST_REPLY = 256 * 1024
 SECONDS_TO_WAIT = 20
+BYTES_READ_AT_ONCE = 16 * 1024
 NO_SETTINGS = {"enabled": False, "service": PUBLIC_SERVICE, "url": "", "user": ""}
 
 
@@ -31,11 +34,16 @@ def settings():
         return dict(NO_SETTINGS)
     if not isinstance(stored, dict):
         return dict(NO_SETTINGS)
-    return {name: stored[name] if isinstance(stored.get(name), type(default)) else default
+    kept = {name: stored[name] if isinstance(stored.get(name), type(default)) else default
             for name, default in NO_SETTINGS.items()}
+    if kept["service"] not in (PUBLIC_SERVICE, OWN_SERVICE):
+        kept["service"] = PUBLIC_SERVICE
+    return kept
 
 
 def store_settings(wanted):
+    if not isinstance(wanted, dict):
+        raise ValueError("Nastavení časových razítek nemá očekávaný tvar.")
     service = OWN_SERVICE if wanted.get("service") == OWN_SERVICE else PUBLIC_SERVICE
     url = str(wanted.get("url") or "").strip()
     user = str(wanted.get("user") or "").strip()
@@ -51,9 +59,9 @@ def _refuse_unusable_address(url, user):
     if address.scheme not in ("http", "https") or not address.hostname:
         raise ValueError("Adresa služby časových razítek musí začínat http:// nebo https://.")
     if address.username or address.password:
-        raise ValueError("Jméno a heslo do adresy služby nepatří, jméno zadejte zvlášť.")
+        raise ValueError("Jméno a heslo do adresy služby nepatří, jméno zadejte zvlášť.")
     if user and address.scheme != "https":
-        raise ValueError("Služba s přihlášením musí mít adresu začínající https://, jinak by heslo šlo sítí nechráněné.")
+        raise ValueError("Služba s přihlášením musí mít adresu začínající https://, jinak by heslo šlo sítí nechráněné.")
 
 
 def service_time_stamper(password=None):
@@ -62,6 +70,23 @@ def service_time_stamper(password=None):
         return ServiceTimeStamper(PUBLIC_QUALIFIED_SERVICE)
     _refuse_unusable_address(chosen["url"], chosen["user"])
     return ServiceTimeStamper(chosen["url"], chosen["user"], password)
+
+
+def _stamped_digest(token):
+    return token["content"]["encap_content_info"]["content"].parsed["message_imprint"]["hashed_message"].native
+
+
+def _reply_read_until(give_up_at, response):
+    # The connection's own timeout restarts with every byte; a service that drips its reply would hold the signing for hours.
+    reply = b""
+    while len(reply) <= LONGEST_REPLY:
+        if time.monotonic() > give_up_at:
+            raise TimeStampUnavailable("Služba časových razítek neodpověděla včas.")
+        part = response.read1(BYTES_READ_AT_ONCE)
+        if not part:
+            break
+        reply += part
+    return reply
 
 
 class _Reply(core.Sequence):
@@ -83,10 +108,13 @@ class ServiceTimeStamper(TimeStamper):
     async def async_timestamp(self, message_digest, md_algorithm):
         try:
             token = await super().async_timestamp(message_digest, md_algorithm)
-        except (TimestampRequestError, ValueError, KeyError, TypeError) as error:
+            stamped = _stamped_digest(token)
+        except (TimestampRequestError, ValueError, KeyError, TypeError, AttributeError) as error:
             raise TimeStampUnavailable("Služba časových razítek razítko nevydala.") from error
+        if stamped != message_digest:
+            raise TimeStampUnavailable("Služba časových razítek orazítkovala něco jiného než tento podpis.")
         if len(token.dump()) > ROOM_FOR_TOKEN:
-            raise TimeStampUnavailable("Časové razítko od této služby je větší, než kolik místa na ně Blanketa v podpisu nechává.")
+            raise TimeStampUnavailable("Časové razítko od této služby je větší, než kolik místa na ně Blanketa v podpisu nechává.")
         return token
 
     async def async_request_tsa_response(self, req):
@@ -95,14 +123,15 @@ class ServiceTimeStamper(TimeStamper):
             credentials = f"{self.user}:{self.password or ''}".encode()
             headers["Authorization"] = "Basic " + base64.b64encode(credentials).decode("ascii")
         request = urllib.request.Request(self.url, data=req.dump(), headers=headers)
+        give_up_at = time.monotonic() + SECONDS_TO_WAIT
         try:
             with public_services.opener().open(request, timeout=SECONDS_TO_WAIT) as response:
-                reply = response.read(LONGEST_REPLY + 1)
+                reply = _reply_read_until(give_up_at, response)
         except urllib.error.HTTPError as error:
             if error.code in (401, 403):
-                raise TimeStampUnavailable("Služba časových razítek odmítla přihlášení. Zkontrolujte jméno a heslo.") from error
+                raise TimeStampUnavailable("Služba časových razítek odmítla přihlášení. Zkontrolujte jméno a heslo.") from error
             raise TimeStampUnavailable(f"Služba časových razítek odpověděla chybou {error.code}.") from error
-        except (OSError, ValueError) as error:
+        except (OSError, ValueError, http.client.HTTPException) as error:
             raise TimeStampUnavailable("Službu časových razítek se nepodařilo zastihnout.") from error
         if len(reply) > LONGEST_REPLY:
             raise TimeStampUnavailable("Služba časových razítek poslala příliš dlouhou odpověď.")

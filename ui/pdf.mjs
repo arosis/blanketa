@@ -287,7 +287,7 @@ const signWithoutStampIfWanted = (reason, placement) => {
   stampFailedDialog.showModal();
 };
 const signWith = async (placement, stamp = timeStamp.wanted()) => {
-  setStatus(stamp ? 'Podepisuji a žádám o časové razítko…' : 'Podepisuji… (token si může vyžádat PIN)');
+  setStatus(stamp ? 'Podepisuji a žádám o časové razítko…' : 'Podepisuji… (token si může vyžádat PIN)');
   try {
     await showSavedDocument(await postChangedValues('/pdf-save', '&cert=' + encodeURIComponent(certSelect.value),
                            {placement, password: certificates.password(), time_stamp: stamp}), 'Podepsáno a uloženo jako');
