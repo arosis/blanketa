@@ -33,7 +33,7 @@ def pyinstaller():
             "--specpath", str(ROOT / "build"), "--icon", str(ROOT / "assets/blanketa.ico"),
             *data(f"{EDITOR}/xslt", f"{EDITOR}/xslt"), *data(f"{EDITOR}/scripts", f"{EDITOR}/scripts"),
             *data(f"{EDITOR}/styles", f"{EDITOR}/styles"), *data("ui", "ui"), *data("vendor/pdfjs", "vendor/pdfjs"),
-            *data("assets/blanketa.png", "assets"),
+            *data("assets/blanketa.png", "assets"), *data("VERSION", "."),
             "--collect-all", "pyhanko", "--collect-all", "pyhanko_certvalidator", "--collect-all", "uharfbuzz",
             "--collect-submodules", "fontTools", "--collect-data", "tzdata", "--collect-data", "certifi", "--collect-submodules", "zfoengine",
             "--hidden-import", "app", "--hidden-import", "lxml._elementpath", "--collect-all", "webview"]

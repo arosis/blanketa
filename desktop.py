@@ -310,7 +310,7 @@ class DesktopApp:
                 page_action("Nápověda k poli", "help"),
                 page_action("Informace o formuláři a podpisech", "panel"),
             ]),
-            Menu("Nápověda", [page_action("Podpořit Blanketu…", "support")]),
+            Menu("Nápověda", [page_action("O aplikaci Blanketa", "about"), page_action("Podpořit Blanketu…", "support")]),
         ]
 
     def run(self, paths):

@@ -137,6 +137,69 @@ window.zfoSupport = (() => {
   };
 })();
 
+window.zfoAbout = (() => {
+  const LINKS = [
+    {title: 'Web blanketa.cz', url: 'https://blanketa.cz'},
+    {title: 'Zdrojový kód', url: 'https://github.com/arosis/blanketa'},
+    {title: 'Nahlásit chybu nebo navrhnout zlepšení', url: 'https://github.com/arosis/blanketa/issues'},
+  ];
+  let dialog;
+  return () => {
+    if (!dialog) {
+      const version = JSON.parse(document.querySelector('script[data-zfo-page]')?.textContent || '{}').version;
+      dialog = document.createElement('dialog');
+      dialog.className = 'zfo-dialog zfo-about';
+      dialog.innerHTML = `<style>
+          .zfo-about { width: 400px; font: 13px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif; }
+          .zfo-about h2 { margin-bottom: 0; }
+          .zfo-about-version { margin: 0 0 10px; color: #6e6e73; }
+          .zfo-about dl { margin: 10px 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; }
+          .zfo-about dt { color: #6e6e73; }
+          .zfo-about dd { margin: 0; }
+          .zfo-about ul { margin: 6px 0 12px; padding-left: 18px; }
+          .zfo-about a { color: var(--accent, #0a64d6); cursor: pointer; }
+        </style>
+        <h2>Blanketa</h2>
+        <p class="zfo-about-version" data-version></p>
+        <p>Vyplňování, podepisování a ověřování úředních formulářů 602XML (.zfo) a PDF na macOS, Windows a Linuxu.</p>
+        <dl><dt>Autor</dt><dd><a href="https://winkler-bejrovi.cz">Richard Winkler Bejr</a></dd>
+          <dt>Licence</dt><dd>Svobodný software pod licencí
+            <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL 3.0</a></dd></dl>
+        <ul data-links></ul>
+        <p>Blanketa je zdarma a žije z dobrovolných příspěvků.</p>
+        <div class="zfo-dialog-buttons">
+          <button type="button" class="zfo-btn" data-support>Podpořit Blanketu…</button>
+          <button type="button" class="zfo-btn primary" data-close>Zavřít</button></div>`;
+      dialog.querySelector('[data-version]').textContent = version ? `Verze ${version}` : '';
+      for (const link of LINKS) {
+        const item = document.createElement('li');
+        const anchor = document.createElement('a');
+        anchor.href = link.url;
+        anchor.textContent = link.title;
+        item.append(anchor);
+        dialog.querySelector('[data-links]').append(item);
+      }
+      dialog.querySelector('[data-support]').addEventListener('click', () => { dialog.close(); window.zfoSupport(); });
+      dialog.querySelector('[data-close]').addEventListener('click', () => dialog.close());
+      document.body.append(dialog);
+    }
+    dialog.showModal();
+  };
+})();
+
+// After a signature is saved, never while filling in or signing: a line in the status bar, at most once in a while.
+window.zfoSupportReminder = async (sessionToken, status) => {
+  const ask = action => fetch('/support-reminder?s=' + sessionToken, {method: 'POST', body: JSON.stringify({action})})
+    .then(response => (response.ok ? response.json() : {show: false})).catch(() => ({show: false}));
+  if (!(await ask('offer')).show) return;
+  const reminder = document.createElement('span');
+  reminder.className = 'zfo-support-reminder';
+  reminder.innerHTML = ` · Blanketa je zdarma – <a data-support>podpořit vývoj</a> · <a data-hide>Už nezobrazovat</a>`;
+  reminder.querySelector('[data-support]').addEventListener('click', () => window.zfoSupport());
+  reminder.querySelector('[data-hide]').addEventListener('click', () => { reminder.remove(); ask('hide'); });
+  status.append(reminder);
+};
+
 // Links in a form (fo:basic-link) or a PDF never navigate the app window: a web page there could reach the host.
 // Web links open in the system browser, links within the page keep working, anything else (javascript:, file:) is
 // dropped.

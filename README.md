@@ -25,7 +25,9 @@ Formuláře podepsané Blanketou otevře i Software602 Form Filler a podpis uzn�
 Blanketa je zdarma a zdarma zůstane. Pokud vám ušetřila čas, můžete na její další vývoj přispět libovolnou částkou
 převodem na účet **7133557349/0800** (IBAN CZ43 0800 0000 0071 3355 7349) nebo kartou přes
 [GitHub Sponsors](https://github.com/sponsors/arosis) či [Ko-fi](https://ko-fi.com/rivel_arosis). QR platbu najdete v aplikaci pod
-„Podpořit Blanketu“ (na Macu v menu Blanketa, jinde v menu Nápověda). Děkuji!
+„Podpořit Blanketu“ (na Macu v menu Blanketa, jinde v menu Nápověda), kde je i okno „O aplikaci Blanketa“ s verzí,
+licencí a odkazy. Po podpisu se ve stavovém řádku nejvýš jednou za 14 dní objeví nenápadná připomínka příspěvku;
+volbou „Už nezobrazovat“ zmizí natrvalo. Děkuji!
 
 ## Stažení a instalace
 
@@ -128,6 +130,7 @@ Stránky jsou na všech systémech stejné; s aplikací kolem sebe mluví přes 
 | `certstore.py` | podpisové identity na všech systémech: klíčenka (`keychain.py` + `macsign`), úložiště Windows (`winsign.ps1`), soubory `.pfx`; důvěryhodnost certifikátů podle systému |
 | `trustlist.py`, `revocation.py` | důvěryhodné seznamy EU a seznamy zrušených certifikátů |
 | `time_stamps.py` | služba časových razítek při podepisování PDF a její nastavení |
+| `support_reminder.py` | kdy po podpisu připomenout možnost přispět na vývoj |
 | `desktop.py` | okna aplikace pro Windows a Linux |
 | `linux_print.py` | náhled tisku PDF na Linuxu (PDFium) |
 | `ui/bridge.js` | spojení stránek s aplikací (macOS / Windows a Linux / prohlížeč), sdílený výběr certifikátu |

@@ -384,6 +384,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func applicationMenu() -> NSMenuItem {
         submenuItem([
+            formItem("O aplikaci Blanketa", "about"),
             formItem("Podpořit Blanketu…", "support"),
             .separator(),
             NSMenuItem(title: "Ukončit Blanketu", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"),
