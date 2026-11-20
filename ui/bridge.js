@@ -141,7 +141,7 @@ window.zfoAbout = (() => {
   const LINKS = [
     {title: 'Web blanketa.cz', url: 'https://blanketa.cz'},
     {title: 'Zdrojový kód', url: 'https://github.com/arosis/blanketa'},
-    {title: 'Nahlásit chybu nebo navrhnout zlepšení', url: 'https://github.com/arosis/blanketa/issues'},
+    {title: 'Navrhnout zlepšení', url: 'https://github.com/arosis/blanketa/issues'},
   ];
   let dialog;
   return () => {
@@ -157,7 +157,8 @@ window.zfoAbout = (() => {
           .zfo-about dt { color: #6e6e73; }
           .zfo-about dd { margin: 0; }
           .zfo-about ul { margin: 6px 0 12px; padding-left: 18px; }
-          .zfo-about a { color: var(--accent, #0a64d6); cursor: pointer; }
+          .zfo-about a, .zfo-about-link { color: var(--accent, #0a64d6); cursor: pointer; }
+          .zfo-about-link { padding: 0; border: 0; background: none; font: inherit; text-decoration: underline; }
         </style>
         <h2>Blanketa</h2>
         <p class="zfo-about-version" data-version></p>
@@ -165,7 +166,7 @@ window.zfoAbout = (() => {
         <dl><dt>Autor</dt><dd><a href="https://winkler-bejrovi.cz">Richard Winkler Bejr</a></dd>
           <dt>Licence</dt><dd>Svobodný software pod licencí
             <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL 3.0</a></dd></dl>
-        <ul data-links></ul>
+        <ul data-links><li><button type="button" class="zfo-about-link" data-report>Nahlásit chybu…</button></li></ul>
         <p>Blanketa je zdarma a žije z dobrovolných příspěvků.</p>
         <div class="zfo-dialog-buttons">
           <button type="button" class="zfo-btn" data-support>Podpořit Blanketu…</button>
@@ -180,10 +181,90 @@ window.zfoAbout = (() => {
         dialog.querySelector('[data-links]').append(item);
       }
       dialog.querySelector('[data-support]').addEventListener('click', () => { dialog.close(); window.zfoSupport(); });
+      dialog.querySelector('[data-report]').addEventListener('click', () => { dialog.close(); window.zfoReportError(); });
       dialog.querySelector('[data-close]').addEventListener('click', () => dialog.close());
       document.body.append(dialog);
     }
     dialog.showModal();
+  };
+})();
+
+window.zfoReportError = (() => {
+  const ADDRESS = 'podpora@blanketa.cz';
+  const MAX_ERRORS = 5;
+  const MAX_ENCODED_BODY = 1800;
+  const pageErrors = [];
+  const scriptName = url => { try { return new URL(url).pathname.split('/').pop(); } catch { return ''; } };
+  const remember = (message, file, line) => {
+    const place = file ? ` (${scriptName(file)}:${line || '?'})` : '';
+    pageErrors.push(String(message).slice(0, 200) + place);
+    if (pageErrors.length > MAX_ERRORS) pageErrors.shift();
+  };
+  window.addEventListener('error', event => remember(event.message, event.filename, event.lineno));
+  window.addEventListener('unhandledrejection', event => remember(event.reason?.message ?? event.reason));
+
+  const pageData = () => JSON.parse(document.querySelector('script[data-zfo-page]')?.textContent || '{}');
+  const template = () => {
+    const data = pageData();
+    const errors = pageErrors.length ? pageErrors.map(error => `- ${error}`).join('\n') : '- žádné';
+    return `Co se stalo a co jste dělali těsně předtím:\n\n\n`
+      + `Kontakt pro doplňující dotaz (nepovinné):\n\n\n`
+      + `— Technické údaje (můžete je upravit nebo smazat) —\n`
+      + `Blanketa: ${data.app_version || '?'}\n`
+      + `Systém: ${data.system || navigator.platform}\n`
+      + `Dokument: ${data.document || 'neuvedený'}\n`
+      + `Chyby na stránce:\n${errors}\n`;
+  };
+  const fitIntoMailLink = text => {
+    if (encodeURIComponent(text).length <= MAX_ENCODED_BODY) return text;
+    let shortened = text;
+    while (encodeURIComponent(shortened + '…').length > MAX_ENCODED_BODY) shortened = shortened.slice(0, -20);
+    return shortened + '…';
+  };
+
+  let dialog;
+  return () => {
+    if (!dialog) {
+      dialog = document.createElement('dialog');
+      dialog.className = 'zfo-dialog zfo-report';
+      dialog.innerHTML = `<style>
+          .zfo-report { width: 480px; font: 13px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif; }
+          .zfo-report textarea { box-sizing: border-box; width: 100%; height: 260px; font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; }
+          .zfo-report-note { margin: 8px 0 0; font-size: 12px; color: #6e6e73; }
+          .zfo-report-note b { user-select: text; -webkit-user-select: text; }
+        </style>
+        <h2>Nahlásit chybu</h2>
+        <p>Popište, co se stalo. Hlášení odejde až z vaší pošty a neobsahuje vyplněné údaje, názvy souborů ani certifikáty.
+          Před odesláním ho můžete libovolně upravit.</p>
+        <textarea data-report-text spellcheck="false" aria-label="Text hlášení"></textarea>
+        <p class="zfo-report-note">Hlášení čte jen autor Blankety. Pokud se pošta neotevře, zkopírujte text a pošlete ho
+          na <b data-address></b>.</p>
+        <div class="zfo-dialog-buttons">
+          <button type="button" class="zfo-btn" data-copy>Zkopírovat text</button>
+          <button type="button" class="zfo-btn" data-close>Zrušit</button>
+          <button type="button" class="zfo-btn primary" data-send>Otevřít v poště</button></div>`;
+      dialog.querySelector('[data-address]').textContent = ADDRESS;
+      const text = dialog.querySelector('[data-report-text]');
+      const subject = () => `Hlášení chyby – Blanketa ${pageData().app_version || ''}`.trim();
+      dialog.querySelector('[data-copy]').addEventListener('click', async event => {
+        try { await navigator.clipboard.writeText(text.value); event.target.textContent = 'Zkopírováno'; }
+        catch { text.select(); document.execCommand('copy'); event.target.textContent = 'Zkopírováno'; }
+      });
+      dialog.querySelector('[data-send]').addEventListener('click', () => {
+        const message = {action: 'reportError', subject: subject(), body: fitIntoMailLink(text.value)};
+        if (window.zfoNative) window.zfoNative.postMessage(message);
+        else window.location.href = `mailto:${ADDRESS}?subject=${encodeURIComponent(message.subject)}&body=${encodeURIComponent(message.body)}`;
+        dialog.close();
+      });
+      dialog.querySelector('[data-close]').addEventListener('click', () => dialog.close());
+      document.body.append(dialog);
+    }
+    const text = dialog.querySelector('[data-report-text]');
+    text.value = template();
+    dialog.querySelector('[data-copy]').textContent = 'Zkopírovat text';
+    dialog.showModal();
+    const answerLine = text.value.indexOf('\n') + 1;
+    text.setSelectionRange(answerLine, answerLine);
   };
 })();
 

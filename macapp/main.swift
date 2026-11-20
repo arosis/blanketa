@@ -31,6 +31,17 @@ enum AttachmentRequest {
     }
 }
 
+enum ErrorReport {
+    static let address = "podpora@blanketa.cz"
+    private static let unreserved = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+
+    static func mailLink(subject: String, body: String) -> URL? {
+        guard let subject = subject.addingPercentEncoding(withAllowedCharacters: unreserved),
+              let body = body.addingPercentEncoding(withAllowedCharacters: unreserved) else { return nil }
+        return URL(string: "mailto:\(address)?subject=\(subject)&body=\(body)")
+    }
+}
+
 final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUIDelegate, WKNavigationDelegate {
     let window: NSWindow
     let webView: WKWebView
@@ -132,6 +143,11 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
             }
         case "openUrl":
             if let link = body["url"] as? String, let url = URL(string: link), ["http", "https"].contains(url.scheme) {
+                NSWorkspace.shared.open(url)
+            }
+        case "reportError":
+            if let subject = body["subject"] as? String, let text = body["body"] as? String,
+               let url = ErrorReport.mailLink(subject: subject, body: text) {
                 NSWorkspace.shared.open(url)
             }
         case "saveFile":
@@ -386,6 +402,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         submenuItem([
             formItem("O aplikaci Blanketa", "about"),
             formItem("Podpořit Blanketu…", "support"),
+            formItem("Nahlásit chybu…", "report-error"),
             .separator(),
             NSMenuItem(title: "Ukončit Blanketu", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"),
         ])

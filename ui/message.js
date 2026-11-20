@@ -125,6 +125,7 @@ const actions = {
   open: () => native?.postMessage({action: 'open'}),
   support: () => zfoSupport(),
   about: () => zfoAbout(),
+  'report-error': () => zfoReportError(),
   panel: () => {
     const hidden = document.body.classList.toggle('panel-hidden');
     queryOne('.zfo-bar [data-action="panel"]').classList.toggle('active', !hidden);
