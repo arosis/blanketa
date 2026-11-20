@@ -193,15 +193,18 @@ window.zfoReportError = (() => {
   const ADDRESS = 'podpora@blanketa.cz';
   const MAX_ERRORS = 5;
   const MAX_ENCODED_BODY = 1800;
+  const SHORTENED_NOTE = '\n…\n[Text se do odkazu pro poštu celý nevešel. Celý je ve schránce – vložte ho sem místo tohoto.]';
   const pageErrors = [];
   const scriptName = url => { try { return new URL(url).pathname.split('/').pop(); } catch { return ''; } };
-  const remember = (message, file, line) => {
+  const withoutQuotedValues = message => String(message)
+    .replace(/"[^"]*"|'[^']*'|„[^“]*“|`[^`]*`/g, '…').replace(/\d{4,}/g, '…').slice(0, 200);
+  const record = (message, file, line) => {
     const place = file ? ` (${scriptName(file)}:${line || '?'})` : '';
-    pageErrors.push(String(message).slice(0, 200) + place);
+    pageErrors.push(withoutQuotedValues(message) + place);
     if (pageErrors.length > MAX_ERRORS) pageErrors.shift();
   };
-  window.addEventListener('error', event => remember(event.message, event.filename, event.lineno));
-  window.addEventListener('unhandledrejection', event => remember(event.reason?.message ?? event.reason));
+  window.addEventListener('error', event => record(event.message, event.filename, event.lineno));
+  window.addEventListener('unhandledrejection', event => record(event.reason?.message ?? event.reason));
 
   const pageData = () => JSON.parse(document.querySelector('script[data-zfo-page]')?.textContent || '{}');
   const template = () => {
@@ -218,12 +221,15 @@ window.zfoReportError = (() => {
   const fitIntoMailLink = text => {
     if (encodeURIComponent(text).length <= MAX_ENCODED_BODY) return text;
     let shortened = text;
-    while (encodeURIComponent(shortened + '…').length > MAX_ENCODED_BODY) shortened = shortened.slice(0, -20);
-    return shortened + '…';
+    while (encodeURIComponent(shortened + SHORTENED_NOTE).length > MAX_ENCODED_BODY) shortened = shortened.slice(0, -20);
+    return shortened + SHORTENED_NOTE;
+  };
+  const copy = async (text, textarea) => {
+    try { await navigator.clipboard.writeText(text); } catch { textarea.select(); document.execCommand('copy'); }
   };
 
   let dialog;
-  return () => {
+  const open = () => {
     if (!dialog) {
       dialog = document.createElement('dialog');
       dialog.className = 'zfo-dialog zfo-report';
@@ -247,11 +253,13 @@ window.zfoReportError = (() => {
       const text = dialog.querySelector('[data-report-text]');
       const subject = () => `Hlášení chyby – Blanketa ${pageData().app_version || ''}`.trim();
       dialog.querySelector('[data-copy]').addEventListener('click', async event => {
-        try { await navigator.clipboard.writeText(text.value); event.target.textContent = 'Zkopírováno'; }
-        catch { text.select(); document.execCommand('copy'); event.target.textContent = 'Zkopírováno'; }
+        await copy(text.value, text);
+        event.target.textContent = 'Zkopírováno';
       });
-      dialog.querySelector('[data-send]').addEventListener('click', () => {
-        const message = {action: 'reportError', subject: subject(), body: fitIntoMailLink(text.value)};
+      dialog.querySelector('[data-send]').addEventListener('click', async () => {
+        const body = fitIntoMailLink(text.value);
+        if (body !== text.value) await copy(text.value, text);
+        const message = {action: 'reportError', subject: subject(), body};
         if (window.zfoNative) window.zfoNative.postMessage(message);
         else window.location.href = `mailto:${ADDRESS}?subject=${encodeURIComponent(message.subject)}&body=${encodeURIComponent(message.body)}`;
         dialog.close();
@@ -266,6 +274,7 @@ window.zfoReportError = (() => {
     const answerLine = text.value.indexOf('\n') + 1;
     text.setSelectionRange(answerLine, answerLine);
   };
+  return Object.assign(open, {record, template, fitIntoMailLink});
 })();
 
 window.zfoSupportReminder = async (sessionToken, status) => {

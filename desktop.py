@@ -36,7 +36,7 @@ def is_print_file(path):
 
 def open_with_system(path):
     if IS_WINDOWS:
-        os.startfile(path)  # noqa: S606 - a file the app itself wrote
+        os.startfile(path)  # noqa: S606 - a file the app itself wrote, or a mailto: link to the fixed project address
     else:
         subprocess.Popen(["xdg-open", str(path)])
 

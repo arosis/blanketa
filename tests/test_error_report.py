@@ -1,11 +1,13 @@
 """Reporting an error by e-mail: what the report carries and where the hosts send it."""
 import json
+import platform
 import re
+import sys
 import unittest
 from unittest import mock
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
-from support import ROOT
+from support import ROOT, needs_node, run_ui_scripts
 
 import app
 import desktop
@@ -31,8 +33,11 @@ class MailLink(unittest.TestCase):
             with self.subTest(subject=subject, body=body):
                 self.assertIsNone(error_report.mail_link(subject, body))
 
-    def test_names_the_system(self):
-        self.assertRegex(error_report.system_description(), r"^(macOS|Windows|\S.*) .*\(.+\)$")
+    def test_names_the_system_and_the_processor(self):
+        description = error_report.system_description()
+        expected_start = {"darwin": "macOS ", "win32": "Windows "}.get(sys.platform, "")
+        self.assertTrue(description.startswith(expected_start), description)
+        self.assertTrue(description.endswith(f"{platform.machine()})"), description)
 
 
 class ReportOnEveryPage(unittest.TestCase):
@@ -79,3 +84,32 @@ class DesktopHostOpensTheMail(unittest.TestCase):
         with mock.patch.object(desktop, "open_with_system") as open_with_system:
             self.bridge.message({"action": "reportError", "subject": "Hlášení", "body": "text"})
         open_with_system.assert_not_called()
+
+
+@needs_node
+class ReportText(unittest.TestCase):
+    PAGE = "document.querySelector = () => ({textContent: JSON.stringify({app_version: '1.2.3', system: 'macOS 27.2 (arm64)', document: 'PDF'})});"
+
+    def run_report(self, script):
+        return json.loads(run_ui_scripts(["bridge.js"], self.PAGE + script))
+
+    def test_carries_version_system_document_and_the_last_errors(self):
+        text = self.run_report("""
+            for (let i = 1; i <= 7; i++) zfoReportError.record(`chyba ${i}`, 'http://127.0.0.1:1/pdf.mjs?v=1', i);
+            console.log(JSON.stringify(zfoReportError.template()));""")
+        self.assertIn("Blanketa: 1.2.3\nSystém: macOS 27.2 (arm64)\nDokument: PDF\n", text)
+        self.assertEqual(re.findall(r"^- .*$", text, re.M), [f"- chyba {i} (pdf.mjs:{i})" for i in range(3, 8)])
+
+    def test_error_text_loses_quoted_values_and_long_numbers(self):
+        text = self.run_report("""
+            zfoReportError.record('Neplatné datum "1. 2. 1985" v poli \\'Jan Novák\\' pro 9801011234 a „tajne.zfo“');
+            console.log(JSON.stringify(zfoReportError.template()));""")
+        self.assertIn("- Neplatné datum … v poli … pro … a …\n", text)
+        for value in ("1985", "Novák", "9801011234", "tajne"):
+            self.assertNotIn(value, text)
+
+    def test_long_report_fits_the_mail_link_and_says_where_the_rest_is(self):
+        body = self.run_report("console.log(JSON.stringify(zfoReportError.fitIntoMailLink('č'.repeat(3000))));")
+        self.assertLessEqual(len(quote(body, safe="-_.!~*'()")), 1800)
+        self.assertTrue(body.endswith("Celý je ve schránce – vložte ho sem místo tohoto.]"), body[-80:])
+        self.assertEqual(self.run_report("console.log(JSON.stringify(zfoReportError.fitIntoMailLink('krátké')))"), "krátké")
