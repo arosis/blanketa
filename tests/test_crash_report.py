@@ -130,6 +130,14 @@ class CrashInTheLocalServer(WithOwnSettings):
                 self.assertEqual(self.post("/crash-report", b'{"enabled": false}', token)[0], 200)
 
 
+    def test_empty_window_reaches_nothing_but_the_choice(self):
+        empty = page_data(app.render_empty_window())["session"]
+        for path in ("/save", "/ipc", "/pdf-save", "/export-data", "/add-certificate", "/time-stamp-settings"):
+            with self.subTest(path=path):
+                self.assertEqual(self.post(path, b"{}", empty)[0], 404)
+        self.assertIsNone(crash_report.take_pending())
+
+
 class HostsNoticeAServerThatStopped(WithOwnSettings):
     def form_window(self, exit_code):
         form = desktop.FormWindow.__new__(desktop.FormWindow)

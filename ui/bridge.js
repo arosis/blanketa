@@ -219,8 +219,14 @@ window.zfoReportError = (() => {
       + `Chyby na stránce:\n${errors}\n`
       + (crash ? `Záznam o chybě z minulé práce:\n${crash}\n` : '');
   };
-  const storeCrashOffers = enabled => fetch(`/crash-report?s=${pageData().session}`, {method: 'POST', body: JSON.stringify({enabled})})
-    .catch(() => {});
+  let crashOffersEnabled;
+  const storeCrashOffers = async enabled => {
+    crashOffersEnabled = enabled;
+    try {
+      const response = await fetch(`/crash-report?s=${pageData().session}`, {method: 'POST', body: JSON.stringify({enabled})});
+      if (response.ok) crashOffersEnabled = (await response.json()).enabled;
+    } catch {}
+  };
   const fitIntoMailLink = text => {
     if (encodeURIComponent(text).length <= MAX_ENCODED_BODY) return text;
     let shortened = text;
@@ -275,7 +281,8 @@ window.zfoReportError = (() => {
     }
     const text = dialog.querySelector('[data-report-text]');
     text.value = template(crash);
-    dialog.querySelector('[data-crash-offers]').checked = pageData().crash_reports !== false;
+    crashOffersEnabled ??= pageData().crash_reports !== false;
+    dialog.querySelector('[data-crash-offers]').checked = crashOffersEnabled;
     dialog.querySelector('[data-copy]').textContent = 'Zkopírovat text';
     dialog.showModal();
     const answerLine = text.value.indexOf('\n') + 1;

@@ -209,8 +209,8 @@ def render_pdf_page(name):
     pdf = form_path(name).read_bytes()
     session = new_session({"name": name, "pdf": pdf})
     return document_page(PDF_PAGE, "PDF", {"session": session, "file": form_path(name).name,
-                                     "signatures": pdf_signatures(pdf), "info": pdf_info(pdf),
-                                     "time_stamp": time_stamps.settings()})
+                                           "signatures": pdf_signatures(pdf), "info": pdf_info(pdf),
+                                           "time_stamp": time_stamps.settings()})
 
 
 def container_signatures(signatures):
@@ -242,9 +242,9 @@ def render_message_page(name):
     message = isds_message.read_message(form_path(name).read_bytes())
     signatures = add_trust_verdicts([isds_message.describe_seal(message)])
     session = new_session({"name": name, "message": message})
-    return document_page(MESSAGE_PAGE, "datová zpráva", {"session": session, "file": form_path(name).name,
-                                                         "message": message.info,
-                                         "signatures": signatures, "submitted": isds_message.submission_stamp(message)})
+    return document_page(MESSAGE_PAGE, "datová zpráva", {
+        "session": session, "file": form_path(name).name, "message": message.info,
+        "signatures": signatures, "submitted": isds_message.submission_stamp(message)})
 
 
 def save_pdf(session, values, identity_id=None, placement=None, password=None, time_stamp=None):
@@ -842,6 +842,8 @@ class Handler(BaseHTTPRequestHandler):
         if session is None:
             return self._send_response(404, "Relace vypršela, načti formulář znovu".encode(), PLAIN_TEXT_UTF8)
         if ("message" in session or "entries" in session) and url.path not in ("/revocation", "/crash-report"):
+            return self._send_not_found()
+        if "empty" in session and url.path != "/crash-report":
             return self._send_not_found()
         if url.path == "/add-certificate":
             return self._add_certificate()
