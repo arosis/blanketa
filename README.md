@@ -26,7 +26,7 @@ Blanketa je zdarma a zdarma zůstane. Pokud vám ušetřila čas, můžete na je
 převodem na účet **7133557349/0800** (IBAN CZ43 0800 0000 0071 3355 7349) nebo kartou přes
 [GitHub Sponsors](https://github.com/sponsors/arosis) či [Ko-fi](https://ko-fi.com/rivel_arosis). QR platbu najdete v aplikaci pod
 „Podpořit Blanketu“ (na Macu v menu Blanketa, jinde v menu Nápověda), kde je i okno „O aplikaci Blanketa“ s verzí,
-licencí a odkazy. Po podpisu se ve stavovém řádku nejvýš jednou za 14 dní objeví nenápadná připomínka příspěvku;
+licencí a odkazy. Po podpisu se ve stavovém řádku nejvýš jednou za 14 dní objeví nenápadná připomínka příspěvku;
 volbou „Už nezobrazovat“ zmizí natrvalo. Děkuji!
 
 ## Stažení a instalace

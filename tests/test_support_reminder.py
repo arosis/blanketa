@@ -79,6 +79,10 @@ class SupportReminderOverTheLocalServer(WithOwnSettingsFolder):
     def test_malformed_request_is_refused(self):
         self.assertEqual(self.post(b"[")[0], 400)
         self.assertEqual(self.post(b"[]")[0], 400)
+        for unknown in (b"{}", b'{"action": "ukaz"}', b'{"action": null}'):
+            with self.subTest(body=unknown):
+                self.assertEqual(self.post(unknown)[0], 400)
+        self.assertFalse(self.settings.exists())
 
     def test_settings_that_cannot_be_written_never_show_it(self):
         with mock.patch.object(support_reminder, "_store", side_effect=OSError("read-only")):
@@ -90,7 +94,7 @@ class AboutWindow(unittest.TestCase):
         version = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
         page = app.render_empty_window()
         data = json.loads(re.search(r"<script type=\"application/json\" data-zfo-page[^>]*>(.*?)</script>", page, re.S).group(1))
-        self.assertEqual(data["version"], version)
+        self.assertEqual(data["app_version"], version)
 
     def test_version_travels_with_every_build(self):
         self.assertIn('--add-data "$PWD/VERSION:."', (ROOT / "build.sh").read_text(encoding="utf-8"))

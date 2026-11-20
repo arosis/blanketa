@@ -85,7 +85,7 @@ def json_for_script(value):
 
 
 def page_with_data(template, data, fonts=""):
-    values = {"__PAGE_DATA__": json_for_script({**data, "version": APP_VERSION}), "__FONTS__": fonts}
+    values = {"__PAGE_DATA__": json_for_script({**data, "app_version": APP_VERSION}), "__FONTS__": fonts}
     # One pass: a placeholder name inside a file name, a message or a font must stay text.
     return re.sub("__PAGE_DATA__|__FONTS__", lambda match: values[match.group(0)], template)
 
@@ -781,9 +781,11 @@ class Handler(BaseHTTPRequestHandler):
             if wanted == "hide":
                 support_reminder.hide()
                 return self._send_json({"show": False})
-            return self._send_json({"show": support_reminder.offer()})
+            if wanted == "offer":
+                return self._send_json({"show": support_reminder.offer()})
         except OSError:
             return self._send_json({"show": False})
+        return self._send_response(400, b"bad request", PLAIN_TEXT)
 
     def _export_or_import_data(self, session, path, body):
         try:

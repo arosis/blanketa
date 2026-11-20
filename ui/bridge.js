@@ -146,7 +146,7 @@ window.zfoAbout = (() => {
   let dialog;
   return () => {
     if (!dialog) {
-      const version = JSON.parse(document.querySelector('script[data-zfo-page]')?.textContent || '{}').version;
+      const version = JSON.parse(document.querySelector('script[data-zfo-page]')?.textContent || '{}').app_version;
       dialog = document.createElement('dialog');
       dialog.className = 'zfo-dialog zfo-about';
       dialog.innerHTML = `<style>
@@ -161,12 +161,12 @@ window.zfoAbout = (() => {
         </style>
         <h2>Blanketa</h2>
         <p class="zfo-about-version" data-version></p>
-        <p>Vyplňování, podepisování a ověřování úředních formulářů 602XML (.zfo) a PDF na macOS, Windows a Linuxu.</p>
+        <p>Vyplňování, podepisování a ověřování úředních formulářů 602XML (.zfo) a PDF na macOS, Windows a Linuxu.</p>
         <dl><dt>Autor</dt><dd><a href="https://winkler-bejrovi.cz">Richard Winkler Bejr</a></dd>
           <dt>Licence</dt><dd>Svobodný software pod licencí
             <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL 3.0</a></dd></dl>
         <ul data-links></ul>
-        <p>Blanketa je zdarma a žije z dobrovolných příspěvků.</p>
+        <p>Blanketa je zdarma a žije z dobrovolných příspěvků.</p>
         <div class="zfo-dialog-buttons">
           <button type="button" class="zfo-btn" data-support>Podpořit Blanketu…</button>
           <button type="button" class="zfo-btn primary" data-close>Zavřít</button></div>`;
@@ -187,14 +187,14 @@ window.zfoAbout = (() => {
   };
 })();
 
-// After a signature is saved, never while filling in or signing: a line in the status bar, at most once in a while.
 window.zfoSupportReminder = async (sessionToken, status) => {
   const ask = action => fetch('/support-reminder?s=' + sessionToken, {method: 'POST', body: JSON.stringify({action})})
     .then(response => (response.ok ? response.json() : {show: false})).catch(() => ({show: false}));
   if (!(await ask('offer')).show) return;
   const reminder = document.createElement('span');
   reminder.className = 'zfo-support-reminder';
-  reminder.innerHTML = ` · Blanketa je zdarma – <a data-support>podpořit vývoj</a> · <a data-hide>Už nezobrazovat</a>`;
+  reminder.innerHTML = ` · Blanketa je zdarma – <button type="button" class="zfo-link" data-support>podpořit vývoj</button>`
+    + ` · <button type="button" class="zfo-link" data-hide>Už nezobrazovat</button>`;
   reminder.querySelector('[data-support]').addEventListener('click', () => window.zfoSupport());
   reminder.querySelector('[data-hide]').addEventListener('click', () => { reminder.remove(); ask('hide'); });
   status.append(reminder);
