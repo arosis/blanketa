@@ -24,6 +24,7 @@ import asic_verify
 import barcode
 import certstore
 import codelists
+import error_report
 import isds_message
 import lookups
 import pdf_form_data
@@ -76,6 +77,7 @@ MESSAGE_PAGE = (RESOURCES / "ui/message.html").read_text(encoding="utf-8").repla
 CONTAINER_PAGE = (RESOURCES / "ui/container.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
 CODELISTS_PAGE = (RESOURCES / "ui/codelists.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
 APP_VERSION = (RESOURCES / "VERSION").read_text(encoding="utf-8").strip()
+SYSTEM = error_report.system_description()
 PAGE_SCRIPTS = {f"/{name}": RESOURCES / "ui" / name
                 for name in ("files.js", "shell.js", "pdf.mjs", "message.js", "container.js", "codelists.js")}
 
@@ -85,7 +87,7 @@ def json_for_script(value):
 
 
 def page_with_data(template, data, fonts=""):
-    values = {"__PAGE_DATA__": json_for_script({**data, "app_version": APP_VERSION}), "__FONTS__": fonts}
+    values = {"__PAGE_DATA__": json_for_script({**data, "app_version": APP_VERSION, "system": SYSTEM}), "__FONTS__": fonts}
     # One pass: a placeholder name inside a file name, a message or a font must stay text.
     return re.sub("__PAGE_DATA__|__FONTS__", lambda match: values[match.group(0)], template)
 
@@ -138,7 +140,7 @@ def remove_data_objects(layer):
 
 
 def render_empty_window():
-    return page_with_data(SHELL, {"session": "", "file": "", "empty": True})
+    return page_with_data(SHELL, {"session": "", "file": "", "empty": True, "document": "prázdné okno"})
 
 
 def judge_time_stamps(signature):
@@ -200,7 +202,7 @@ def pdf_info(pdf):
 def render_pdf_page(name):
     pdf = form_path(name).read_bytes()
     session = new_session({"name": name, "pdf": pdf})
-    return page_with_data(PDF_PAGE, {"session": session, "file": form_path(name).name,
+    return page_with_data(PDF_PAGE, {"session": session, "file": form_path(name).name, "document": "PDF",
                                      "signatures": pdf_signatures(pdf), "info": pdf_info(pdf),
                                      "time_stamp": time_stamps.settings()})
 
@@ -221,7 +223,8 @@ def render_container_page(name):
     description, entries = asic_verify.describe(path.read_bytes())
     description["signatures"] = container_signatures(description["signatures"])
     content = {"name": name, "entries": entries, "names": [file["name"] for file in description["files"]]}
-    return page_with_data(CONTAINER_PAGE, {"session": new_session(content), "file": path.name, "container": description})
+    return page_with_data(CONTAINER_PAGE, {"session": new_session(content), "file": path.name, "container": description,
+                                           "document": "podepsaný kontejner"})
 
 
 def file_start(path):
@@ -233,7 +236,8 @@ def render_message_page(name):
     message = isds_message.read_message(form_path(name).read_bytes())
     signatures = add_trust_verdicts([isds_message.describe_seal(message)])
     session = new_session({"name": name, "message": message})
-    return page_with_data(MESSAGE_PAGE, {"session": session, "file": form_path(name).name, "message": message.info,
+    return page_with_data(MESSAGE_PAGE, {"session": session, "file": form_path(name).name, "document": "datová zpráva",
+                                         "message": message.info,
                                          "signatures": signatures, "submitted": isds_message.submission_stamp(message)})
 
 
@@ -352,6 +356,7 @@ def render_zfo_page(name, blank=False, data=None, lists_waited_for=False):
                                PATH_TO_CSS="'/static/styles/'"), method="html", encoding="unicode")
     shell = page_with_data(SHELL, {
         "session": session, "file": form_path(name).name if SINGLE_FILE else name, "folder": folder_for_data(name), "empty": False,
+        "document": "formulář ZFO",
         "signatures": zfo_signatures(fo), "page": page_geometry(doc), "colors": field_colors(doc),
         "info": {**form_info(name), "missing_lists": bool(unfilled_lists)},
         "blank": blank, "buttons": user_buttons(doc), "codes": binds_of_lists_showing_codes(doc)}, fonts=embedded_fonts(doc))

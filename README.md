@@ -29,6 +29,16 @@ převodem na účet **7133557349/0800** (IBAN CZ43 0800 0000 0071 3355 7349) neb
 licencí a odkazy. Po podpisu se ve stavovém řádku nejvýš jednou za 14 dní objeví nenápadná připomínka příspěvku;
 volbou „Už nezobrazovat“ zmizí natrvalo. Děkuji!
 
+## Nahlášení chyby
+
+Chybu nahlásíte v aplikaci volbou „Nahlásit chybu…“ (na Macu v menu Blanketa, jinde v menu Nápověda, a také v okně
+„O aplikaci Blanketa“). Blanketa připraví e-mail na **podpora@blanketa.cz** a otevře ho ve vašem poštovním programu;
+nic neodešle sama. Hlášení obsahuje to, co do něj napíšete, a technické údaje: verzi Blankety, systém, druh dokumentu
+(formulář ZFO, PDF, datová zpráva, podepsaný kontejner) a posledních nejvýš 5 chyb skriptu stránky. Neobsahuje vyplněné
+údaje, obsah formuláře, názvy souborů, certifikáty ani hesla. Celý text vidíte a můžete ho před odesláním upravit nebo
+smazat. Hlášení čte jen autor Blankety a slouží jen k opravě chyby. Návrhy na zlepšení můžete psát i do
+[GitHub Issues](https://github.com/arosis/blanketa/issues).
+
 ## Stažení a instalace
 
 Hotové balíčky vytváří GitHub Actions (`.github/workflows/build.yml`) při každé značce `v*`, nebo ručně ze záložky Actions:
@@ -131,6 +141,7 @@ Stránky jsou na všech systémech stejné; s aplikací kolem sebe mluví přes 
 | `trustlist.py`, `revocation.py` | důvěryhodné seznamy EU a seznamy zrušených certifikátů |
 | `time_stamps.py` | služba časových razítek při podepisování PDF a její nastavení |
 | `support_reminder.py` | kdy po podpisu připomenout možnost přispět na vývoj |
+| `error_report.py` | e-mail s hlášením chyby a popis systému pro něj |
 | `desktop.py` | okna aplikace pro Windows a Linux |
 | `linux_print.py` | náhled tisku PDF na Linuxu (PDFium) |
 | `ui/bridge.js` | spojení stránek s aplikací (macOS / Windows a Linux / prohlížeč), sdílený výběr certifikátu |

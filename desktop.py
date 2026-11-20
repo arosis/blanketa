@@ -10,6 +10,8 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
+import error_report
+
 FROZEN = hasattr(sys, "_MEIPASS")
 IS_WINDOWS = sys.platform == "win32"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -34,7 +36,7 @@ def is_print_file(path):
 
 def open_with_system(path):
     if IS_WINDOWS:
-        os.startfile(path)  # noqa: S606 - a file the app itself wrote
+        os.startfile(path)  # noqa: S606 - a file the app itself wrote, or a mailto: link to the fixed project address
     else:
         subprocess.Popen(["xdg-open", str(path)])
 
@@ -182,6 +184,8 @@ class Bridge:
             print_pdf_file(Path(msg["path"]), window)
         elif action == "openUrl" and str(msg.get("url", "")).startswith(("https://", "http://")):
             webbrowser.open(msg["url"])
+        elif action == "reportError" and (link := error_report.mail_link(msg.get("subject"), msg.get("body"))):
+            open_with_system(link)
         elif action == "saveFile":
             self._save_file_from_dialog(window, msg)
         elif action == "saveAttachment":
@@ -310,7 +314,11 @@ class DesktopApp:
                 page_action("Nápověda k poli", "help"),
                 page_action("Informace o formuláři a podpisech", "panel"),
             ]),
-            Menu("Nápověda", [page_action("O aplikaci Blanketa", "about"), page_action("Podpořit Blanketu…", "support")]),
+            Menu("Nápověda", [
+                page_action("O aplikaci Blanketa", "about"),
+                page_action("Nahlásit chybu…", "report-error"),
+                page_action("Podpořit Blanketu…", "support"),
+            ]),
         ]
 
     def run(self, paths):

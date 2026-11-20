@@ -369,6 +369,7 @@ const actions = {
   open: () => native?.postMessage({action: 'open'}),
   support: () => zfoSupport(),
   about: () => zfoAbout(),
+  'report-error': () => zfoReportError(),
   'save-plain': async () => {
     closeMenus();
     try { await showSavedDocument(await postChangedValues('/pdf-save'), 'Uloženo do'); } catch (error) { setStatus('Chyba: ' + error.message); }
