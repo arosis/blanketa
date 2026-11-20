@@ -42,6 +42,24 @@ enum ErrorReport {
     }
 }
 
+enum CrashReport {
+    private static var settings: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Blanketa/crash-report.json")
+    }
+
+    static func recordServerExit(code: Int32) {
+        var stored = (try? Data(contentsOf: settings))
+            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+        guard stored["disabled"] as? Bool != true else { return }
+        let today = ISO8601DateFormatter.string(from: Date(), timeZone: .current, formatOptions: .withFullDate)
+        stored["pending"] = ["kind": "server-exit", "exit_code": Int(code), "date": today]
+        guard let data = try? JSONSerialization.data(withJSONObject: stored) else { return }
+        try? FileManager.default.createDirectory(at: settings.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? data.write(to: settings, options: .atomic)
+    }
+}
+
 final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUIDelegate, WKNavigationDelegate {
     let window: NSWindow
     let webView: WKWebView
@@ -50,6 +68,7 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
     var onClose: (() -> Void)?
     var onOpen: ((URL?) -> Void)?
     var formServerPort: Int?
+    private var serverStopRequested = false
 
     init(file: URL?) {
         self.file = file
@@ -92,6 +111,11 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
             DispatchQueue.main.async {
                 self?.formServerPort = Int(port)
                 self?.webView.load(URLRequest(url: URL(string: "http://127.0.0.1:\(port)/")!))
+            }
+        }
+        server.terminationHandler = { [weak self] process in
+            DispatchQueue.main.async {
+                if self?.serverStopRequested == false { CrashReport.recordServerExit(code: process.terminationStatus) }
             }
         }
         do {
@@ -303,9 +327,14 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
         alert.beginSheetModal(for: window) { completionHandler($0 == .alertFirstButtonReturn ? field.stringValue : nil) }
     }
 
+    func stopServer() {
+        serverStopRequested = true
+        if server.isRunning { server.terminate() }
+    }
+
     func windowWillClose(_ notification: Notification) {
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "app")
-        if server.isRunning { server.terminate() }
+        stopServer()
         onClose?()
     }
 }
@@ -348,7 +377,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func applicationWillTerminate(_ notification: Notification) {
-        windows.forEach { if $0.server.isRunning { $0.server.terminate() } }
+        windows.forEach { $0.stopServer() }
     }
 
     func open(_ url: URL) {

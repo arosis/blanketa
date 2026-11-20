@@ -24,6 +24,7 @@ import asic_verify
 import barcode
 import certstore
 import codelists
+import crash_report
 import error_report
 import isds_message
 import lookups
@@ -92,6 +93,11 @@ def page_with_data(template, data, fonts=""):
     return re.sub("__PAGE_DATA__|__FONTS__", lambda match: values[match.group(0)], template)
 
 
+def document_page(template, document, data, fonts=""):
+    offer = {"document": document, "crash_report": crash_report.take_pending(), "crash_reports": crash_report.enabled()}
+    return page_with_data(template, {**data, **offer}, fonts)
+
+
 def new_session(content):
     session = secrets.token_urlsafe(12)
     with LOCK:
@@ -140,7 +146,7 @@ def remove_data_objects(layer):
 
 
 def render_empty_window():
-    return page_with_data(SHELL, {"session": "", "file": "", "empty": True, "document": "prázdné okno"})
+    return document_page(SHELL, "prázdné okno", {"session": new_session({"empty": True}), "file": "", "empty": True})
 
 
 def judge_time_stamps(signature):
@@ -202,7 +208,7 @@ def pdf_info(pdf):
 def render_pdf_page(name):
     pdf = form_path(name).read_bytes()
     session = new_session({"name": name, "pdf": pdf})
-    return page_with_data(PDF_PAGE, {"session": session, "file": form_path(name).name, "document": "PDF",
+    return document_page(PDF_PAGE, "PDF", {"session": session, "file": form_path(name).name,
                                      "signatures": pdf_signatures(pdf), "info": pdf_info(pdf),
                                      "time_stamp": time_stamps.settings()})
 
@@ -223,8 +229,8 @@ def render_container_page(name):
     description, entries = asic_verify.describe(path.read_bytes())
     description["signatures"] = container_signatures(description["signatures"])
     content = {"name": name, "entries": entries, "names": [file["name"] for file in description["files"]]}
-    return page_with_data(CONTAINER_PAGE, {"session": new_session(content), "file": path.name, "container": description,
-                                           "document": "podepsaný kontejner"})
+    return document_page(CONTAINER_PAGE, "podepsaný kontejner",
+                         {"session": new_session(content), "file": path.name, "container": description})
 
 
 def file_start(path):
@@ -236,8 +242,8 @@ def render_message_page(name):
     message = isds_message.read_message(form_path(name).read_bytes())
     signatures = add_trust_verdicts([isds_message.describe_seal(message)])
     session = new_session({"name": name, "message": message})
-    return page_with_data(MESSAGE_PAGE, {"session": session, "file": form_path(name).name, "document": "datová zpráva",
-                                         "message": message.info,
+    return document_page(MESSAGE_PAGE, "datová zpráva", {"session": session, "file": form_path(name).name,
+                                                         "message": message.info,
                                          "signatures": signatures, "submitted": isds_message.submission_stamp(message)})
 
 
@@ -354,9 +360,8 @@ def render_zfo_page(name, blank=False, data=None, lists_waited_for=False):
         hidden.getparent().remove(hidden)
     html = etree.tostring(XSLT(etree.ElementTree(doc), PATH_TO_JS="'/static/scripts/'",
                                PATH_TO_CSS="'/static/styles/'"), method="html", encoding="unicode")
-    shell = page_with_data(SHELL, {
+    shell = document_page(SHELL, "formulář ZFO", {
         "session": session, "file": form_path(name).name if SINGLE_FILE else name, "folder": folder_for_data(name), "empty": False,
-        "document": "formulář ZFO",
         "signatures": zfo_signatures(fo), "page": page_geometry(doc), "colors": field_colors(doc),
         "info": {**form_info(name), "missing_lists": bool(unfilled_lists)},
         "blank": blank, "buttons": user_buttons(doc), "codes": binds_of_lists_showing_codes(doc)}, fonts=embedded_fonts(doc))
@@ -530,6 +535,15 @@ def first_query_value(query, key, default=""):
 
 
 class Handler(BaseHTTPRequestHandler):
+    def handle(self):
+        try:
+            super().handle()
+        except (ConnectionError, TimeoutError):
+            raise
+        except Exception as error:
+            crash_report.record_error(error, f"{getattr(self, 'command', '?')} {urlparse(getattr(self, 'path', '')).path}")
+            raise
+
     def log_message(self, format, *args):
         # A windowed Windows build has no stderr.
         if sys.stderr:
@@ -777,6 +791,19 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_error_message(error)
         return self._send_json(stored)
 
+    def _store_crash_report_choice(self, body):
+        try:
+            wanted = json.loads(body or b"{}").get("enabled")
+        except (ValueError, AttributeError):
+            wanted = None
+        if not isinstance(wanted, bool):
+            return self._send_response(400, b"bad request", PLAIN_TEXT)
+        try:
+            crash_report.set_enabled(wanted)
+        except OSError:
+            pass
+        return self._send_json({"enabled": crash_report.enabled()})
+
     def _answer_support_reminder(self, body):
         try:
             wanted = json.loads(body or b"{}").get("action")
@@ -814,7 +841,7 @@ class Handler(BaseHTTPRequestHandler):
         session = SESSIONS.get(first_query_value(url.query, "s"))
         if session is None:
             return self._send_response(404, "Relace vypršela, načti formulář znovu".encode(), PLAIN_TEXT_UTF8)
-        if ("message" in session or "entries" in session) and url.path != "/revocation":
+        if ("message" in session or "entries" in session) and url.path not in ("/revocation", "/crash-report"):
             return self._send_not_found()
         if url.path == "/add-certificate":
             return self._add_certificate()
@@ -840,6 +867,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._store_time_stamp_settings(body)
             if url.path == "/support-reminder":
                 return self._answer_support_reminder(body)
+            if url.path == "/crash-report":
+                return self._store_crash_report_choice(body)
             if url.path in ("/export-data", "/import-data"):
                 return self._export_or_import_data(session, url.path, body)
             if url.path in ("/pdf-export-data", "/pdf-import-data"):

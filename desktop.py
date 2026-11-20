@@ -5,6 +5,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import urllib.request
 import webbrowser
@@ -200,6 +201,8 @@ class FormWindow:
         # The port is chosen here: a windowed Windows build has no stdout to report one on.
         port = free_local_port()
         self.server = self._start_server(port)
+        self.server_stop_requested = False
+        threading.Thread(target=self._record_unexpected_server_exit, daemon=True).start()
         self.home = f"http://127.0.0.1:{port}/"
         self.window = app.webview.create_window(path.name if path else "Blanketa", self.home,
                                                 js_api=Bridge(app, self), width=1280, height=900, text_select=True)
@@ -232,7 +235,14 @@ class FormWindow:
         if not (self.window.get_current_url() or self.home).startswith(self.home):
             self.window.load_url(self.home)
 
+    def _record_unexpected_server_exit(self):
+        exit_code = self.server.wait()
+        if not self.server_stop_requested:
+            import crash_report
+            crash_report.record_server_exit(exit_code)
+
     def stop_server(self):
+        self.server_stop_requested = True
         if self.server.poll() is None:
             self.server.stdin.close()
             self.server.terminate()

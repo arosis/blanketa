@@ -207,7 +207,7 @@ window.zfoReportError = (() => {
   window.addEventListener('unhandledrejection', event => record(event.reason?.message ?? event.reason));
 
   const pageData = () => JSON.parse(document.querySelector('script[data-zfo-page]')?.textContent || '{}');
-  const template = () => {
+  const template = (crash = '') => {
     const data = pageData();
     const errors = pageErrors.length ? pageErrors.map(error => `- ${error}`).join('\n') : '- žádné';
     return `Co se stalo a co jste dělali těsně předtím:\n\n\n`
@@ -216,8 +216,11 @@ window.zfoReportError = (() => {
       + `Blanketa: ${data.app_version || '?'}\n`
       + `Systém: ${data.system || navigator.platform}\n`
       + `Dokument: ${data.document || 'neuvedený'}\n`
-      + `Chyby na stránce:\n${errors}\n`;
+      + `Chyby na stránce:\n${errors}\n`
+      + (crash ? `Záznam o chybě z minulé práce:\n${crash}\n` : '');
   };
+  const storeCrashOffers = enabled => fetch(`/crash-report?s=${pageData().session}`, {method: 'POST', body: JSON.stringify({enabled})})
+    .catch(() => {});
   const fitIntoMailLink = text => {
     if (encodeURIComponent(text).length <= MAX_ENCODED_BODY) return text;
     let shortened = text;
@@ -229,7 +232,7 @@ window.zfoReportError = (() => {
   };
 
   let dialog;
-  const open = () => {
+  const open = crash => {
     if (!dialog) {
       dialog = document.createElement('dialog');
       dialog.className = 'zfo-dialog zfo-report';
@@ -238,6 +241,7 @@ window.zfoReportError = (() => {
           .zfo-report textarea { box-sizing: border-box; width: 100%; height: 260px; font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; }
           .zfo-report-note { margin: 8px 0 0; font-size: 12px; color: #6e6e73; }
           .zfo-report-note b { user-select: text; -webkit-user-select: text; }
+          .zfo-report label { display: block; margin-top: 8px; font-size: 12px; }
         </style>
         <h2>Nahlásit chybu</h2>
         <p>Popište, co se stalo. Hlášení odejde až z vaší pošty a neobsahuje vyplněné údaje, názvy souborů ani certifikáty.
@@ -245,6 +249,7 @@ window.zfoReportError = (() => {
         <textarea data-report-text spellcheck="false" aria-label="Text hlášení"></textarea>
         <p class="zfo-report-note">Hlášení čte jen autor Blankety. Pokud se pošta neotevře, zkopírujte text a pošlete ho
           na <b data-address></b>.</p>
+        <label><input type="checkbox" data-crash-offers> Po chybě nabídnout hlášení při dalším otevření okna</label>
         <div class="zfo-dialog-buttons">
           <button type="button" class="zfo-btn" data-copy>Zkopírovat text</button>
           <button type="button" class="zfo-btn" data-close>Zrušit</button>
@@ -264,17 +269,41 @@ window.zfoReportError = (() => {
         else window.location.href = `mailto:${ADDRESS}?subject=${encodeURIComponent(message.subject)}&body=${encodeURIComponent(message.body)}`;
         dialog.close();
       });
+      dialog.querySelector('[data-crash-offers]').addEventListener('change', event => storeCrashOffers(event.target.checked));
       dialog.querySelector('[data-close]').addEventListener('click', () => dialog.close());
       document.body.append(dialog);
     }
     const text = dialog.querySelector('[data-report-text]');
-    text.value = template();
+    text.value = template(crash);
+    dialog.querySelector('[data-crash-offers]').checked = pageData().crash_reports !== false;
     dialog.querySelector('[data-copy]').textContent = 'Zkopírovat text';
     dialog.showModal();
     const answerLine = text.value.indexOf('\n') + 1;
     text.setSelectionRange(answerLine, answerLine);
   };
-  return Object.assign(open, {record, template, fitIntoMailLink});
+  const offerAfterCrash = () => {
+    const crash = pageData().crash_report;
+    if (!crash) return;
+    const offer = document.createElement('dialog');
+    offer.className = 'zfo-dialog zfo-crash-offer';
+    offer.innerHTML = `<style>.zfo-crash-offer { width: 420px; font: 13px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif; }</style>
+      <h2>Blanketa minule narazila na chybu</h2>
+      <p>Pomůžete ji opravit? Blanketa připraví hlášení, které před odesláním uvidíte celé a můžete ho upravit.
+        Neobsahuje vyplněné údaje, názvy souborů ani certifikáty.</p>
+      <div class="zfo-dialog-buttons">
+        <button type="button" class="zfo-btn" data-never>Už nenabízet</button>
+        <button type="button" class="zfo-btn" data-later>Teď ne</button>
+        <button type="button" class="zfo-btn primary" data-report>Připravit hlášení…</button></div>`;
+    offer.querySelector('[data-never]').addEventListener('click', () => { offer.close(); storeCrashOffers(false); });
+    offer.querySelector('[data-later]').addEventListener('click', () => offer.close());
+    offer.querySelector('[data-report]').addEventListener('click', () => { offer.close(); open(crash); });
+    offer.addEventListener('close', () => offer.remove());
+    document.body.append(offer);
+    offer.showModal();
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', offerAfterCrash);
+  else offerAfterCrash();
+  return Object.assign(() => open(), {record, template, fitIntoMailLink});
 })();
 
 window.zfoSupportReminder = async (sessionToken, status) => {

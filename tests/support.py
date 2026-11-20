@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from xml.sax.saxutils import escape, quoteattr
@@ -18,6 +19,11 @@ from xml.sax.saxutils import escape, quoteattr
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 os.environ["ZFO_OFFLINE"] = "1"  # tests never download trusted lists
+
+import crash_report  # noqa: E402
+
+_TEST_SETTINGS = tempfile.TemporaryDirectory()
+crash_report.settings_path = lambda: Path(_TEST_SETTINGS.name) / crash_report.SETTINGS_FILE
 
 NS = {"d": "http://software602.cz/sample"}
 LONGEST_RUN_OF_ALL_TESTS_IN_SECONDS = 15 * 60
@@ -61,7 +67,7 @@ def ui_source(name):
 UI_SCRIPTS_IN_NODE = """
 const vm = require('node:vm'), fs = require('node:fs');
 const element = () => ({style: {}, append() {}, addEventListener() {}});
-const document = {addEventListener() {}, querySelectorAll: () => [], createElement: element, head: element(), body: element()};
+const document = {addEventListener() {}, querySelector: () => null, querySelectorAll: () => [], createElement: element, head: element(), body: element()};
 const context = vm.createContext({console, setTimeout, process, navigator: {platform: 'Linux'}, document, URL, addEventListener() {}});
 context.window = context;
 for (const path of %s) vm.runInContext(fs.readFileSync(path, 'utf8'), context, {filename: path});
