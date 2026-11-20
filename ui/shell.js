@@ -58,7 +58,7 @@
       const recent = event.target.closest('[data-path]');
       if (recent) native?.postMessage({action: 'openFile', path: recent.dataset.path});
     });
-    window.zfoAction = name => { if (name === 'open') open(); else if (name === 'support') zfoSupport(); };
+    window.zfoAction = name => { if (name === 'open') open(); else if (name === 'support') zfoSupport(); else if (name === 'about') zfoAbout(); };
     return;
   }
 
@@ -1182,6 +1182,7 @@
   const actions = {
     open: () => native.postMessage({action: 'open'}),
     support: () => zfoSupport(),
+    about: () => zfoAbout(),
     'zoom-in': () => manualZoom(zoom + .1),
     'zoom-out': () => manualZoom(zoom - .1),
     'zoom-fit': () => { autoFit = false; fitWidth(); },
@@ -1224,10 +1225,11 @@
       const result = await response.json();
       signatures = result.signatures; changed = false; renderSignatures();
       savedStatus('Podepsáno a uloženo jako', result.saved);
+      zfoSupportReminder(SESSION, status);
     },
   };
   // A hidden page has no visible fields: until it is shown, a check would find nothing wrong and the zoom nothing to fit.
-  const AVAILABLE_WHILE_OPENING = new Set(['open', 'support', 'help', 'panel']);
+  const AVAILABLE_WHILE_OPENING = new Set(['open', 'support', 'about', 'help', 'panel']);
   const runAction = name => { if (ready || AVAILABLE_WHILE_OPENING.has(name)) actions[name]?.(); };
   for (const button of document.querySelectorAll('.zfo-bar [data-action], .zfo-close[data-action]')) {
     button.addEventListener('click', () => runAction(button.dataset.action));

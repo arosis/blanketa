@@ -196,7 +196,7 @@ class CodeListsOnThePage(unittest.TestCase):
         (Path(self.folder.name) / "codelists" / "Obec.xml").unlink()
         with mock.patch.dict(os.environ, {"ZFO_OFFLINE": ""}), mock.patch.object(codelists, "start_download", return_value="t1") as started:
             page = app.render_zfo_page("codelists-test")
-            self.assertEqual(page_data(page), {"token": "t1"})
+            self.assertEqual(page_data(page)["token"], "t1")
             self.assertEqual(started.call_args[0][0], ["Obec", "ZdravotniPojistovna"])
             self.assertIn("session", page_data(app.render_zfo_page("codelists-test", lists_waited_for=True)))
 

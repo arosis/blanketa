@@ -29,6 +29,7 @@ import lookups
 import pdf_form_data
 import pdf_sign
 import ruian
+import support_reminder
 import time_stamps
 import zfo_sign
 import zfo_verify
@@ -74,6 +75,7 @@ PDF_PAGE = (RESOURCES / "ui/pdf.html").read_text(encoding="utf-8").replace("__SH
 MESSAGE_PAGE = (RESOURCES / "ui/message.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
 CONTAINER_PAGE = (RESOURCES / "ui/container.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
 CODELISTS_PAGE = (RESOURCES / "ui/codelists.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
+APP_VERSION = (RESOURCES / "VERSION").read_text(encoding="utf-8").strip()
 PAGE_SCRIPTS = {f"/{name}": RESOURCES / "ui" / name
                 for name in ("files.js", "shell.js", "pdf.mjs", "message.js", "container.js", "codelists.js")}
 
@@ -83,7 +85,7 @@ def json_for_script(value):
 
 
 def page_with_data(template, data, fonts=""):
-    values = {"__PAGE_DATA__": json_for_script(data), "__FONTS__": fonts}
+    values = {"__PAGE_DATA__": json_for_script({**data, "app_version": APP_VERSION}), "__FONTS__": fonts}
     # One pass: a placeholder name inside a file name, a message or a font must stay text.
     return re.sub("__PAGE_DATA__|__FONTS__", lambda match: values[match.group(0)], template)
 
@@ -770,6 +772,21 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_error_message(error)
         return self._send_json(stored)
 
+    def _answer_support_reminder(self, body):
+        try:
+            wanted = json.loads(body or b"{}").get("action")
+        except (ValueError, AttributeError):
+            return self._send_response(400, b"bad request", PLAIN_TEXT)
+        try:
+            if wanted == "hide":
+                support_reminder.hide()
+                return self._send_json({"show": False})
+            if wanted == "offer":
+                return self._send_json({"show": support_reminder.offer()})
+        except OSError:
+            return self._send_json({"show": False})
+        return self._send_response(400, b"bad request", PLAIN_TEXT)
+
     def _export_or_import_data(self, session, path, body):
         try:
             result = export_data(session) if path == "/export-data" else import_data(session, body)
@@ -816,6 +833,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send_pdf_for_printing(session, body)
             if url.path == "/time-stamp-settings":
                 return self._store_time_stamp_settings(body)
+            if url.path == "/support-reminder":
+                return self._answer_support_reminder(body)
             if url.path in ("/export-data", "/import-data"):
                 return self._export_or_import_data(session, url.path, body)
             if url.path in ("/pdf-export-data", "/pdf-import-data"):

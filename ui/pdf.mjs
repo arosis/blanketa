@@ -291,6 +291,7 @@ const signWith = async (placement, stamp = timeStamp.wanted()) => {
   try {
     await showSavedDocument(await postChangedValues('/pdf-save', '&cert=' + encodeURIComponent(certSelect.value),
                            {placement, password: certificates.password(), time_stamp: stamp}), 'Podepsáno a uloženo jako');
+    zfoSupportReminder(SESSION, status);
   } catch (error) {
     if (error.status === TIME_STAMP_UNAVAILABLE) signWithoutStampIfWanted(error.message, placement);
     else setStatus('Chyba: ' + error.message);
@@ -367,6 +368,7 @@ const zoomTo = scale => { autoFit = false; viewer.currentScale = Math.min(4, Mat
 const actions = {
   open: () => native?.postMessage({action: 'open'}),
   support: () => zfoSupport(),
+  about: () => zfoAbout(),
   'save-plain': async () => {
     closeMenus();
     try { await showSavedDocument(await postChangedValues('/pdf-save'), 'Uloženo do'); } catch (error) { setStatus('Chyba: ' + error.message); }
