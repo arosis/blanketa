@@ -39,6 +39,11 @@ nic neodešle sama. Hlášení obsahuje to, co do něj napíšete, a technické
 smazat. Hlášení čte jen autor Blankety a slouží jen k opravě chyby. Návrhy na zlepšení můžete psát i do
 [GitHub Issues](https://github.com/arosis/blanketa/issues).
 
+Když při práci s dokumentem selže server okna nebo nečekaně skončí, Blanketa si uloží krátký technický záznam: druh
+chyby, místa v kódu Blankety, kde vznikla, činnost a datum – bez textu chyby, hodnot a názvů souborů. Při dalším
+otevření okna nabídne hlášení připravit; záznam se pak přidá k technickým údajům a nic neodejde bez vašeho potvrzení.
+Volbou „Už nenabízet“ se nabídka vypne natrvalo a zapnout ji jde znovu zaškrtnutím v okně „Nahlásit chybu“.
+
 ## Stažení a instalace
 
 Hotové balíčky vytváří GitHub Actions (`.github/workflows/build.yml`) při každé značce `v*`, nebo ručně ze záložky Actions:
@@ -142,6 +147,7 @@ Stránky jsou na všech systémech stejné; s aplikací kolem sebe mluví přes 
 | `time_stamps.py` | služba časových razítek při podepisování PDF a její nastavení |
 | `support_reminder.py` | kdy po podpisu připomenout možnost přispět na vývoj |
 | `error_report.py` | e-mail s hlášením chyby a popis systému pro něj |
+| `crash_report.py` | záznam o chybě serveru okna a nabídka hlášení při dalším otevření |
 | `desktop.py` | okna aplikace pro Windows a Linux |
 | `linux_print.py` | náhled tisku PDF na Linuxu (PDFium) |
 | `ui/bridge.js` | spojení stránek s aplikací (macOS / Windows a Linux / prohlížeč), sdílený výběr certifikátu |
