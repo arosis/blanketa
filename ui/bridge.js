@@ -172,6 +172,10 @@ window.zfoAbout = (() => {
             <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL 3.0</a></dd></dl>
         <ul data-links><li><button type="button" class="zfo-about-link" data-report>Nahlásit chybu…</button></li></ul>
         <p>Blanketa je zdarma a žije z dobrovolných příspěvků.</p>
+        <div class="zfo-about-updates">
+          <label><input type="checkbox" data-update-checks> Automaticky kontrolovat nové verze</label>
+          <button type="button" class="zfo-btn" data-update-check>Zkontrolovat aktualizace</button>
+          <p class="zfo-about-update-result" data-update-result role="status"></p></div>
         <div class="zfo-dialog-buttons">
           <button type="button" class="zfo-btn" data-support>Podpořit Blanketu…</button>
           <button type="button" class="zfo-btn primary" data-close>Zavřít</button></div>`;

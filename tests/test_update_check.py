@@ -426,3 +426,28 @@ class UpdateDialog(unittest.TestCase):
         self.assertIn("pageData().update_offer", block)
         self.assertIn("document.readyState === 'loading'", block)
         self.assertIn("document.addEventListener('DOMContentLoaded', offerOnOpen)", block)
+
+
+@needs_node
+class AboutWindow(unittest.TestCase):
+    SCRIPT = """
+        const controls = {};
+        const node = () => ({style: {}, append() {}, addEventListener() {}, close() {}, showModal() { this.shown = true; }});
+        let about;
+        document.createElement = () => {
+            const created = node();
+            created.querySelector = selector => (controls[selector] ??= {...node(), textContent: '', checked: false});
+            return (about ??= created);
+        };
+        zfoAbout();
+        console.log(JSON.stringify({shown: about.shown, html: about.innerHTML, wired: Object.keys(controls)}));
+    """
+
+    def test_about_dialog_has_the_update_controls_and_opens(self):
+        result = json.loads(run_ui_scripts(["bridge.js"], self.SCRIPT))
+        self.assertTrue(result["shown"])
+        for fragment in ("data-update-checks", "data-update-check>", "data-update-result",
+                         "Automaticky kontrolovat nové verze", "Zkontrolovat aktualizace"):
+            self.assertIn(fragment, result["html"])
+        for selector in ("[data-update-checks]", "[data-update-check]", "[data-update-result]"):
+            self.assertIn(selector, result["wired"])
