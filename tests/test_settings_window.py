@@ -390,7 +390,7 @@ class FakeWindow:
     def __init__(self, title, url, **options):
         self.title, self.url, self.options = title, url, options
         self.events = mock.Mock(closed=FakeEvent(), loaded=FakeEvent(), shown=FakeEvent())
-        self.scripts, self.shown = [], 0
+        self.scripts, self.shown, self.log = [], 0, []
         self.destroyed = False
 
     def get_current_url(self):
@@ -398,9 +398,11 @@ class FakeWindow:
 
     def evaluate_js(self, script):
         self.scripts.append(script)
+        self.log.append("script")
 
     def show(self):
         self.shown += 1
+        self.log.append("show")
 
     def restore(self):
         pass
@@ -457,6 +459,7 @@ class TheDesktopHost(unittest.TestCase):
         self.active = self.app.settings_window.window
         self.app._send_action_to_page("check-updates")
         self.assertEqual(first.window.scripts, ['window.zfoAction && zfoAction("check-updates")'])
+        self.assertEqual(first.window.log, ["show", "script"])
         self.assertEqual(second.window.scripts + self.app.settings_window.window.scripts, [])
 
     def test_page_action_goes_to_the_active_document_window(self):
@@ -466,6 +469,7 @@ class TheDesktopHost(unittest.TestCase):
         self.active = first.window
         self.app._send_action_to_page("about")
         self.assertEqual(first.window.scripts, ['window.zfoAction && zfoAction("about")'])
+        self.assertEqual(first.window.log, ["script"])
         self.assertEqual(second.window.scripts, [])
 
     def test_page_action_without_a_document_opens_an_empty_window_and_waits_for_it(self):
@@ -478,6 +482,21 @@ class TheDesktopHost(unittest.TestCase):
         empty.window.events.loaded.fire()
         empty.window.events.loaded.fire()
         self.assertEqual(empty.window.scripts, ['window.zfoAction && zfoAction("support")'])
+
+    def test_document_actions_without_a_document_window_do_nothing(self):
+        self.app.open_settings()
+        self.active = self.app.settings_window.window
+        for name in ("save", "print", "zoom-in", "recalc"):
+            self.app._send_action_to_page(name)
+        self.assertEqual(self.app.windows, [])
+        self.assertEqual(self.app.settings_window.window.scripts, [])
+
+    def test_every_app_action_without_a_document_window_opens_one(self):
+        for name in ("about", "check-updates", "report-error", "support"):
+            with self.subTest(action=name):
+                self.app.windows.clear()
+                self.app._send_action_to_page(name)
+                self.assertEqual(len(self.app.windows), 1)
 
     def test_settings_server_runs_in_settings_mode(self):
         form = desktop.FormWindow.__new__(desktop.FormWindow)
@@ -507,5 +526,8 @@ class TheDesktopHost(unittest.TestCase):
     def test_mac_settings_window_is_kept_apart(self):
         swift = (ROOT / "macapp/main.swift").read_text(encoding="utf-8")
         for fragment in ("enum WindowKind { case document, settings }", '["--settings", "0"]', 'setFrameAutosaveName(kind == .settings ? "SettingsWindow" : "FormWindow")',
-                         '"Nastavení"', "var settingsWindow: FormWindow?"):
+                         '"Nastavení"', "var settingsWindow: FormWindow?",
+                         'private static let appActions: Set<String> = ["about", "check-updates", "report-error", "support"]',
+                         "} else if Self.appActions.contains(action) {",
+                         "if !form.window.isKeyWindow { form.window.makeKeyAndOrderFront(nil) }"):
             self.assertIn(fragment, swift)

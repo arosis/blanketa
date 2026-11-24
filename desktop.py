@@ -20,6 +20,7 @@ SERVER_START_ATTEMPTS = 300
 MAX_RECENT_FILES = 10
 ATTACHMENT_URL = re.compile(r"/(?:attachment|container-file)\?s=[A-Za-z0-9_-]+&i=\d+", re.ASCII)
 ATTACHMENT_DOWNLOAD_SECONDS = 120
+APP_ACTIONS = ("about", "check-updates", "report-error", "support")
 OPEN_DIALOG_FILE_TYPES = ("Podporované soubory (*.zfo;*.fo;*.pdf;*.asice;*.sce;*.asics;*.scs)", "Všechny soubory (*.*)")
 
 
@@ -316,9 +317,15 @@ class DesktopApp:
 
     def _send_action_to_page(self, name):
         script = f"window.zfoAction && zfoAction({json.dumps(name)})"
-        form = self._note_active_document_window() or (self.windows[-1] if self.windows else None)
+        active = self._note_active_document_window()
+        form = active or (self.windows[-1] if self.windows else None)
         if form:
+            if not active:
+                form.window.restore()
+                form.window.show()
             form.window.evaluate_js(script)
+            return
+        if name not in APP_ACTIONS:
             return
         form, unsent = self.open_window(), [script]
         form.window.events.loaded += lambda: unsent and form.window.evaluate_js(unsent.pop())

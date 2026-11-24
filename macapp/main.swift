@@ -374,6 +374,7 @@ enum RecentFiles {
 }
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    private static let appActions: Set<String> = ["about", "check-updates", "report-error", "support"]
     var windows: [FormWindow] = []
     var settingsWindow: FormWindow?
     var openedFile = false
@@ -454,8 +455,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc func formAction(_ sender: NSMenuItem) {
         guard let action = sender.representedObject as? String else { return }
         if let form = windows.first(where: { $0.window.isKeyWindow }) ?? windows.last {
+            if !form.window.isKeyWindow { form.window.makeKeyAndOrderFront(nil) }
             form.sendActionToPage(action)
-        } else {
+        } else if Self.appActions.contains(action) {
             openEmptyWindow().pendingAction = action
         }
     }
