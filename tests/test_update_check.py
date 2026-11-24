@@ -10,7 +10,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
-from support import isds_sample, page_data
+from support import isds_sample, needs_node, page_data, run_ui_scripts, ui_source
 
 import app
 import crash_report
@@ -394,3 +394,35 @@ class InTheLocalServer(WithOwnSettingsFolder):
                 with mock.patch.object(update_check, "check_now", return_value={"status": "current"}):
                     self.assertEqual(self.post("/update-check", b'{"action": "check"}', token)[0], 200)
                 self.assertEqual(self.post("/save", b"{}", token)[0], 404)
+
+
+@needs_node
+class UpdateDialog(unittest.TestCase):
+    def offer_text(self, **fields):
+        offer = {"version": "0.5.0", "current": "0.4.0", "linux": False, "download_url": RELEASE_DOWNLOADS, "news_url": "https://blanketa.cz/novinky/#0.5.0"}
+        offer.update(fields)
+        return json.loads(run_ui_scripts(["bridge.js"], f"console.log(JSON.stringify(zfoUpdateOffer.text({json.dumps(offer)})));"))
+
+    def test_offer_text_names_both_versions(self):
+        text = self.offer_text()
+        self.assertEqual(text["title"], "Je k dispozici nová verze Blankety")
+        self.assertEqual(text["lines"], ["Blanketa 0.5.0 (máte 0.4.0)"])
+
+    def test_linux_offer_explains_installation(self):
+        lines = self.offer_text(linux=True)["lines"]
+        self.assertEqual(lines[0], "Blanketa 0.5.0 (máte 0.4.0)")
+        self.assertIn("sudo apt install ./blanketa_0.5.0_amd64.deb", lines[1])
+
+    def test_bridge_opens_only_the_offered_urls(self):
+        source = ui_source("bridge.js")
+        block = source[source.index("window.zfoUpdateOffer"):]
+        self.assertIn("window.zfoOpenUrl(offer.download_url)", block)
+        self.assertIn("window.zfoOpenUrl(offer.news_url)", block)
+        self.assertNotIn("window.open(", block)
+
+    def test_offer_dialog_waits_for_page_load_like_the_crash_offer(self):
+        source = ui_source("bridge.js")
+        block = source[source.index("window.zfoUpdateOffer"):]
+        self.assertIn("pageData().update_offer", block)
+        self.assertIn("document.readyState === 'loading'", block)
+        self.assertIn("document.addEventListener('DOMContentLoaded', offerOnOpen)", block)
