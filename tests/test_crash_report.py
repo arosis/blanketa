@@ -113,7 +113,7 @@ class CrashInTheLocalServer(WithOwnSettings):
 
     def test_page_turns_the_offer_off_and_on(self):
         self.assertEqual(self.post("/crash-report", b'{"enabled": false}'), (200, '{"enabled": false}'))
-        self.assertFalse(page_data(app.render_empty_window())["crash_reports"])
+        self.assertNotIn("crash_reports", page_data(app.render_empty_window()))
         self.assertEqual(self.post("/crash-report", b'{"enabled": true}'), (200, '{"enabled": true}'))
 
     def test_malformed_choice_is_refused(self):

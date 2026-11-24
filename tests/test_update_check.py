@@ -355,7 +355,7 @@ class OnThePages(WithOwnSettingsFolder):
             data = page_data(app.document_page(app.SHELL, "formulář ZFO", {"session": "x"}))
         offered.assert_called_once_with(app.APP_VERSION)
         self.assertEqual(data["update_offer"]["version"], "0.5.0")
-        self.assertIs(data["update_checks"], True)
+        self.assertNotIn("update_checks", data)
 
     def test_page_without_an_offer_says_so(self):
         with mock.patch.object(update_check, "offer_for_page", return_value=None):
@@ -373,7 +373,7 @@ class OnThePages(WithOwnSettingsFolder):
         with mock.patch.object(update_check.certstore, "config_dir", return_value=self.folder / "missing" / "deeper"):
             data = page_data(app.render_empty_window())
         self.assertIsNone(data["update_offer"])
-        self.assertIs(data["update_checks"], True)
+        self.assertNotIn("update_checks", data)
 
 
 class InTheLocalServer(WithOwnSettingsFolder):

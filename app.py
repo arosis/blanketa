@@ -100,8 +100,7 @@ def page_with_data(template, data, fonts=""):
 def document_page(template, document, data, fonts=""):
     pending_crash_report = crash_report.take_pending()
     update_offer = None if pending_crash_report else update_check.offer_for_page(APP_VERSION)
-    offer = {"document": document, "crash_report": pending_crash_report, "crash_reports": crash_report.enabled(),
-             "update_offer": update_offer, "update_checks": update_check.enabled()}
+    offer = {"document": document, "crash_report": pending_crash_report, "update_offer": update_offer}
     return page_with_data(template, {**data, **offer}, fonts)
 
 
