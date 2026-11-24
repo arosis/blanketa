@@ -26,13 +26,25 @@ Blanketa je zdarma a zdarma zůstane. Pokud vám ušetřila čas, můžete na je
 převodem na účet **7133557349/0800** (IBAN CZ43 0800 0000 0071 3355 7349) nebo kartou přes
 [GitHub Sponsors](https://github.com/sponsors/arosis) či [Ko-fi](https://ko-fi.com/rivel_arosis). QR platbu najdete v aplikaci pod
 „Podpořit Blanketu“ (na Macu v menu Blanketa, jinde v menu Nápověda), kde je i okno „O aplikaci Blanketa“ s verzí,
-licencí a odkazy. Po podpisu se ve stavovém řádku nejvýš jednou za 14 dní objeví nenápadná připomínka příspěvku;
-volbou „Už nezobrazovat“ zmizí natrvalo. Děkuji!
+licencí a odkazy. Po podpisu se ve stavovém řádku nejvýš jednou za 14 dní objeví nenápadná připomínka příspěvku;
+volbou „Už nezobrazovat“ zmizí natrvalo a v [Nastavení](#nastavení) ji jde znovu zapnout (objeví se nejdřív 14 dní po
+posledním zobrazení). Děkuji!
+
+## Nastavení
+
+Okno „Nastavení“ je jedno pro celou aplikaci a otevírá se vedle dokumentů, takže práci neruší. Na Macu ho najdete v menu
+Blanketa pod „Nastavení…“ (⌘,), na Windows a Linuxu v menu Soubor pod „Nastavení…“. Změny se ukládají hned, tlačítko
+„Uložit“ není.
+
+- Aktualizace: „Automaticky kontrolovat nové verze“ (viz [Nové verze](#nové-verze)).
+- Hlášení chyb: „Po chybě nabídnout hlášení při dalším otevření okna“ (viz [Nahlášení chyby](#nahlášení-chyby)).
+- Podpora: „Občas připomenout možnost přispět na vývoj“.
+- Časová razítka (podpis PDF): veřejná služba Sectigo, nebo vlastní služba s adresou a případně jménem (viz
+  [Časová razítka](#časová-razítka)). Heslo k vlastní službě se zadává při každém podpisu a neukládá se.
 
 ## Nahlášení chyby
 
-Chybu nahlásíte v aplikaci volbou „Nahlásit chybu…“ (na Macu v menu Blanketa, jinde v menu Nápověda, a také v okně
-„O aplikaci Blanketa“). Blanketa připraví e-mail na **podpora@blanketa.cz** a otevře ho ve vašem poštovním programu;
+Chybu nahlásíte v aplikaci volbou „Nahlásit chybu…“ (na Macu v menu Blanketa, jinde v menu Nápověda). Blanketa připraví e-mail na **podpora@blanketa.cz** a otevře ho ve vašem poštovním programu;
 nic neodešle sama. Hlášení obsahuje to, co do něj napíšete, a technické údaje: verzi Blankety, systém, druh dokumentu
 (formulář ZFO, PDF, datová zpráva, podepsaný kontejner) a posledních nejvýš 5 chyb skriptu stránky. Neobsahuje vyplněné
 údaje, obsah formuláře, názvy souborů, certifikáty ani hesla. Celý text vidíte a můžete ho před odesláním upravit nebo
@@ -42,7 +54,7 @@ smazat. Hlášení čte jen autor Blankety a slouží jen k opravě chyby. Ná
 Když při práci s dokumentem selže server okna nebo nečekaně skončí, Blanketa si uloží krátký technický záznam: druh
 chyby, místa v kódu Blankety, kde vznikla, činnost a datum – bez textu chyby, hodnot a názvů souborů. Při dalším
 otevření okna nabídne hlášení připravit; záznam se pak přidá k technickým údajům a nic neodejde bez vašeho potvrzení.
-Volbou „Už nenabízet“ se nabídka vypne natrvalo a zapnout ji jde znovu zaškrtnutím v okně „Nahlásit chybu“.
+Volbou „Už nenabízet“ se nabídka vypne natrvalo a zapnout ji jde znovu v [Nastavení](#nastavení) v části Hlášení chyb.
 
 ## Nové verze
 
@@ -52,8 +64,7 @@ a to, že se ptá Blanketa. Když vyšla novější verze, nabídne ji při dal
 „Stáhnout…“ otevře v prohlížeči balíček pro váš systém (na Linuxu stránku vydání s postupem instalace), „Připomenout za
 týden“ nabídku o sedm dní odloží.
 
-Automatické kontroly vypnete v okně „O aplikaci Blanketa“ volbou „Automaticky kontrolovat nové verze“; tamní tlačítko
-„Zkontrolovat aktualizace“ zjistí novou verzi i při vypnutých kontrolách. Instalace zůstává ruční, Blanketa se sama
+Automatické kontroly vypnete v [Nastavení](#nastavení) volbou „Automaticky kontrolovat nové verze“. Volba „Zkontrolovat aktualizace…“ (na Macu v menu Blanketa, jinde v menu Nápověda) zjistí novou verzi i při vypnutých kontrolách a řekne, zda máte nejnovější. Instalace zůstává ruční, Blanketa se sama
 nepřepíše.
 
 ## Stažení a instalace
@@ -151,6 +162,8 @@ Stránky jsou na všech systémech stejné; s aplikací kolem sebe mluví přes 
 | `ui/shell.html`, `ui/shell.js` | rozhraní ZFO (lišta, panely, dialogy) vkládané do vykreslené stránky formuláře |
 | `ui/pdf.html`, `ui/pdf.mjs` | rozhraní PDF nad PDF.js |
 | `ui/message.html`, `ui/container.html` a jejich `.js` | datové zprávy a podepsané kontejnery; server předává data stránce jedním blokem JSON |
+| `preferences.py` | okno Nastavení: čtení a ukládání voleb (aktualizace, hlášení chyb, připomínka podpory, časová razítka) |
+| `ui/settings.html`, `ui/settings.js` | rozhraní okna Nastavení |
 | `ui/fo2html.xsl` | doplněk XSLT zfo-editoru (obrázky, rozměry) |
 | `zfo_sign.py`, `zfo_verify.py` | podpis a ověření vrstev XMLDSig |
 | `pdf_sign.py` | vyplnění a podpis PDF, ověření podpisů |
@@ -262,7 +275,7 @@ Systémy české kvalifikované autority (PostSignum, I.CA, eIdentity) většino
 
 U PDF Blanketa čte časové razítko v podpisu i razítko celého dokumentu. Čas potvrdí jen neporušené razítko služby, která byla v tu chvíli kvalifikovaná podle důvěryhodného seznamu EU, a to certifikátem určeným jen pro časová razítka. Když vydavatel certifikát zrušil, rozhoduje o platnosti podpisu právě tento čas. Razítko dokumentu pokrývá jen podpisy, které už v souboru byly, a pozdější razítko dokumentu podpis po zrušení certifikátu nezneplatní, jen čas nepotvrdí. Zda nebyl zrušen certifikát samotného razítka, se nekontroluje.
 
-Razítko jde připojit i při podepisování PDF: v dialogu podpisu se zaškrtne „Připojit časové razítko“ a vybere služba. Předvolená je veřejná služba Sectigo (`http://timestamp.sectigo.com/qualified`), která vydává kvalifikovaná razítka bez přihlášení, ale bez záruky dostupnosti a za podmínek jejího provozovatele. Kdo má smlouvu s jiným poskytovatelem (například PostSignum nebo I.CA), zadá adresu jeho služby a případně jméno; heslo se zadává při každém podpisu a neukládá se, a služba s přihlášením musí mít adresu `https://`. Službě odchází jen otisk podpisu (desítky bajtů), ne dokument; poskytovatel se dozví IP adresu a čas. Volba je vypnutá, dokud ji uživatel nezapne. U vlastní služby Blanketa předem neví, zda je kvalifikovaná; ukáže to po podpisu panel podpisů. Když razítko získat nejde nebo služba orazítkuje něco jiného než tento podpis, Blanketa nic neuloží, řekne proč a nabídne podpis bez razítka. Vznikne podpis s razítkem (PAdES-B-T); stav certifikátu pro dlouhodobé ověření (PAdES-LT) Blanketa k podpisu nepřikládá. Přihlášení ke službě certifikátem není podporované. Formuláře ZFO se podepisují bez razítka.
+Razítko jde připojit i při podepisování PDF: v dialogu podpisu se zaškrtne „Připojit časové razítko“; službu vybíráte v [Nastavení](#nastavení) a dialog ji jen ukazuje. Předvolená je veřejná služba Sectigo (`http://timestamp.sectigo.com/qualified`), která vydává kvalifikovaná razítka bez přihlášení, ale bez záruky dostupnosti a za podmínek jejího provozovatele. Kdo má smlouvu s jiným poskytovatelem (například PostSignum nebo I.CA), zadá v Nastavení adresu jeho služby a případně jméno; heslo se zadává v dialogu při každém podpisu a neukládá se, a služba s přihlášením musí mít adresu `https://`. Službě odchází jen otisk podpisu (desítky bajtů), ne dokument; poskytovatel se dozví IP adresu a čas. Volba je vypnutá, dokud ji uživatel nezapne. U vlastní služby Blanketa předem neví, zda je kvalifikovaná; ukáže to po podpisu panel podpisů. Když razítko získat nejde nebo služba orazítkuje něco jiného než tento podpis, Blanketa nic neuloží, řekne proč a nabídne podpis bez razítka. Vznikne podpis s razítkem (PAdES-B-T); stav certifikátu pro dlouhodobé ověření (PAdES-LT) Blanketa k podpisu nepřikládá. Přihlášení ke službě certifikátem není podporované. Formuláře ZFO se podepisují bez razítka.
 
 ### Stav certifikátu uložený v PDF
 
