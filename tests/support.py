@@ -20,10 +20,15 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 os.environ["ZFO_OFFLINE"] = "1"  # tests never download trusted lists
 
+import certstore  # noqa: E402
 import crash_report  # noqa: E402
+import update_check  # noqa: E402
 
 _TEST_SETTINGS = tempfile.TemporaryDirectory()
 crash_report.settings_path = lambda: Path(_TEST_SETTINGS.name) / crash_report.SETTINGS_FILE
+certstore.config_dir = lambda: Path(_TEST_SETTINGS.name)
+REAL_REFRESH_IN_BACKGROUND = update_check.refresh_in_background
+update_check.refresh_in_background = lambda: None
 
 NS = {"d": "http://software602.cz/sample"}
 LONGEST_RUN_OF_ALL_TESTS_IN_SECONDS = 15 * 60

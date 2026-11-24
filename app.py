@@ -33,6 +33,7 @@ import pdf_sign
 import ruian
 import support_reminder
 import time_stamps
+import update_check
 import zfo_sign
 import zfo_verify
 from zfoengine import api as engine
@@ -94,7 +95,10 @@ def page_with_data(template, data, fonts=""):
 
 
 def document_page(template, document, data, fonts=""):
-    offer = {"document": document, "crash_report": crash_report.take_pending(), "crash_reports": crash_report.enabled()}
+    pending_crash_report = crash_report.take_pending()
+    update_offer = None if pending_crash_report else update_check.offer_for_page(APP_VERSION)
+    offer = {"document": document, "crash_report": pending_crash_report, "crash_reports": crash_report.enabled(),
+             "update_offer": update_offer, "update_checks": update_check.enabled()}
     return page_with_data(template, {**data, **offer}, fonts)
 
 
@@ -804,6 +808,24 @@ class Handler(BaseHTTPRequestHandler):
             pass
         return self._send_json({"enabled": crash_report.enabled()})
 
+    def _answer_update_check(self, body):
+        try:
+            request = json.loads(body or b"{}")
+            wanted, action = request.get("enabled"), request.get("action")
+        except (ValueError, AttributeError):
+            return self._send_response(400, b"bad request", PLAIN_TEXT)
+        if action == "check" and wanted is None:
+            return self._send_json(update_check.check_now(APP_VERSION))
+        if action == "state" and wanted is None:
+            return self._send_json({"enabled": update_check.enabled()})
+        if not isinstance(wanted, bool) or action is not None:
+            return self._send_response(400, b"bad request", PLAIN_TEXT)
+        try:
+            update_check.set_enabled(wanted)
+        except OSError:
+            pass
+        return self._send_json({"enabled": update_check.enabled()})
+
     def _answer_support_reminder(self, body):
         try:
             wanted = json.loads(body or b"{}").get("action")
@@ -841,9 +863,9 @@ class Handler(BaseHTTPRequestHandler):
         session = SESSIONS.get(first_query_value(url.query, "s"))
         if session is None:
             return self._send_response(404, "Relace vypršela, načti formulář znovu".encode(), PLAIN_TEXT_UTF8)
-        if ("message" in session or "entries" in session) and url.path not in ("/revocation", "/crash-report"):
+        if ("message" in session or "entries" in session) and url.path not in ("/revocation", "/crash-report", "/update-check"):
             return self._send_not_found()
-        if "empty" in session and url.path != "/crash-report":
+        if "empty" in session and url.path not in ("/crash-report", "/update-check"):
             return self._send_not_found()
         if url.path == "/add-certificate":
             return self._add_certificate()
@@ -852,6 +874,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._report_revocation(body)
         if url.path == "/lookup":  # outside the lock for the same reason
             return self._answer_lookup(body)
+        if url.path == "/update-check":  # outside the lock: a manual check may wait for GitHub
+            return self._answer_update_check(body)
         if url.path == "/check-addresses":
             return self._check_addresses(session)
         with LOCK:

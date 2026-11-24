@@ -146,7 +146,8 @@ window.zfoAbout = (() => {
   let dialog;
   return () => {
     if (!dialog) {
-      const version = JSON.parse(document.querySelector('script[data-zfo-page]')?.textContent || '{}').app_version;
+      const page = JSON.parse(document.querySelector('script[data-zfo-page]')?.textContent || '{}');
+      const version = page.app_version;
       dialog = document.createElement('dialog');
       dialog.className = 'zfo-dialog zfo-about';
       dialog.innerHTML = `<style>
@@ -159,6 +160,9 @@ window.zfoAbout = (() => {
           .zfo-about ul { margin: 6px 0 12px; padding-left: 18px; }
           .zfo-about a, .zfo-about-link { color: var(--accent, #0a64d6); cursor: pointer; }
           .zfo-about-link { padding: 0; border: 0; background: none; font: inherit; text-decoration: underline; }
+          .zfo-about-updates { margin: 0 0 12px; display: grid; gap: 6px; justify-items: start; }
+          .zfo-about-updates label { display: block; }
+          .zfo-about-update-result { margin: 0; min-height: 1.45em; color: #6e6e73; }
         </style>
         <h2>Blanketa</h2>
         <p class="zfo-about-version" data-version></p>
@@ -168,6 +172,10 @@ window.zfoAbout = (() => {
             <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL 3.0</a></dd></dl>
         <ul data-links><li><button type="button" class="zfo-about-link" data-report>Nahlásit chybu…</button></li></ul>
         <p>Blanketa je zdarma a žije z dobrovolných příspěvků.</p>
+        <div class="zfo-about-updates">
+          <label><input type="checkbox" data-update-checks> Automaticky kontrolovat nové verze</label>
+          <button type="button" class="zfo-btn" data-update-check>Zkontrolovat aktualizace</button>
+          <p class="zfo-about-update-result" data-update-result role="status"></p></div>
         <div class="zfo-dialog-buttons">
           <button type="button" class="zfo-btn" data-support>Podpořit Blanketu…</button>
           <button type="button" class="zfo-btn primary" data-close>Zavřít</button></div>`;
@@ -182,9 +190,27 @@ window.zfoAbout = (() => {
       }
       dialog.querySelector('[data-support]').addEventListener('click', () => { dialog.close(); window.zfoSupport(); });
       dialog.querySelector('[data-report]').addEventListener('click', () => { dialog.close(); window.zfoReportError(); });
+      const switchBox = dialog.querySelector('[data-update-checks]');
+      const checkButton = dialog.querySelector('[data-update-check]');
+      const result = dialog.querySelector('[data-update-result]');
+      switchBox.checked = page.update_checks !== false;
+      switchBox.addEventListener('change', async () => {
+        const wanted = switchBox.checked;
+        try { switchBox.checked = (await window.zfoUpdateOffer.store(wanted)).enabled; } catch { switchBox.checked = !wanted; }
+      });
+      checkButton.addEventListener('click', async () => {
+        checkButton.disabled = true;
+        result.textContent = 'Zjišťuji…';
+        const answer = await window.zfoUpdateOffer.check();
+        checkButton.disabled = false;
+        if (answer.status === 'newer') { dialog.close(); window.zfoUpdateOffer(answer.offer); }
+        else result.textContent = answer.status === 'current' ? 'Máte nejnovější verzi.' : 'Novou verzi teď nešlo zjistit. Zkuste to později.';
+      });
       dialog.querySelector('[data-close]').addEventListener('click', () => dialog.close());
       document.body.append(dialog);
     }
+    dialog.querySelector('[data-update-result]').textContent = '';
+    window.zfoUpdateOffer.state().then(answer => { dialog.querySelector('[data-update-checks]').checked = answer.enabled; }, () => {});
     dialog.showModal();
   };
 })();
@@ -311,6 +337,60 @@ window.zfoReportError = (() => {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', offerAfterCrash);
   else offerAfterCrash();
   return Object.assign(() => open(), {record, template, fitIntoMailLink});
+})();
+
+window.zfoUpdateOffer = (() => {
+  const pageData = () => JSON.parse(document.querySelector('script[data-zfo-page]')?.textContent || '{}');
+  const post = async body => {
+    const response = await fetch(`/update-check?s=${pageData().session}`, {method: 'POST', body: JSON.stringify(body)});
+    if (!response.ok) throw new Error(response.status);
+    return response.json();
+  };
+  const text = offer => {
+    const lines = [`Blanketa ${offer.version} (máte ${offer.current})`];
+    if (offer.linux) {
+      lines.push(`Na stránce vydání stáhněte balíček .deb a nainstalujte ho příkazem sudo apt install ./blanketa_${offer.version}_amd64.deb, nebo archiv .tar.gz pro ostatní distribuce.`);
+    }
+    return {title: 'Je k dispozici nová verze Blankety', lines};
+  };
+  const open = offer => {
+    const {title, lines} = text(offer);
+    const dialog = document.createElement('dialog');
+    dialog.className = 'zfo-dialog zfo-update-offer';
+    dialog.innerHTML = `<style>.zfo-update-offer { width: 420px; font: 13px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif; }</style>
+      <h2 data-title></h2>
+      <div data-lines></div>
+      <div class="zfo-dialog-buttons">
+        <button type="button" class="zfo-btn" data-news>Co je nového</button>
+        <button type="button" class="zfo-btn" data-later>Připomenout za týden</button>
+        <button type="button" class="zfo-btn primary" data-download>Stáhnout…</button></div>`;
+    dialog.querySelector('[data-title]').textContent = title;
+    for (const line of lines) {
+      const paragraph = document.createElement('p');
+      paragraph.textContent = line;
+      dialog.querySelector('[data-lines]').append(paragraph);
+    }
+    dialog.querySelector('[data-news]').addEventListener('click', () => window.zfoOpenUrl(offer.news_url));
+    dialog.querySelector('[data-later]').addEventListener('click', () => dialog.close());
+    dialog.querySelector('[data-download]').addEventListener('click', () => { window.zfoOpenUrl(offer.download_url); dialog.close(); });
+    dialog.addEventListener('close', () => dialog.remove());
+    document.body.append(dialog);
+    dialog.showModal();
+  };
+  const check = async () => {
+    try {
+      return await post({action: 'check'});
+    } catch {
+      return {status: 'unknown'};
+    }
+  };
+  const offerOnOpen = () => {
+    const offer = pageData().update_offer;
+    if (offer) open(offer);
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', offerOnOpen);
+  else offerOnOpen();
+  return Object.assign(open, {text, check, store: enabled => post({enabled}), state: () => post({action: 'state'})});
 })();
 
 window.zfoSupportReminder = async (sessionToken, status) => {
