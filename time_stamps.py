@@ -41,19 +41,6 @@ def settings():
     return kept
 
 
-def store_settings(wanted):
-    if not isinstance(wanted, dict):
-        raise ValueError("Nastavení časových razítek nemá očekávaný tvar.")
-    service = OWN_SERVICE if wanted.get("service") == OWN_SERVICE else PUBLIC_SERVICE
-    url = str(wanted.get("url") or "").strip()
-    user = str(wanted.get("user") or "").strip()
-    if service == OWN_SERVICE and wanted.get("enabled"):
-        _refuse_unusable_address(url, user)
-    stored = {"enabled": bool(wanted.get("enabled")), "service": service, "url": url, "user": user}
-    (certstore.config_dir() / SETTINGS_FILE).write_text(json.dumps(stored, ensure_ascii=False), encoding="utf-8")
-    return stored
-
-
 def _write(stored):
     (certstore.config_dir() / SETTINGS_FILE).write_text(json.dumps(stored, ensure_ascii=False), encoding="utf-8")
 

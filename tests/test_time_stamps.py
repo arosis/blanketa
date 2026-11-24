@@ -153,13 +153,21 @@ class Settings(ServiceRunning):
         self.assertEqual(time_stamps.settings(), {"enabled": False, "service": "public", "url": "", "user": ""})
 
     def test_stored_settings_come_back(self):
-        wanted = {"enabled": True, "service": "own", "url": "https://tsa.example.cz/tsa", "user": "uzivatel"}
-        self.assertEqual(time_stamps.store_settings(wanted), wanted)
-        self.assertEqual(time_stamps.settings(), wanted)
+        time_stamps.store_service("own", "https://tsa.example.cz/tsa", "uzivatel")
+        time_stamps.store_enabled(True)
+        self.assertEqual(time_stamps.settings(),
+                         {"enabled": True, "service": "own", "url": "https://tsa.example.cz/tsa", "user": "uzivatel"})
+
+    def test_service_and_switch_do_not_overwrite_each_other(self):
+        time_stamps.store_enabled(True)
+        time_stamps.store_service("own", "https://tsa.example.cz/tsa", "")
+        self.assertTrue(time_stamps.settings()["enabled"])
+        time_stamps.store_enabled(False)
+        self.assertEqual(time_stamps.settings()["url"], "https://tsa.example.cz/tsa")
 
     def test_password_is_never_stored(self):
-        time_stamps.store_settings({"enabled": True, "service": "own", "url": "https://tsa.example.cz/tsa",
-                                    "user": "uzivatel", "password": "tajne"})
+        time_stamps.store_service("own", "https://tsa.example.cz/tsa", "uzivatel")
+        time_stamps.store_enabled(True)
         self.assertNotIn("tajne", (time_stamps.certstore.config_dir() / time_stamps.SETTINGS_FILE).read_text(encoding="utf-8"))
 
     def test_damaged_settings_file_means_no_stamp(self):
@@ -176,32 +184,25 @@ class Settings(ServiceRunning):
             '{"enabled": true, "service": "jina\\"]", "url": "", "user": ""}', encoding="utf-8")
         self.assertEqual(time_stamps.settings()["service"], "public")
 
-    def test_settings_that_are_no_object_are_refused(self):
-        with self.assertRaises(ValueError):
-            time_stamps.store_settings(["enabled"])
-
     def test_own_service_needs_a_web_address(self):
         for address in ("", "tsa.example.cz", "file:///etc/passwd", "ftp://tsa.example.cz"):
             with self.subTest(address=address), self.assertRaises(ValueError):
-                time_stamps.store_settings({"enabled": True, "service": "own", "url": address})
+                time_stamps.store_service("own", address, "")
 
     def test_password_never_travels_unencrypted(self):
         with self.assertRaises(ValueError):
-            time_stamps.store_settings({"enabled": True, "service": "own", "url": "http://tsa.example.cz/tsa", "user": "uzivatel"})
+            time_stamps.store_service("own", "http://tsa.example.cz/tsa", "uzivatel")
 
     def test_credentials_inside_the_address_are_refused(self):
         with self.assertRaises(ValueError):
-            time_stamps.store_settings({"enabled": True, "service": "own", "url": "https://uzivatel:tajne@tsa.example.cz/tsa"})
-
-    def test_unfinished_own_service_can_be_stored_while_stamps_are_off(self):
-        self.assertEqual(time_stamps.store_settings({"enabled": False, "service": "own", "url": ""})["service"], "own")
+            time_stamps.store_service("own", "https://uzivatel:tajne@tsa.example.cz/tsa", "")
 
     def test_public_service_is_the_qualified_one(self):
-        time_stamps.store_settings({"enabled": True, "service": "public"})
+        time_stamps.store_enabled(True)
         self.assertEqual(time_stamps.service_time_stamper().url, "http://timestamp.sectigo.com/qualified")
 
     def test_own_service_gets_its_address_name_and_the_password_of_this_signing(self):
-        time_stamps.store_settings({"enabled": True, "service": "own", "url": "https://tsa.example.cz/tsa", "user": "uzivatel"})
+        time_stamps.store_service("own", "https://tsa.example.cz/tsa", "uzivatel")
         stamper = time_stamps.service_time_stamper("tajne")
         self.assertEqual((stamper.url, stamper.user, stamper.password), ("https://tsa.example.cz/tsa", "uzivatel", "tajne"))
 
@@ -269,16 +270,10 @@ class OverTheLocalServer(PdfReadyToSign):
         self.assertEqual(status, 200)
         self.assertEqual(pdf_sign.describe_signatures(self.target.read_bytes())[0]["stamps"], [])
 
-    def test_page_stores_the_chosen_service(self):
-        wanted = {"enabled": True, "service": "own", "url": "https://tsa.example.cz/tsa", "user": ""}
-        status, stored = self.post("/time-stamp-settings", wanted)
-        self.assertEqual((status, json.loads(stored)), (200, wanted))
-        self.assertEqual(time_stamps.settings(), wanted)
-
-    def test_unusable_service_is_refused_with_a_reason(self):
-        status, reason = self.post("/time-stamp-settings", {"enabled": True, "service": "own", "url": "tsa.example.cz"})
-        self.assertEqual(status, 400)
-        self.assertIn("http://", reason)
+    def test_page_stores_only_the_switch(self):
+        status, stored = self.post("/time-stamp-settings", {"enabled": True, "service": "own", "url": "tsa.example.cz"})
+        self.assertEqual((status, json.loads(stored)["enabled"]), (200, True))
+        self.assertEqual(time_stamps.settings(), {"enabled": True, "service": "public", "url": "", "user": ""})
 
     def test_settings_that_are_no_object_are_refused(self):
         self.assertEqual(self.post("/time-stamp-settings", ["enabled"])[0], 400)

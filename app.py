@@ -30,6 +30,7 @@ import isds_message
 import lookups
 import pdf_form_data
 import pdf_sign
+import preferences
 import ruian
 import support_reminder
 import time_stamps
@@ -53,6 +54,7 @@ OPENING_PLACEHOLDER_STYLE = ('<style>body:not(.zfo-app) > * { display: none; } b
 XSLT = etree.XSLT(etree.parse(str(RESOURCES / "ui/fo2html.xsl")))
 FORMS = {}
 SINGLE_FILE = False
+SETTINGS_ONLY = False
 DAMAGED_PAGE = ("<!doctype html><meta charset=utf-8><title>Soubor nelze otevřít</title>"
                 "<body style='font:14px system-ui,sans-serif;padding:24px'><h1 style='font-size:18px'>Soubor nelze otevřít</h1>"
                 "<p>Soubor může být poškozený nebo nejde o formulář, který Blanketa umí přečíst. Může jít i o chybu Blankety; "
@@ -77,6 +79,7 @@ SHELL_STYLE = re.search(r"<style>.*?</style>", SHELL, re.S).group(0).replace("__
 PDF_PAGE = (RESOURCES / "ui/pdf.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
 MESSAGE_PAGE = (RESOURCES / "ui/message.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
 CONTAINER_PAGE = (RESOURCES / "ui/container.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
+SETTINGS_PAGE = (RESOURCES / "ui/settings.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
 CODELISTS_PAGE = (RESOURCES / "ui/codelists.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
 APP_VERSION = (RESOURCES / "VERSION").read_text(encoding="utf-8").strip()
 SYSTEM = error_report.system_description()
@@ -149,6 +152,10 @@ def remove_data_objects(layer):
         layer.remove(data_object)
 
 
+def render_settings_page():
+    return page_with_data(SETTINGS_PAGE, {"session": new_session({"settings": True}), "settings": preferences.current()})
+
+
 def render_empty_window():
     return document_page(SHELL, "prázdné okno", {"session": new_session({"empty": True}), "file": "", "empty": True})
 
@@ -209,12 +216,17 @@ def pdf_info(pdf):
             "signature_field": pdf_sign.empty_signature_field(pdf), "xfa": pdf_xfa_usage(reader, fields)}
 
 
+def time_stamp_state():
+    stored = time_stamps.settings()
+    return {**stored, "usable": time_stamps.usable(stored)}
+
+
 def render_pdf_page(name):
     pdf = form_path(name).read_bytes()
     session = new_session({"name": name, "pdf": pdf})
     return document_page(PDF_PAGE, "PDF", {"session": session, "file": form_path(name).name,
                                            "signatures": pdf_signatures(pdf), "info": pdf_info(pdf),
-                                           "time_stamp": time_stamps.settings()})
+                                           "time_stamp": time_stamp_state()})
 
 
 def container_signatures(signatures):
@@ -692,6 +704,8 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/codelists-progress":
             progress = codelists.download_progress(first_query_value(url.query, "t"))
             return self._send_json(progress) if progress else self._send_not_found()
+        if SETTINGS_ONLY:
+            return self._send_response(200, render_settings_page().encode(), HTML_UTF8)
         name = first_query_value(url.query, "form", None)
         if not name and SINGLE_FILE and not FORMS:
             return self._send_response(200, render_empty_window().encode(), HTML_UTF8)
@@ -790,10 +804,21 @@ class Handler(BaseHTTPRequestHandler):
 
     def _store_time_stamp_settings(self, body):
         try:
-            stored = time_stamps.store_settings(json.loads(body or b"{}"))
+            wanted = json.loads(body or b"{}")
+            enabled = wanted.get("enabled") if isinstance(wanted, dict) else ""
+            if enabled is not None and not isinstance(enabled, bool):
+                raise ValueError("Nastavení časových razítek nemá očekávaný tvar.")
+            if enabled is not None:
+                time_stamps.store_enabled(enabled)
         except (ValueError, OSError) as error:
             return self._send_error_message(error)
-        return self._send_json(stored)
+        return self._send_json(time_stamp_state())
+
+    def _store_settings(self, body):
+        try:
+            return self._send_json(preferences.change(json.loads(body or b"{}")))
+        except (ValueError, OSError) as error:
+            return self._send_error_message(error)
 
     def _store_crash_report_choice(self, body):
         try:
@@ -867,6 +892,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_not_found()
         if "empty" in session and url.path not in ("/crash-report", "/update-check"):
             return self._send_not_found()
+        if ("settings" in session) != (url.path == "/settings"):
+            return self._send_not_found()
         if url.path == "/add-certificate":
             return self._add_certificate()
         body = self._read_body()
@@ -878,6 +905,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._answer_update_check(body)
         if url.path == "/check-addresses":
             return self._check_addresses(session)
+        if url.path == "/settings":
+            return self._store_settings(body)
         with LOCK:
             if url.path == "/ipc":
                 return self._answer_engine_message(session, body)
@@ -927,8 +956,9 @@ def exit_together_with_host_app():
 
 
 def main(args):
-    global SINGLE_FILE
-    if args[:1] in (["--file"], ["--empty"]):
+    global SINGLE_FILE, SETTINGS_ONLY
+    if args[:1] in (["--file"], ["--empty"], ["--settings"]):
+        SETTINGS_ONLY = args[0] == "--settings"
         if args[0] == "--file":
             path = Path(args[1]).expanduser().resolve()
             FORMS[path.stem] = path
