@@ -32,6 +32,19 @@ def config_dir():
     return base
 
 
+def replace_file(path, text):
+    partial = None
+    try:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", suffix=".part",
+                                         delete=False) as partial:
+            partial.write(text)
+        os.replace(partial.name, path)
+    except BaseException:
+        if partial is not None:
+            Path(partial.name).unlink(missing_ok=True)
+        raise
+
+
 FROZEN = hasattr(sys, "_MEIPASS")
 TEST_PASSWORD = os.environ.get("ZFO_TEST_KEYCHAIN_PASSWORD", "test")
 TEST_KEYCHAIN = Path(os.environ.get("ZFO_TEST_KEYCHAIN", config_dir() / "test.keychain-db" if FROZEN

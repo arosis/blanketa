@@ -23,7 +23,7 @@ def _stored():
 
 
 def _store(values):
-    settings_path().write_text(json.dumps(values, ensure_ascii=False), encoding="utf-8")
+    certstore.replace_file(settings_path(), json.dumps(values, ensure_ascii=False))
 
 
 def enabled():

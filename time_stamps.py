@@ -42,7 +42,7 @@ def settings():
 
 
 def _write(stored):
-    (certstore.config_dir() / SETTINGS_FILE).write_text(json.dumps(stored, ensure_ascii=False), encoding="utf-8")
+    certstore.replace_file(certstore.config_dir() / SETTINGS_FILE, json.dumps(stored, ensure_ascii=False))
 
 
 def store_service(service, url, user):

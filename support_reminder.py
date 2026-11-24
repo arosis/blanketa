@@ -16,7 +16,7 @@ def _stored():
 
 
 def _store(values):
-    (certstore.config_dir() / SETTINGS_FILE).write_text(json.dumps(values), encoding="utf-8")
+    certstore.replace_file(certstore.config_dir() / SETTINGS_FILE, json.dumps(values))
 
 
 def _last_shown(stored):

@@ -93,5 +93,41 @@ class TimeStampRecord(WithOwnSettingsFolder):
         self.assertTrue(time_stamps.usable({"service": time_stamps.PUBLIC_SERVICE, "url": "", "user": ""}))
 
 
+
+class SettingsFilesAreReplacedWhole(WithOwnSettingsFolder):
+    def test_every_settings_file_is_complete_and_leaves_no_partial_file(self):
+        preferences.change({"update_checks": False, "crash_offers": False, "support_reminder": False,
+                            "time_stamp": {"service": "own", "url": "https://tsa.example.cz/", "user": "jméno"}})
+        time_stamps.store_enabled(True)
+        names = sorted(path.name for path in self.folder.iterdir())
+        self.assertEqual(names, sorted([update_check.SETTINGS_FILE, crash_report.SETTINGS_FILE,
+                                        support_reminder.SETTINGS_FILE, time_stamps.SETTINGS_FILE]))
+        self.assertEqual(self.stored(time_stamps.SETTINGS_FILE)["user"], "jméno")
+        self.assertFalse(preferences.current()["update_checks"])
+        self.assertFalse(preferences.current()["crash_offers"])
+        self.assertFalse(preferences.current()["support_reminder"])
+
+    def test_failed_replace_keeps_the_old_file_and_no_partial_one(self):
+        update_check.set_enabled(False)
+        with mock.patch.object(update_check.certstore.os, "replace", side_effect=OSError("busy")), \
+                self.assertRaises(OSError):
+            update_check.set_enabled(True)
+        self.assertEqual([path.name for path in self.folder.iterdir()], [update_check.SETTINGS_FILE])
+        self.assertFalse(update_check.enabled())
+
+    def test_written_file_is_never_seen_partial(self):
+        replaced = []
+        real_replace = update_check.certstore.os.replace
+
+        def replace(source, target):
+            replaced.append((Path(source).parent, json.loads(Path(source).read_text(encoding="utf-8"))))
+            real_replace(source, target)
+
+        with mock.patch.object(update_check.certstore.os, "replace", side_effect=replace):
+            support_reminder.hide()
+        self.assertEqual(replaced[0][0], self.folder)
+        self.assertTrue(replaced[0][1]["hidden"])
+
+
 if __name__ == "__main__":
     unittest.main()
