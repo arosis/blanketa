@@ -1,6 +1,7 @@
 const pageData = JSON.parse(document.querySelector('script[data-zfo-page]').textContent);
 const SESSION = pageData.session;
 const SAVE_FAILED = 'Nastavení se nepodařilo uložit.';
+const TIME_STAMP_UNUSABLE = 'Služba časových razítek není správně nastavená – upravte adresu.';
 const TYPING_PAUSE_MS = 400;
 const SWITCHES = {
   update_checks: document.querySelector('[data-update-checks]'),
@@ -27,6 +28,7 @@ const render = settings => {
   URL_FIELD.value = settings.time_stamp.url;
   USER_FIELD.value = settings.time_stamp.user;
   showOwnFields();
+  showError('time_stamp', settings.time_stamp.usable ? '' : TIME_STAMP_UNUSABLE);
 };
 const restore = key => {
   if (SWITCHES[key]) {

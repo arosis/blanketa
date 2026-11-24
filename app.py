@@ -55,6 +55,8 @@ XSLT = etree.XSLT(etree.parse(str(RESOURCES / "ui/fo2html.xsl")))
 FORMS = {}
 SINGLE_FILE = False
 SETTINGS_ONLY = False
+SETTINGS_NOT_STORED = "Nastavení se nepodařilo uložit."
+TIME_STAMP_SETTINGS_SHAPE = "Nastavení časových razítek nemá očekávaný tvar."
 DAMAGED_PAGE = ("<!doctype html><meta charset=utf-8><title>Soubor nelze otevřít</title>"
                 "<body style='font:14px system-ui,sans-serif;padding:24px'><h1 style='font-size:18px'>Soubor nelze otevřít</h1>"
                 "<p>Soubor může být poškozený nebo nejde o formulář, který Blanketa umí přečíst. Může jít i o chybu Blankety; "
@@ -684,6 +686,8 @@ class Handler(BaseHTTPRequestHandler):
         if self._is_foreign_request():
             return self._send_response(403, b"forbidden", PLAIN_TEXT)
         url = urlparse(self.path)
+        if SETTINGS_ONLY:
+            return self._serve_settings_window(url.path)
         if url.path.startswith("/static/"):
             return self._serve_file_inside(EDITOR, url.path[len("/static/"):], STATIC_CONTENT_TYPES)
         if url.path.startswith("/pdfjs/"):
@@ -703,10 +707,6 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/codelists-progress":
             progress = codelists.download_progress(first_query_value(url.query, "t"))
             return self._send_json(progress) if progress else self._send_not_found()
-        if SETTINGS_ONLY:
-            if url.path != "/":
-                return self._send_not_found()
-            return self._send_response(200, render_settings_page().encode(), HTML_UTF8)
         name = first_query_value(url.query, "form", None)
         if not name and SINGLE_FILE and not FORMS:
             return self._send_response(200, render_empty_window().encode(), HTML_UTF8)
@@ -715,6 +715,15 @@ class Handler(BaseHTTPRequestHandler):
         if not name:
             return self._serve_form_list()
         return self._serve_form_page(name, url.query)
+
+    def _serve_settings_window(self, path):
+        if path == "/":
+            return self._send_response(200, render_settings_page().encode(), HTML_UTF8)
+        if path == "/bridge.js":
+            return self._serve_bridge_script()
+        if path == "/settings.js":
+            return self._serve_page_script(PAGE_SCRIPTS[path])
+        return self._send_not_found()
 
     def _add_certificate(self):
         request = json.loads(self._read_body() or b"{}")
@@ -806,10 +815,12 @@ class Handler(BaseHTTPRequestHandler):
     def _store_time_stamp_settings(self, body):
         try:
             wanted = json.loads(body or b"{}")
-            enabled = wanted.get("enabled") if isinstance(wanted, dict) else ""
+            if not isinstance(wanted, dict):
+                raise ValueError(TIME_STAMP_SETTINGS_SHAPE)
+            enabled = wanted.get("enabled")
             if enabled is not None and not isinstance(enabled, bool):
-                raise ValueError("Nastavení časových razítek nemá očekávaný tvar.")
-            if enabled is not None:
+                raise ValueError(TIME_STAMP_SETTINGS_SHAPE)
+            if isinstance(enabled, bool):
                 time_stamps.store_enabled(enabled)
         except (ValueError, OSError) as error:
             return self._send_error_message(error)
@@ -818,8 +829,10 @@ class Handler(BaseHTTPRequestHandler):
     def _store_settings(self, body):
         try:
             return self._send_json(preferences.change(json.loads(body or b"{}")))
-        except (ValueError, OSError) as error:
+        except ValueError as error:
             return self._send_error_message(error)
+        except OSError:
+            return self._send_error_message(SETTINGS_NOT_STORED)
 
     def _store_crash_report_choice(self, body):
         try:
@@ -837,20 +850,11 @@ class Handler(BaseHTTPRequestHandler):
     def _answer_update_check(self, body):
         try:
             request = json.loads(body or b"{}")
-            wanted, action = request.get("enabled"), request.get("action")
-        except (ValueError, AttributeError):
+        except ValueError:
+            request = None
+        if request != {"action": "check"}:
             return self._send_response(400, b"bad request", PLAIN_TEXT)
-        if action == "check" and wanted is None:
-            return self._send_json(update_check.check_now(APP_VERSION))
-        if action == "state" and wanted is None:
-            return self._send_json({"enabled": update_check.enabled()})
-        if not isinstance(wanted, bool) or action is not None:
-            return self._send_response(400, b"bad request", PLAIN_TEXT)
-        try:
-            update_check.set_enabled(wanted)
-        except OSError:
-            pass
-        return self._send_json({"enabled": update_check.enabled()})
+        return self._send_json(update_check.check_now(APP_VERSION))
 
     def _answer_support_reminder(self, body):
         try:

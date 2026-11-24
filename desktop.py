@@ -300,6 +300,9 @@ class DesktopApp:
     def _forget_settings_window(self):
         self.settings_window = None
 
+    def _settings_window_is_active(self):
+        return self.settings_window is not None and self.webview.active_window() is self.settings_window.window
+
     def _note_active_document_window(self):
         active = self.webview.active_window()
         for form in self.windows:
@@ -316,6 +319,8 @@ class DesktopApp:
             self.open_window(Path(path))
 
     def _send_action_to_page(self, name):
+        if self._settings_window_is_active() and name not in APP_ACTIONS:
+            return
         script = f"window.zfoAction && zfoAction({json.dumps(name)})"
         active = self._note_active_document_window()
         form = active or (self.windows[-1] if self.windows else None)

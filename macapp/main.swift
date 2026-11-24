@@ -454,12 +454,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func formAction(_ sender: NSMenuItem) {
         guard let action = sender.representedObject as? String else { return }
+        guard runsWhileSettingsIsKey(action) else { return }
         if let form = windows.first(where: { $0.window.isKeyWindow }) ?? windows.last {
             if !form.window.isKeyWindow { form.window.makeKeyAndOrderFront(nil) }
             form.sendActionToPage(action)
         } else if Self.appActions.contains(action) {
             openEmptyWindow().pendingAction = action
         }
+    }
+
+    private func runsWhileSettingsIsKey(_ action: String) -> Bool {
+        settingsWindow?.window.isKeyWindow != true || Self.appActions.contains(action)
     }
 
     private func formItem(_ title: String, _ action: String, _ key: String = "", _ modifiers: NSEvent.ModifierFlags = .command) -> NSMenuItem {
@@ -547,6 +552,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let main = NSMenu()
         [applicationMenu(), fileMenu(), editMenu(), formMenu(), viewMenu()].forEach(main.addItem)
         NSApp.mainMenu = main
+    }
+}
+
+extension AppDelegate: NSMenuItemValidation {
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        guard menuItem.action == #selector(formAction(_:)), let action = menuItem.representedObject as? String else { return true }
+        return runsWhileSettingsIsKey(action)
     }
 }
 

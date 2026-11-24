@@ -367,6 +367,15 @@ for (const button of document.querySelectorAll('[data-menu]')) {
 }
 document.addEventListener('click', closeMenus);
 
+const showSignDialog = () => {
+  queryOne('[data-sign-text]').textContent = 'Dokument se podepíše vybraným certifikátem a uloží jako nový soubor vedle původního. '
+    + (signatureField ? `Podpis se vloží do připraveného podpisového pole „${signatureField}“.`
+                      : 'Dokument nemá připravené podpisové pole.');
+  queryOne('[data-sign-mode]').hidden = Boolean(signatureField);
+  signDialog.returnValue = '';
+  signDialog.showModal();
+  certSelect.focus();
+};
 const zoomTo = scale => { autoFit = false; viewer.currentScale = Math.min(4, Math.max(.25, scale)); };
 const actions = {
   open: () => native?.postMessage({action: 'open'}),
@@ -381,18 +390,12 @@ const actions = {
   save: async () => {
     closeMenus();
     await timeStamp.refresh();
-    queryOne('[data-sign-text]').textContent = 'Dokument se podepíše vybraným certifikátem a uloží jako nový soubor vedle původního. '
-      + (signatureField ? `Podpis se vloží do připraveného podpisového pole „${signatureField}“.`
-                        : 'Dokument nemá připravené podpisové pole.');
-    queryOne('[data-sign-mode]').hidden = Boolean(signatureField);
-    signDialog.returnValue = '';
-    signDialog.showModal();
-    certSelect.focus();
+    showSignDialog();
   },
   sign: async () => {
-    if (!certSelect.value) { setStatus('Vyber certifikát pro podpis.'); actions.save(); return; }
+    if (!certSelect.value) { setStatus('Vyber certifikát pro podpis.'); showSignDialog(); return; }
     try { localStorage.setItem('zfo-cert', certSelect.value); localStorage.setItem('zfo-sign-mode', signMode()); } catch {}
-    try { await timeStamp.store(); } catch (error) { setStatus('Chyba: ' + error.message); actions.save(); return; }
+    try { await timeStamp.store(); } catch (error) { setStatus('Chyba: ' + error.message); showSignDialog(); return; }
     if (!signatureField && signMode() === 'place') startPlacing();
     else signWith(null);
   },

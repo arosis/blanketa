@@ -7,7 +7,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
-from support import ROOT, needs_node, page_data, run_ui_scripts, ui_source
+from support import ROOT, needs_node, page_data, run_in_node, run_ui_scripts, ui_source
 
 import app
 import desktop
@@ -73,6 +73,13 @@ class InTheLocalServer(unittest.TestCase):
         self.assertEqual(self.request("GET", "/anything?form=x")[0], 404)
         self.assertEqual(app.SESSIONS, before)
 
+    def test_only_the_page_and_its_scripts_are_served(self):
+        for path in ("/", "/bridge.js", "/settings.js"):
+            self.assertEqual(self.request("GET", path)[0], 200, path)
+        for path in ("/identities", f"/pdf?s={self.pdf_session}", "/codelists-progress?t=x", "/static/editor.js",
+                     "/pdfjs/build/pdf.min.mjs", "/shell.js", "/container-file", "/attachment"):
+            self.assertEqual(self.request("GET", path)[0], 404, path)
+
     def test_every_load_has_its_own_session(self):
         self.assertNotEqual(self.settings_page()["session"], self.settings_page()["session"])
 
@@ -93,9 +100,9 @@ class InTheLocalServer(unittest.TestCase):
 
     def test_unwritable_settings_answer_with_an_error(self):
         token = self.settings_page()["session"]
-        with mock.patch.object(preferences, "change", side_effect=OSError("read-only")):
+        with mock.patch.object(preferences, "change", side_effect=OSError("/home/x/.config: read-only")):
             status, body = self.post("/settings", {"update_checks": False}, token)
-        self.assertEqual((status, body), (400, "read-only"))
+        self.assertEqual((status, body), (400, "Nastavení se nepodařilo uložit."))
 
     def test_sessions_stay_in_their_lane(self):
         token = self.settings_page()["session"]
@@ -209,6 +216,20 @@ class TheSettingsScript(unittest.TestCase):
             url: ids.url.value, user: ids.user.value, radios: radios.map(radio => radio.checked)}));""", stored=stored)
         self.assertEqual(result, {"update": False, "crash": True, "own": False, "url": "https://t.example.cz/",
                                   "user": "u", "radios": [False, True]})
+
+    def test_unusable_own_service_is_explained_until_a_save_succeeds(self):
+        stored = {**STORED, "time_stamp": {"service": "own", "url": "ftp://x", "user": "", "usable": False}}
+        result = self.run_page("""
+            const shown = {text: ids.e_stamp.textContent, hidden: ids.e_stamp.hidden};
+            ids.url.value = 'https://t.example.cz/';
+            fire('url', 'input');
+            await pause(500);
+            console.log(JSON.stringify({shown, hidden: ids.e_stamp.hidden}));""", stored=stored,
+                               answer="async () => ({ok: true, json: async () => STORED_ANSWER_USABLE})",
+                               preamble="const STORED_ANSWER_USABLE = {...STORED_ANSWER, time_stamp: {...STORED_ANSWER.time_stamp, "
+                                        "url: 'https://t.example.cz/', usable: true}};")
+        self.assertEqual(result, {"shown": {"text": "Služba časových razítek není správně nastavená – upravte adresu.",
+                                            "hidden": False}, "hidden": True})
 
     def test_toggle_posts_only_its_key(self):
         result = self.run_page("""
@@ -369,6 +390,29 @@ class OptionsLiveOnlyInSettings(unittest.TestCase):
         self.assertIn("'Služba: ' + (answer.service === 'own' ? answer.url : 'Sectigo')", source)
 
 
+    @needs_node
+    def test_sign_retry_keeps_the_time_stamp_choice(self):
+        source = ui_source("pdf.mjs")
+        actions = source[source.index("const actions = {"):source.index("  print: async () => {")] + "};"
+        showSignDialog = source[source.index("const showSignDialog = "):source.index("const zoomTo = ")]
+        script = """
+const log = [], node = {style: {}, focus() {}, showModal() { log.push('dialog'); }};
+const queryOne = () => node, signDialog = node, closeMenus = () => {}, signatureField = 'Podpis';
+const localStorage = {setItem() {}}, signMode = () => 'field', setStatus = text => log.push(text);
+const timeStamp = {refresh: async () => log.push('refresh'), store: async () => { throw new Error('nejde'); }};
+let certSelect = {value: '', focus() {}};
+""" + showSignDialog + actions + """
+(async () => {
+  await actions.sign();
+  certSelect.value = 'cert';
+  await actions.sign();
+  await actions.save();
+  console.log(JSON.stringify(log));
+})();
+"""
+        log = json.loads(run_in_node(script))
+        self.assertEqual(log, ["Vyber certifikát pro podpis.", "dialog", "Chyba: nejde", "dialog", "refresh", "dialog"])
+
 class FakeEvent:
     def __init__(self):
         self.handlers = []
@@ -462,6 +506,16 @@ class TheDesktopHost(unittest.TestCase):
         self.assertEqual(first.window.log, ["show", "script"])
         self.assertEqual(second.window.scripts + self.app.settings_window.window.scripts, [])
 
+    def test_document_actions_from_the_settings_window_are_dropped(self):
+        self.app.open_window(ROOT / "README.md")
+        [document] = self.app.windows
+        self.app.open_settings()
+        self.active = self.app.settings_window.window
+        for name in ("save", "save-plain", "print", "find", "zoom-in"):
+            self.app._send_action_to_page(name)
+        self.assertEqual(document.window.scripts + self.app.settings_window.window.scripts, [])
+        self.assertEqual(document.window.log, [])
+
     def test_page_action_goes_to_the_active_document_window(self):
         self.app.open_window(ROOT / "README.md")
         self.app.open_window(ROOT / "LICENSE")
@@ -531,3 +585,11 @@ class TheDesktopHost(unittest.TestCase):
                          "} else if Self.appActions.contains(action) {",
                          "if !form.window.isKeyWindow { form.window.makeKeyAndOrderFront(nil) }"):
             self.assertIn(fragment, swift)
+
+    def test_mac_drops_and_greys_document_actions_while_settings_is_key(self):
+        swift = (ROOT / "macapp/main.swift").read_text(encoding="utf-8")
+        action = swift[swift.index("@objc func formAction"):swift.index("private func formItem")]
+        self.assertLess(action.index("guard runsWhileSettingsIsKey(action) else { return }"), action.index("windows.first"))
+        self.assertIn("extension AppDelegate: NSMenuItemValidation {", swift)
+        self.assertIn("guard menuItem.action == #selector(formAction(_:))", swift)
+        self.assertIn("settingsWindow?.window.isKeyWindow != true || Self.appActions.contains(action)", swift)

@@ -400,23 +400,14 @@ class InTheLocalServer(WithOwnSettingsFolder):
         checked.assert_called_once_with(app.APP_VERSION)
         self.assertEqual((status, json.loads(body)), (200, answer))
 
-    def test_switch_is_stored(self):
-        self.assertEqual(self.post("/update-check", b'{"enabled": false}'), (200, '{"enabled": false}'))
-        self.assertFalse(update_check.enabled())
-        self.assertEqual(self.post("/update-check", b'{"enabled": true}'), (200, '{"enabled": true}'))
+    def test_switch_is_changed_only_in_settings(self):
+        for body in (b'{"enabled": false}', b'{"enabled": true}', b'{"action": "state"}'):
+            with self.subTest(body=body):
+                self.assertEqual(self.post("/update-check", body)[0], 400)
         self.assertTrue(update_check.enabled())
 
-    def test_switch_state_is_read_without_changing_it(self):
-        update_check.set_enabled(False)
-        self.assertEqual(self.post("/update-check", b'{"action": "state"}'), (200, '{"enabled": false}'))
-        self.assertFalse(update_check.enabled())
-
-    def test_unwritable_settings_answer_with_the_actual_state(self):
-        with mock.patch.object(update_check, "_store", side_effect=OSError("read-only")):
-            self.assertEqual(self.post("/update-check", b'{"enabled": false}'), (200, '{"enabled": true}'))
-
     def test_malformed_body_is_refused(self):
-        for body in (b"x", b"[]", b"{}", b'{"action": "rm"}', b'{"enabled": "no"}'):
+        for body in (b"x", b"[]", b"{}", b'{"action": "rm"}', b'{"enabled": "no"}', b'{"action": "check", "enabled": true}'):
             with self.subTest(body=body):
                 self.assertEqual(self.post("/update-check", body)[0], 400)
         self.assertFalse(self.settings.exists())
