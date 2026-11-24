@@ -60,7 +60,7 @@ class InTheLocalServer(unittest.TestCase):
     def test_settings_page_is_served_with_its_script(self):
         status, body = self.request("GET", "/settings.js")
         self.assertEqual(status, 200)
-        self.assertEqual(body, ui_source("settings.js"))
+        self.assertEqual(body, (ROOT / "ui" / "settings.js").read_bytes().decode("utf-8"))
 
     def test_the_page_is_served_whatever_its_query(self):
         status, html = self.request("GET", "/?form=x")
