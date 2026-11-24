@@ -7,9 +7,10 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
-from support import needs_node, page_data, run_ui_scripts, ui_source
+from support import ROOT, needs_node, page_data, run_ui_scripts, ui_source
 
 import app
+import desktop
 import preferences
 import time_stamps
 
@@ -366,3 +367,145 @@ class OptionsLiveOnlyInSettings(unittest.TestCase):
         self.assertIn("post({})", source)
         self.assertIn("await timeStamp.refresh();", source)
         self.assertIn("'Služba: ' + (answer.service === 'own' ? answer.url : 'Sectigo')", source)
+
+
+class FakeEvent:
+    def __init__(self):
+        self.handlers = []
+
+    def __iadd__(self, handler):
+        self.handlers.append(handler)
+        return self
+
+    def __isub__(self, handler):
+        self.handlers.remove(handler)
+        return self
+
+    def fire(self):
+        for handler in list(self.handlers):
+            handler()
+
+
+class FakeWindow:
+    def __init__(self, title, url, **options):
+        self.title, self.url, self.options = title, url, options
+        self.events = mock.Mock(closed=FakeEvent(), loaded=FakeEvent(), shown=FakeEvent())
+        self.scripts, self.shown = [], 0
+        self.destroyed = False
+
+    def get_current_url(self):
+        return self.url
+
+    def evaluate_js(self, script):
+        self.scripts.append(script)
+
+    def show(self):
+        self.shown += 1
+
+    def restore(self):
+        pass
+
+    def destroy(self):
+        self.destroyed = True
+        self.events.closed.fire()
+
+
+START_SERVER = desktop.FormWindow._start_server
+
+
+class TheDesktopHost(unittest.TestCase):
+    def setUp(self):
+        self.active = None
+        fake_webview = mock.Mock(create_window=mock.Mock(side_effect=FakeWindow), active_window=lambda: self.active)
+        for target, name, value in ((desktop.FormWindow, "_start_server", lambda form, port: mock.Mock()),
+                                    (desktop.FormWindow, "_record_unexpected_server_exit", lambda form: None),
+                                    (desktop.DesktopApp, "_remember_recent_file", lambda app, path: None)):
+            patcher = mock.patch.object(target, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        with mock.patch.dict("sys.modules", {"webview": fake_webview}):
+            self.app = desktop.DesktopApp()
+
+    def test_settings_window_is_single_and_survives_opening_a_file(self):
+        self.app.open_window()
+        self.app.open_settings()
+        self.app.open_settings()
+        settings = self.app.settings_window
+        self.assertEqual(settings.kind, "settings")
+        self.assertEqual(settings.window.title, "Nastavení")
+        self.assertEqual((settings.window.options["width"], settings.window.options["height"]), (520, 460))
+        self.assertEqual(settings.window.shown, 1)
+        self.assertNotIn(settings, self.app.windows)
+        self.app.open_window(ROOT / "README.md")
+        self.assertFalse(settings.window.destroyed)
+        self.assertEqual([form.path for form in self.app.windows], [(ROOT / "README.md").resolve()])
+
+    def test_closed_settings_window_opens_anew(self):
+        self.app.open_settings()
+        first = self.app.settings_window
+        first.window.destroy()
+        self.assertIsNone(self.app.settings_window)
+        self.app.open_settings()
+        self.assertIsNot(self.app.settings_window, first)
+
+    def test_page_actions_skip_the_settings_window(self):
+        self.app.open_window(ROOT / "README.md")
+        self.app.open_window(ROOT / "LICENSE")
+        first, second = self.app.windows
+        self.active = first.window
+        self.app.open_settings()
+        self.active = self.app.settings_window.window
+        self.app._send_action_to_page("check-updates")
+        self.assertEqual(first.window.scripts, ['window.zfoAction && zfoAction("check-updates")'])
+        self.assertEqual(second.window.scripts + self.app.settings_window.window.scripts, [])
+
+    def test_page_action_goes_to_the_active_document_window(self):
+        self.app.open_window(ROOT / "README.md")
+        self.app.open_window(ROOT / "LICENSE")
+        first, second = self.app.windows
+        self.active = first.window
+        self.app._send_action_to_page("about")
+        self.assertEqual(first.window.scripts, ['window.zfoAction && zfoAction("about")'])
+        self.assertEqual(second.window.scripts, [])
+
+    def test_page_action_without_a_document_opens_an_empty_window_and_waits_for_it(self):
+        self.app.open_settings()
+        self.active = self.app.settings_window.window
+        self.app._send_action_to_page("support")
+        [empty] = self.app.windows
+        self.assertIsNone(empty.path)
+        self.assertEqual(empty.window.scripts, [])
+        empty.window.events.loaded.fire()
+        empty.window.events.loaded.fire()
+        self.assertEqual(empty.window.scripts, ['window.zfoAction && zfoAction("support")'])
+
+    def test_settings_server_runs_in_settings_mode(self):
+        form = desktop.FormWindow.__new__(desktop.FormWindow)
+        form.path, form.kind = None, "settings"
+        with mock.patch.object(desktop.subprocess, "Popen") as popen, \
+                mock.patch.object(desktop.FormWindow, "_wait_for_server"):
+            START_SERVER(form, 4321)
+        self.assertEqual(popen.call_args.args[0][-2:], ["--settings", "4321"])
+
+    def test_every_host_has_the_menu_items(self):
+        swift = (ROOT / "macapp/main.swift").read_text(encoding="utf-8")
+        python = (ROOT / "desktop.py").read_text(encoding="utf-8")
+        for line in ('formItem("O aplikaci Blanketa", "about")', 'formItem("Zkontrolovat aktualizace…", "check-updates")',
+                     'NSMenuItem(title: "Nastavení…", action: #selector(openSettings(_:)), keyEquivalent: ",")',
+                     'formItem("Podpořit Blanketu…", "support")', 'formItem("Nahlásit chybu…", "report-error")'):
+            self.assertIn(line, swift)
+        order = [swift.index(text) for text in ("O aplikaci Blanketa", "Zkontrolovat aktualizace…", "Nastavení…",
+                                                 "Podpořit Blanketu…", "Nahlásit chybu…", "Ukončit Blanketu")]
+        self.assertEqual(order, sorted(order))
+        self.assertIn('MenuAction("Nastavení…", self.open_settings)', python)
+        order = [python.index(text) for text in ('page_action("O aplikaci Blanketa", "about")',
+                                                 'page_action("Zkontrolovat aktualizace…", "check-updates")',
+                                                 'page_action("Nahlásit chybu…", "report-error")',
+                                                 'page_action("Podpořit Blanketu…", "support")')]
+        self.assertEqual(order, sorted(order))
+
+    def test_mac_settings_window_is_kept_apart(self):
+        swift = (ROOT / "macapp/main.swift").read_text(encoding="utf-8")
+        for fragment in ("enum WindowKind { case document, settings }", '["--settings", "0"]', 'setFrameAutosaveName(kind == .settings ? "SettingsWindow" : "FormWindow")',
+                         '"Nastavení"', "var settingsWindow: FormWindow?"):
+            self.assertIn(fragment, swift)

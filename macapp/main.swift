@@ -61,19 +61,26 @@ enum CrashReport {
 }
 
 final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUIDelegate, WKNavigationDelegate {
+    enum WindowKind { case document, settings }
+
     let window: NSWindow
     let webView: WKWebView
     let server = Process()
     let file: URL?
+    let kind: WindowKind
     var onClose: (() -> Void)?
     var onOpen: ((URL?) -> Void)?
+    var onBecomeKey: (() -> Void)?
     var formServerPort: Int?
+    var pendingAction: String?
     private var serverStopRequested = false
 
-    init(file: URL?) {
+    init(file: URL?, kind: WindowKind = .document) {
         self.file = file
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 900),
-                          styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
+        self.kind = kind
+        let size = kind == .settings ? NSSize(width: 520, height: 460) : NSSize(width: 1280, height: 900)
+        let style: NSWindow.StyleMask = kind == .settings ? [.titled, .closable, .miniaturizable] : [.titled, .closable, .miniaturizable, .resizable]
+        window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: style, backing: .buffered, defer: false)
         let config = WKWebViewConfiguration()
         webView = WKWebView(frame: .zero, configuration: config)
         super.init()
@@ -82,23 +89,28 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
         webView.navigationDelegate = self
         // Swift owns the window; AppKit's own release on close would free it a second time.
         window.isReleasedWhenClosed = false
-        window.title = file?.lastPathComponent ?? "Blanketa"
+        window.title = kind == .settings ? "Nastavení" : file?.lastPathComponent ?? "Blanketa"
         window.representedURL = file
         window.contentView = webView
         window.delegate = self
         window.center()
-        window.setFrameAutosaveName("FormWindow")
+        window.setFrameAutosaveName(kind == .settings ? "SettingsWindow" : "FormWindow")
         if file != nil {
             webView.loadHTMLString("<p style='font:14px -apple-system;padding:24px'>Otevírám formulář…</p>", baseURL: nil)
         }
         window.makeKeyAndOrderFront(nil)
-        startFormServer(file: file)
+        startFormServer()
     }
 
-    private func startFormServer(file: URL?) {
+    private func serverArguments() -> [String] {
+        if kind == .settings { return ["--settings", "0"] }
+        return file.map { ["--file", $0.path, "0"] } ?? ["--empty", "0"]
+    }
+
+    private func startFormServer() {
         let resources = Bundle.main.resourceURL!
         server.executableURL = resources.appendingPathComponent("zfo-server/zfo-server")
-        server.arguments = file.map { ["--file", $0.path, "0"] } ?? ["--empty", "0"]
+        server.arguments = serverArguments()
         var env = ProcessInfo.processInfo.environment
         env["ZFO_MACSIGN"] = resources.appendingPathComponent("macsign").path
         server.environment = env
@@ -141,6 +153,12 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
             NSWorkspace.shared.open(url)
         }
         decisionHandler(.cancel)
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard isFormServerPage(webView.url), let action = pendingAction else { return }
+        pendingAction = nil
+        sendActionToPage(action)
     }
 
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -332,6 +350,10 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
         if server.isRunning { server.terminate() }
     }
 
+    func windowDidBecomeKey(_ notification: Notification) {
+        onBecomeKey?()
+    }
+
     func windowWillClose(_ notification: Notification) {
         webView.configuration.userContentController.removeScriptMessageHandler(forName: "app")
         stopServer()
@@ -353,6 +375,7 @@ enum RecentFiles {
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     var windows: [FormWindow] = []
+    var settingsWindow: FormWindow?
     var openedFile = false
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -372,12 +395,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
-    func openEmptyWindow() { track(FormWindow(file: nil)) }
+    @discardableResult
+    func openEmptyWindow() -> FormWindow {
+        let form = FormWindow(file: nil)
+        track(form)
+        return form
+    }
+
+    @objc func openSettings(_ sender: Any?) {
+        if let settingsWindow {
+            settingsWindow.window.makeKeyAndOrderFront(nil)
+        } else {
+            let form = FormWindow(file: nil, kind: .settings)
+            form.onClose = { [weak self] in self?.settingsWindow = nil }
+            settingsWindow = form
+        }
+        NSApp.activate(ignoringOtherApps: true)
+    }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
     func applicationWillTerminate(_ notification: Notification) {
         windows.forEach { $0.stopServer() }
+        settingsWindow?.stopServer()
     }
 
     func open(_ url: URL) {
@@ -391,6 +431,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func track(_ form: FormWindow) {
         form.onClose = { [weak self, weak form] in self?.windows.removeAll { $0 === form } }
+        form.onBecomeKey = { [weak self, weak form] in
+            guard let self, let form, let index = self.windows.firstIndex(where: { $0 === form }) else { return }
+            self.windows.append(self.windows.remove(at: index))
+        }
         form.onOpen = { [weak self] url in
             if let url { self?.open(url) } else { self?.openDocument(nil) }
         }
@@ -408,9 +452,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc func formAction(_ sender: NSMenuItem) {
-        guard let action = sender.representedObject as? String,
-              let form = windows.first(where: { $0.window.isKeyWindow }) ?? windows.last else { return }
-        form.sendActionToPage(action)
+        guard let action = sender.representedObject as? String else { return }
+        if let form = windows.first(where: { $0.window.isKeyWindow }) ?? windows.last {
+            form.sendActionToPage(action)
+        } else {
+            openEmptyWindow().pendingAction = action
+        }
     }
 
     private func formItem(_ title: String, _ action: String, _ key: String = "", _ modifiers: NSEvent.ModifierFlags = .command) -> NSMenuItem {
@@ -430,6 +477,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func applicationMenu() -> NSMenuItem {
         submenuItem([
             formItem("O aplikaci Blanketa", "about"),
+            formItem("Zkontrolovat aktualizace…", "check-updates"),
+            .separator(),
+            NSMenuItem(title: "Nastavení…", action: #selector(openSettings(_:)), keyEquivalent: ","),
+            .separator(),
             formItem("Podpořit Blanketu…", "support"),
             formItem("Nahlásit chybu…", "report-error"),
             .separator(),
