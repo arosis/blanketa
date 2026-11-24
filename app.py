@@ -816,6 +816,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_response(400, b"bad request", PLAIN_TEXT)
         if action == "check" and wanted is None:
             return self._send_json(update_check.check_now(APP_VERSION))
+        if action == "state" and wanted is None:
+            return self._send_json({"enabled": update_check.enabled()})
         if not isinstance(wanted, bool) or action is not None:
             return self._send_response(400, b"bad request", PLAIN_TEXT)
         try:

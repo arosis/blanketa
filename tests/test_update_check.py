@@ -406,6 +406,11 @@ class InTheLocalServer(WithOwnSettingsFolder):
         self.assertEqual(self.post("/update-check", b'{"enabled": true}'), (200, '{"enabled": true}'))
         self.assertTrue(update_check.enabled())
 
+    def test_switch_state_is_read_without_changing_it(self):
+        update_check.set_enabled(False)
+        self.assertEqual(self.post("/update-check", b'{"action": "state"}'), (200, '{"enabled": false}'))
+        self.assertFalse(update_check.enabled())
+
     def test_unwritable_settings_answer_with_the_actual_state(self):
         with mock.patch.object(update_check, "_store", side_effect=OSError("read-only")):
             self.assertEqual(self.post("/update-check", b'{"enabled": false}'), (200, '{"enabled": true}'))
@@ -482,6 +487,32 @@ class AboutWindow(unittest.TestCase):
             self.assertIn(fragment, result["html"])
         for selector in ("[data-update-checks]", "[data-update-check]", "[data-update-result]"):
             self.assertIn(selector, result["wired"])
+
+    def test_every_opening_shows_the_switch_as_stored_now(self):
+        script = """
+            const controls = {};
+            const node = () => ({style: {}, append() {}, addEventListener() {}, close() {}, showModal() {}});
+            document.createElement = () => {
+                const created = node();
+                created.querySelector = selector => (controls[selector] ??= {...node(), textContent: '', checked: true});
+                return created;
+            };
+            const asked = [];
+            let stored = true;
+            fetch = async (url, options) => { asked.push(options.body); return {ok: true, json: async () => ({enabled: stored})}; };
+            (async () => {
+                zfoAbout();
+                await new Promise(resolve => setTimeout(resolve));
+                const first = controls['[data-update-checks]'].checked;
+                stored = false;
+                zfoAbout();
+                await new Promise(resolve => setTimeout(resolve));
+                console.log(JSON.stringify({first, second: controls['[data-update-checks]'].checked, asked}));
+            })();
+        """
+        result = json.loads(run_ui_scripts(["bridge.js"], script))
+        self.assertEqual((result["first"], result["second"]), (True, False))
+        self.assertEqual(result["asked"], ['{"action":"state"}', '{"action":"state"}'])
 
 
 class TheSuiteStaysOffline(unittest.TestCase):

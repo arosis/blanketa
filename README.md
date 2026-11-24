@@ -47,9 +47,10 @@ Volbou „Už nenabízet“ se nabídka vypne natrvalo a zapnout ji jde znovu z
 ## Nové verze
 
 Blanketa se nejvýš jednou za 24 hodin na pozadí zeptá služby GitHub (`api.github.com`), zda vyšla novější verze. Odešle
-jen samotný dotaz bez údajů o verzi, dokumentech nebo certifikátech, GitHub tedy vidí jen vaši IP adresu a čas dotazu.
-Když vyšla novější verze, nabídne ji při dalším otevření okna, nikdy uprostřed práce: „Stáhnout…“ otevře v prohlížeči
-balíček pro váš systém (na Linuxu stránku vydání s postupem instalace), „Připomenout za týden“ nabídku o sedm dní odloží.
+jen samotný dotaz bez údajů o verzi, dokumentech nebo certifikátech, GitHub tedy vidí jen vaši IP adresu, čas dotazu
+a to, že se ptá Blanketa. Když vyšla novější verze, nabídne ji při dalším otevření okna, nikdy uprostřed práce:
+„Stáhnout…“ otevře v prohlížeči balíček pro váš systém (na Linuxu stránku vydání s postupem instalace), „Připomenout za
+týden“ nabídku o sedm dní odloží.
 
 Automatické kontroly vypnete v okně „O aplikaci Blanketa“ volbou „Automaticky kontrolovat nové verze“; tamní tlačítko
 „Zkontrolovat aktualizace“ zjistí novou verzi i při vypnutých kontrolách. Instalace zůstává ruční, Blanketa se sama

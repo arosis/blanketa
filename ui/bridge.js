@@ -210,6 +210,7 @@ window.zfoAbout = (() => {
       document.body.append(dialog);
     }
     dialog.querySelector('[data-update-result]').textContent = '';
+    window.zfoUpdateOffer.state().then(answer => { dialog.querySelector('[data-update-checks]').checked = answer.enabled; }, () => {});
     dialog.showModal();
   };
 })();
@@ -348,7 +349,7 @@ window.zfoUpdateOffer = (() => {
   const text = offer => {
     const lines = [`Blanketa ${offer.version} (máte ${offer.current})`];
     if (offer.linux) {
-      lines.push(`Na stránce vydání stáhněte balíček .deb a nainstalujte ho příkazem sudo apt install ./blanketa_${offer.version}_amd64.deb, nebo archiv .tar.gz pro ostatní distribuce.`);
+      lines.push(`Na stránce vydání stáhněte balíček .deb a nainstalujte ho příkazem sudo apt install ./blanketa_${offer.version}_amd64.deb, nebo archiv .tar.gz pro ostatní distribuce.`);
     }
     return {title: 'Je k dispozici nová verze Blankety', lines};
   };
@@ -389,7 +390,7 @@ window.zfoUpdateOffer = (() => {
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', offerOnOpen);
   else offerOnOpen();
-  return Object.assign(open, {text, check, store: enabled => post({enabled})});
+  return Object.assign(open, {text, check, store: enabled => post({enabled}), state: () => post({action: 'state'})});
 })();
 
 window.zfoSupportReminder = async (sessionToken, status) => {
