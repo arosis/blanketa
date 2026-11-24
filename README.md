@@ -44,6 +44,17 @@ chyby, místa v kódu Blankety, kde vznikla, činnost a datum – bez textu ch
 otevření okna nabídne hlášení připravit; záznam se pak přidá k technickým údajům a nic neodejde bez vašeho potvrzení.
 Volbou „Už nenabízet“ se nabídka vypne natrvalo a zapnout ji jde znovu zaškrtnutím v okně „Nahlásit chybu“.
 
+## Nové verze
+
+Blanketa se nejvýš jednou za 24 hodin na pozadí zeptá služby GitHub (`api.github.com`), zda vyšla novější verze. Odešle
+jen samotný dotaz bez údajů o verzi, dokumentech nebo certifikátech, GitHub tedy vidí jen vaši IP adresu a čas dotazu.
+Když novější verze je, nabídne ji při dalším otevření okna, nikdy uprostřed práce: „Stáhnout…“ otevře v prohlížeči
+balíček pro váš systém (na Linuxu stránku vydání s postupem instalace), „Připomenout za týden“ nabídku o sedm dní odloží.
+
+Automatické kontroly vypnete v okně „O aplikaci Blanketa“ volbou „Automaticky kontrolovat nové verze“; tamní tlačítko
+„Zkontrolovat aktualizace“ zjistí novou verzi i při vypnutých kontrolách. Instalace zůstává ruční, Blanketa se sama
+nepřepíše.
+
 ## Stažení a instalace
 
 Hotové balíčky vytváří GitHub Actions (`.github/workflows/build.yml`) při každé značce `v*`, nebo ručně ze záložky Actions:
@@ -148,6 +159,7 @@ Stránky jsou na všech systémech stejné; s aplikací kolem sebe mluví přes 
 | `support_reminder.py` | kdy po podpisu připomenout možnost přispět na vývoj |
 | `error_report.py` | e-mail s hlášením chyby a popis systému pro něj |
 | `crash_report.py` | záznam o chybě serveru okna a nabídka hlášení při dalším otevření |
+| `update_check.py` | denní dotaz na novější vydání, uložený výsledek a odložení nabídky o týden |
 | `desktop.py` | okna aplikace pro Windows a Linux |
 | `linux_print.py` | náhled tisku PDF na Linuxu (PDFium) |
 | `ui/bridge.js` | spojení stránek s aplikací (macOS / Windows a Linux / prohlížeč), sdílený výběr certifikátu |
