@@ -160,9 +160,6 @@ window.zfoAbout = (() => {
           .zfo-about ul { margin: 6px 0 12px; padding-left: 18px; }
           .zfo-about a, .zfo-about-link { color: var(--accent, #0a64d6); cursor: pointer; }
           .zfo-about-link { padding: 0; border: 0; background: none; font: inherit; text-decoration: underline; }
-          .zfo-about-updates { margin: 0 0 12px; display: grid; gap: 6px; justify-items: start; }
-          .zfo-about-updates label { display: block; }
-          .zfo-about-update-result { margin: 0; min-height: 1.45em; color: #6e6e73; }
         </style>
         <h2>Blanketa</h2>
         <p class="zfo-about-version" data-version></p>
@@ -172,10 +169,6 @@ window.zfoAbout = (() => {
             <a href="https://www.gnu.org/licenses/gpl-3.0.html">GNU GPL 3.0</a></dd></dl>
         <ul data-links><li><button type="button" class="zfo-about-link" data-report>Nahlásit chybu…</button></li></ul>
         <p>Blanketa je zdarma a žije z dobrovolných příspěvků.</p>
-        <div class="zfo-about-updates">
-          <label><input type="checkbox" data-update-checks> Automaticky kontrolovat nové verze</label>
-          <button type="button" class="zfo-btn" data-update-check>Zkontrolovat aktualizace</button>
-          <p class="zfo-about-update-result" data-update-result role="status"></p></div>
         <div class="zfo-dialog-buttons">
           <button type="button" class="zfo-btn" data-support>Podpořit Blanketu…</button>
           <button type="button" class="zfo-btn primary" data-close>Zavřít</button></div>`;
@@ -190,27 +183,9 @@ window.zfoAbout = (() => {
       }
       dialog.querySelector('[data-support]').addEventListener('click', () => { dialog.close(); window.zfoSupport(); });
       dialog.querySelector('[data-report]').addEventListener('click', () => { dialog.close(); window.zfoReportError(); });
-      const switchBox = dialog.querySelector('[data-update-checks]');
-      const checkButton = dialog.querySelector('[data-update-check]');
-      const result = dialog.querySelector('[data-update-result]');
-      switchBox.checked = page.update_checks !== false;
-      switchBox.addEventListener('change', async () => {
-        const wanted = switchBox.checked;
-        try { switchBox.checked = (await window.zfoUpdateOffer.store(wanted)).enabled; } catch { switchBox.checked = !wanted; }
-      });
-      checkButton.addEventListener('click', async () => {
-        checkButton.disabled = true;
-        result.textContent = 'Zjišťuji…';
-        const answer = await window.zfoUpdateOffer.check();
-        checkButton.disabled = false;
-        if (answer.status === 'newer') { dialog.close(); window.zfoUpdateOffer(answer.offer); }
-        else result.textContent = answer.status === 'current' ? 'Máte nejnovější verzi.' : 'Novou verzi teď nešlo zjistit. Zkuste to později.';
-      });
       dialog.querySelector('[data-close]').addEventListener('click', () => dialog.close());
       document.body.append(dialog);
     }
-    dialog.querySelector('[data-update-result]').textContent = '';
-    window.zfoUpdateOffer.state().then(answer => { dialog.querySelector('[data-update-checks]').checked = answer.enabled; }, () => {});
     dialog.showModal();
   };
 })();
@@ -245,13 +220,8 @@ window.zfoReportError = (() => {
       + `Chyby na stránce:\n${errors}\n`
       + (crash ? `Záznam o chybě z minulé práce:\n${crash}\n` : '');
   };
-  let crashOffersEnabled;
-  const storeCrashOffers = async enabled => {
-    crashOffersEnabled = enabled;
-    try {
-      const response = await fetch(`/crash-report?s=${pageData().session}`, {method: 'POST', body: JSON.stringify({enabled})});
-      if (response.ok) crashOffersEnabled = (await response.json()).enabled;
-    } catch {}
+  const stopOfferingAfterCrash = async () => {
+    try { await fetch(`/crash-report?s=${pageData().session}`, {method: 'POST', body: JSON.stringify({enabled: false})}); } catch {}
   };
   const fitIntoMailLink = text => {
     if (encodeURIComponent(text).length <= MAX_ENCODED_BODY) return text;
@@ -273,7 +243,6 @@ window.zfoReportError = (() => {
           .zfo-report textarea { box-sizing: border-box; width: 100%; height: 260px; font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace; }
           .zfo-report-note { margin: 8px 0 0; font-size: 12px; color: #6e6e73; }
           .zfo-report-note b { user-select: text; -webkit-user-select: text; }
-          .zfo-report label { display: block; margin-top: 8px; font-size: 12px; }
         </style>
         <h2>Nahlásit chybu</h2>
         <p>Popište, co se stalo. Hlášení odejde až z vaší pošty a neobsahuje vyplněné údaje, názvy souborů ani certifikáty.
@@ -281,7 +250,6 @@ window.zfoReportError = (() => {
         <textarea data-report-text spellcheck="false" aria-label="Text hlášení"></textarea>
         <p class="zfo-report-note">Hlášení čte jen autor Blankety. Pokud se pošta neotevře, zkopírujte text a pošlete ho
           na <b data-address></b>.</p>
-        <label><input type="checkbox" data-crash-offers> Po chybě nabídnout hlášení při dalším otevření okna</label>
         <div class="zfo-dialog-buttons">
           <button type="button" class="zfo-btn" data-copy>Zkopírovat text</button>
           <button type="button" class="zfo-btn" data-close>Zrušit</button>
@@ -301,14 +269,11 @@ window.zfoReportError = (() => {
         else window.location.href = `mailto:${ADDRESS}?subject=${encodeURIComponent(message.subject)}&body=${encodeURIComponent(message.body)}`;
         dialog.close();
       });
-      dialog.querySelector('[data-crash-offers]').addEventListener('change', event => storeCrashOffers(event.target.checked));
       dialog.querySelector('[data-close]').addEventListener('click', () => dialog.close());
       document.body.append(dialog);
     }
     const text = dialog.querySelector('[data-report-text]');
     text.value = template(crash);
-    crashOffersEnabled ??= pageData().crash_reports !== false;
-    dialog.querySelector('[data-crash-offers]').checked = crashOffersEnabled;
     dialog.querySelector('[data-copy]').textContent = 'Zkopírovat text';
     dialog.showModal();
     const answerLine = text.value.indexOf('\n') + 1;
@@ -327,7 +292,7 @@ window.zfoReportError = (() => {
         <button type="button" class="zfo-btn" data-never>Už nenabízet</button>
         <button type="button" class="zfo-btn" data-later>Teď ne</button>
         <button type="button" class="zfo-btn primary" data-report>Připravit hlášení…</button></div>`;
-    offer.querySelector('[data-never]').addEventListener('click', () => { offer.close(); storeCrashOffers(false); });
+    offer.querySelector('[data-never]').addEventListener('click', () => { offer.close(); stopOfferingAfterCrash(); });
     offer.querySelector('[data-later]').addEventListener('click', () => offer.close());
     offer.querySelector('[data-report]').addEventListener('click', () => { offer.close(); open(crash); });
     offer.addEventListener('close', () => offer.remove());
@@ -384,13 +349,30 @@ window.zfoUpdateOffer = (() => {
       return {status: 'unknown'};
     }
   };
+  const inform = message => {
+    const dialog = document.createElement('dialog');
+    dialog.className = 'zfo-dialog zfo-update-offer';
+    dialog.innerHTML = `<style>.zfo-update-offer { width: 420px; font: 13px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif; }</style>
+      <p data-message></p>
+      <div class="zfo-dialog-buttons"><button type="button" class="zfo-btn primary" data-close>OK</button></div>`;
+    dialog.querySelector('[data-message]').textContent = message;
+    dialog.querySelector('[data-close]').addEventListener('click', () => dialog.close());
+    dialog.addEventListener('close', () => dialog.remove());
+    document.body.append(dialog);
+    dialog.showModal();
+  };
+  const report = async () => {
+    const answer = await check();
+    if (answer.status === 'newer') open(answer.offer);
+    else inform(answer.status === 'current' ? 'Máte nejnovější verzi.' : 'Novou verzi teď nešlo zjistit. Zkuste to později.');
+  };
   const offerOnOpen = () => {
     const offer = pageData().update_offer;
     if (offer) open(offer);
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', offerOnOpen);
   else offerOnOpen();
-  return Object.assign(open, {text, check, store: enabled => post({enabled}), state: () => post({action: 'state'})});
+  return Object.assign(open, {text, check, report});
 })();
 
 window.zfoSupportReminder = async (sessionToken, status) => {

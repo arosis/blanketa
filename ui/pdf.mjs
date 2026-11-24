@@ -250,29 +250,32 @@ const TIME_STAMP_UNAVAILABLE = 424;
 const timeStamp = (() => {
   const box = queryOne('[data-time-stamp]');
   const enabled = box.querySelector('[data-time-stamp-enabled]');
-  const url = box.querySelector('[data-time-stamp-url]');
-  const user = box.querySelector('[data-time-stamp-user]');
+  const serviceLine = box.querySelector('[data-time-stamp-service]');
+  const unusable = box.querySelector('[data-time-stamp-unusable]');
   const passwordRow = box.querySelector('[data-time-stamp-password]');
-  const service = () => box.querySelector('[name="time-stamp-service"]:checked').value;
+  let state = {};
   const show = () => {
-    const own = service() === 'own';
     box.querySelector('[data-time-stamp-details]').hidden = !enabled.checked;
-    for (const row of box.querySelectorAll('[data-time-stamp-own]')) row.hidden = !own;
-    passwordRow.hidden = !(own && user.value.trim());
+    passwordRow.hidden = !(state.service === 'own' && state.user);
   };
-  const stored = pageData.time_stamp;
-  enabled.checked = stored.enabled;
-  box.querySelector(`[name="time-stamp-service"][value="${stored.service}"]`).checked = true;
-  url.value = stored.url;
-  user.value = stored.user;
-  box.addEventListener('input', show);
-  show();
+  const apply = answer => {
+    state = answer;
+    enabled.disabled = !answer.usable;
+    enabled.checked = answer.usable && answer.enabled;
+    unusable.hidden = answer.usable;
+    serviceLine.textContent = 'Služba: ' + (answer.service === 'own' ? answer.url : 'Sectigo');
+    show();
+  };
+  apply(pageData.time_stamp);
+  enabled.addEventListener('change', show);
+  const post = async body => {
+    const response = await fetch('/time-stamp-settings?s=' + SESSION, {method: 'POST', body: JSON.stringify(body)});
+    if (!response.ok) throw new Error(await response.text());
+    return response.json();
+  };
   return {
-    store: async () => {
-      const response = await fetch('/time-stamp-settings?s=' + SESSION, {method: 'POST', body: JSON.stringify(
-        {enabled: enabled.checked, service: service(), url: url.value, user: user.value})});
-      if (!response.ok) throw new Error(await response.text());
-    },
+    refresh: async () => { try { apply(await post({})); } catch {} },
+    store: async () => { if (!enabled.disabled) await post({enabled: enabled.checked}); },
     wanted: () => (enabled.checked ? {password: passwordRow.hidden ? null : passwordRow.querySelector('input').value} : undefined),
   };
 })();
@@ -370,12 +373,14 @@ const actions = {
   support: () => zfoSupport(),
   about: () => zfoAbout(),
   'report-error': () => zfoReportError(),
+  'check-updates': () => zfoUpdateOffer.report(),
   'save-plain': async () => {
     closeMenus();
     try { await showSavedDocument(await postChangedValues('/pdf-save'), 'Uloženo do'); } catch (error) { setStatus('Chyba: ' + error.message); }
   },
-  save: () => {
+  save: async () => {
     closeMenus();
+    await timeStamp.refresh();
     queryOne('[data-sign-text]').textContent = 'Dokument se podepíše vybraným certifikátem a uloží jako nový soubor vedle původního. '
       + (signatureField ? `Podpis se vloží do připraveného podpisového pole „${signatureField}“.`
                         : 'Dokument nemá připravené podpisové pole.');

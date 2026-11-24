@@ -328,3 +328,41 @@ class TheSettingsScript(unittest.TestCase):
             console.log(JSON.stringify({text: ids.e_update.textContent, checked: ids.update_checks.checked}));""",
                                answer="""async () => { throw new TypeError('Failed to fetch'); }""")
         self.assertEqual(result, {"text": "Nastavení se nepodařilo uložit.", "checked": True})
+
+
+class OptionsLiveOnlyInSettings(unittest.TestCase):
+    PAGES = ("shell.js", "pdf.mjs", "message.js", "container.js")
+
+    def test_about_has_no_settings(self):
+        bridge = ui_source("bridge.js")
+        about = bridge[bridge.index("window.zfoAbout"):bridge.index("window.zfoReportError")]
+        for fragment in ("data-update-checks", "data-update-check", "data-update-result"):
+            self.assertNotIn(fragment, about)
+
+    def test_report_dialog_has_no_crash_checkbox(self):
+        bridge = ui_source("bridge.js")
+        self.assertNotIn("data-crash-offers", bridge)
+        self.assertNotIn("storeCrashOffers", bridge)
+        self.assertIn("{enabled: false}", bridge)
+
+    def test_every_page_handles_check_updates(self):
+        for name in self.PAGES:
+            with self.subTest(page=name):
+                self.assertIn("'check-updates': () => zfoUpdateOffer.report()", ui_source(name))
+        self.assertEqual(ui_source("shell.js").count("'check-updates': () => zfoUpdateOffer.report()"), 2)
+        self.assertIn("'check-updates', 'help'", ui_source("shell.js"))
+
+    def test_sign_dialog_has_no_service_fields(self):
+        html = ui_source("pdf.html")
+        for fragment in ("data-time-stamp-url", "data-time-stamp-user", "time-stamp-service\"", "Vlastní služba"):
+            self.assertNotIn(fragment, html)
+        for text in ("Připojit časové razítko", "Službu změníte v\u00a0Nastavení.",
+                     "Služba časových razítek není správně nastavená – upravte ji v\u00a0Nastavení."):
+            self.assertIn(text, html)
+
+    def test_sign_dialog_stores_only_the_switch_and_rereads_when_opened(self):
+        source = ui_source("pdf.mjs")
+        self.assertIn("post({enabled: enabled.checked})", source)
+        self.assertIn("post({})", source)
+        self.assertIn("await timeStamp.refresh();", source)
+        self.assertIn("'Služba: ' + (answer.service === 'own' ? answer.url : 'Sectigo')", source)

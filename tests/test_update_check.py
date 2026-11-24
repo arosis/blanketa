@@ -479,40 +479,58 @@ class AboutWindow(unittest.TestCase):
         console.log(JSON.stringify({shown: about.shown, html: about.innerHTML, wired: Object.keys(controls)}));
     """
 
-    def test_about_dialog_has_the_update_controls_and_opens(self):
+    def test_about_dialog_opens_without_settings(self):
         result = json.loads(run_ui_scripts(["bridge.js"], self.SCRIPT))
         self.assertTrue(result["shown"])
-        for fragment in ("data-update-checks", "data-update-check>", "data-update-result",
-                         "Automaticky kontrolovat nové verze", "Zkontrolovat aktualizace"):
+        for fragment in ("data-update-check", "Automaticky kontrolovat", "Zkontrolovat aktualizace"):
+            self.assertNotIn(fragment, result["html"])
+        for fragment in ("Nahlásit chybu…", "Podpořit Blanketu…", "Zavřít"):
             self.assertIn(fragment, result["html"])
-        for selector in ("[data-update-checks]", "[data-update-check]", "[data-update-result]"):
-            self.assertIn(selector, result["wired"])
 
-    def test_every_opening_shows_the_switch_as_stored_now(self):
+
+@needs_node
+class ManualCheckInThePage(unittest.TestCase):
+    def run_check(self, answer):
         script = """
-            const controls = {};
-            const node = () => ({style: {}, append() {}, addEventListener() {}, close() {}, showModal() {}});
+            const dialogs = [];
             document.createElement = () => {
-                const created = node();
-                created.querySelector = selector => (controls[selector] ??= {...node(), textContent: '', checked: true});
+                const created = {style: {}, append() {}, addEventListener() {}, close() {}, showModal() { this.shown = true; },
+                                 querySelector: () => ({textContent: '', append() {}, addEventListener() {}})};
+                dialogs.push(created);
                 return created;
             };
-            const asked = [];
-            let stored = true;
-            fetch = async (url, options) => { asked.push(options.body); return {ok: true, json: async () => ({enabled: stored})}; };
+            document.body.append = () => {};
+            fetch = async () => (ANSWER);
             (async () => {
-                zfoAbout();
-                await new Promise(resolve => setTimeout(resolve));
-                const first = controls['[data-update-checks]'].checked;
-                stored = false;
-                zfoAbout();
-                await new Promise(resolve => setTimeout(resolve));
-                console.log(JSON.stringify({first, second: controls['[data-update-checks]'].checked, asked}));
+                await zfoUpdateOffer.report();
+                console.log(JSON.stringify(dialogs.map(dialog => ({shown: dialog.shown, html: dialog.innerHTML}))));
             })();
-        """
-        result = json.loads(run_ui_scripts(["bridge.js"], script))
-        self.assertEqual((result["first"], result["second"]), (True, False))
-        self.assertEqual(result["asked"], ['{"action":"state"}', '{"action":"state"}'])
+        """.replace("ANSWER", answer)
+        return json.loads(run_ui_scripts(["bridge.js"], script))
+
+    def test_current_version_is_said_so(self):
+        shown = self.run_check("{ok: true, json: async () => ({status: 'current'})}")
+        self.assertEqual(len(shown), 1)
+        self.assertTrue(shown[0]["shown"])
+        self.assertIn("data-message", shown[0]["html"])
+        self.assertIn("OK</button>", shown[0]["html"])
+
+    def test_unreachable_server_is_unknown(self):
+        shown = self.run_check("{ok: false, status: 500}")
+        self.assertEqual(len(shown), 1)
+        self.assertTrue(shown[0]["shown"])
+
+    def test_newer_version_opens_the_offer(self):
+        offer = "{version: '9.9', current: '1.0', news_url: 'n', download_url: 'd'}"
+        shown = self.run_check("{ok: true, json: async () => ({status: 'newer', offer: %s})}" % offer)
+        opened = [dialog for dialog in shown if dialog.get("shown")]
+        self.assertEqual(len(opened), 1)
+        self.assertIn("Stáhnout…", opened[0]["html"])
+
+    def test_texts(self):
+        source = ui_source("bridge.js")
+        self.assertIn("'Máte nejnovější verzi.'", source)
+        self.assertIn("'Novou verzi teď nešlo zjistit. Zkuste to později.'", source)
 
 
 class TheSuiteStaysOffline(unittest.TestCase):
