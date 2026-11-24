@@ -7,7 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
-import support  # noqa: F401
+from support import ROOT
+
 import update_check
 
 NOW = datetime(2026, 11, 24, 10, 0)
@@ -56,6 +57,11 @@ class WithOwnSettingsFolder(unittest.TestCase):
         ):
             patcher.start()
             self.addCleanup(patcher.stop)
+        self.addCleanup(setattr, update_check, "_background_running", False)
+        self.real_refresh = update_check.refresh_in_background
+        patcher = mock.patch.object(update_check, "refresh_in_background")
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def store(self, **values):
         self.settings.write_text(json.dumps(values), encoding="utf-8")
@@ -152,8 +158,7 @@ class Offer(WithOwnSettingsFolder):
             self.assertEqual(update_check.check_now("0.4.0", NOW)["status"], "newer")
 
     def test_settings_folder_that_is_a_file(self):
-        blocker = self.folder / "file"
-        blocker.write_text("x")
+        blocker = ROOT / "update_check.py"
         self.answering(release_json())
         with mock.patch.object(update_check.certstore, "config_dir", return_value=blocker):
             with mock.patch.object(update_check, "refresh_in_background"):
@@ -267,10 +272,9 @@ class BackgroundRefresh(WithOwnSettingsFolder):
         started = []
         with mock.patch.object(update_check.threading, "Thread") as thread:
             thread.side_effect = lambda **kwargs: started.append(kwargs) or mock.Mock()
-            update_check.refresh_in_background()
-            update_check.refresh_in_background()
+            self.real_refresh()
+            self.real_refresh()
         self.assertEqual(len(started), 1)
-        update_check._background_running = False
 
 
 class PortableWindows(unittest.TestCase):
