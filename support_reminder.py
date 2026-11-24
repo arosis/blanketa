@@ -40,3 +40,11 @@ def offer(today=None):
 
 def hide():
     _store({**_stored(), "hidden": True})
+
+
+def hidden():
+    return _stored().get("hidden") is True
+
+
+def show_again():
+    _store({name: value for name, value in _stored().items() if name != "hidden"})

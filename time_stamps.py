@@ -54,6 +54,32 @@ def store_settings(wanted):
     return stored
 
 
+def _write(stored):
+    (certstore.config_dir() / SETTINGS_FILE).write_text(json.dumps(stored, ensure_ascii=False), encoding="utf-8")
+
+
+def store_service(service, url, user):
+    if service == OWN_SERVICE:
+        _refuse_unusable_address(url, user)
+    _write({**settings(), "service": service, "url": url, "user": user})
+    return settings()
+
+
+def store_enabled(enabled):
+    _write({**settings(), "enabled": enabled})
+    return settings()
+
+
+def usable(stored):
+    if stored["service"] == PUBLIC_SERVICE:
+        return True
+    try:
+        _refuse_unusable_address(stored["url"], stored["user"])
+    except ValueError:
+        return False
+    return True
+
+
 def _refuse_unusable_address(url, user):
     address = urlsplit(url)
     if address.scheme not in ("http", "https") or not address.hostname:
