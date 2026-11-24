@@ -1,14 +1,20 @@
+import http.client
 import io
 import json
 import tempfile
+import threading
 import unittest
 import urllib.error
 from datetime import datetime
+from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
-from support import ROOT as ROOT
+from support import isds_sample, page_data
 
+import app
+import crash_report
+import isds_message
 import update_check
 
 NOW = datetime(2026, 11, 24, 10, 0)
@@ -295,3 +301,96 @@ class PortableWindows(unittest.TestCase):
         with mock.patch.object(update_check.certstore, "IS_WINDOWS", False), \
                 mock.patch.object(update_check.sys, "frozen", True, create=True):
             self.assertFalse(update_check.portable_windows())
+
+
+OFFER = {
+    "version": "0.5.0",
+    "current": app.APP_VERSION,
+    "download_url": RELEASE_DOWNLOADS + "Blanketa-0.5.0-macos.dmg",
+    "news_url": "https://blanketa.cz/novinky/#0.5.0",
+    "linux": False,
+}
+
+
+class OnThePages(WithOwnSettingsFolder):
+    def setUp(self):
+        super().setUp()
+        patcher = mock.patch.object(crash_report, "settings_path", return_value=self.folder / crash_report.SETTINGS_FILE)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_page_carries_a_stored_offer(self):
+        with mock.patch.object(update_check, "offer_for_page", return_value=OFFER) as offered:
+            data = page_data(app.document_page(app.SHELL, "formulář ZFO", {"session": "x"}))
+        offered.assert_called_once_with(app.APP_VERSION)
+        self.assertEqual(data["update_offer"]["version"], "0.5.0")
+        self.assertIs(data["update_checks"], True)
+
+    def test_page_without_an_offer_says_so(self):
+        with mock.patch.object(update_check, "offer_for_page", return_value=None):
+            data = page_data(app.render_empty_window())
+        self.assertIsNone(data["update_offer"])
+
+    def test_crash_offer_wins_and_records_nothing(self):
+        with mock.patch.object(crash_report, "take_pending", return_value="Chyba serveru"), \
+                mock.patch.object(update_check, "offer_for_page") as offered:
+            data = page_data(app.render_empty_window())
+        self.assertIsNone(data["update_offer"])
+        offered.assert_not_called()
+
+    def test_page_renders_when_settings_are_unwritable(self):
+        with mock.patch.object(update_check.certstore, "config_dir", return_value=self.folder / "missing" / "deeper"):
+            data = page_data(app.render_empty_window())
+        self.assertIsNone(data["update_offer"])
+        self.assertIs(data["update_checks"], True)
+
+
+class InTheLocalServer(WithOwnSettingsFolder):
+    def setUp(self):
+        super().setUp()
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), app.Handler)
+        self.server.handle_error = lambda request, address: None
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.addCleanup(self.server.server_close)
+        self.addCleanup(self.server.shutdown)
+        self.token = app.new_session({"name": "zadost", "pdf": b""})
+
+    def post(self, path, body=b"{}", token=None):
+        port = self.server.server_address[1]
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=30)
+        connection.request("POST", f"{path}?s={token or self.token}", body=body, headers={"Host": f"127.0.0.1:{port}"})
+        response = connection.getresponse()
+        return response.status, response.read().decode()
+
+    def test_manual_check_answers_with_the_result(self):
+        answer = {"status": "newer", "offer": OFFER}
+        with mock.patch.object(update_check, "check_now", return_value=answer) as checked:
+            status, body = self.post("/update-check", b'{"action": "check"}')
+        checked.assert_called_once_with(app.APP_VERSION)
+        self.assertEqual((status, json.loads(body)), (200, answer))
+
+    def test_switch_is_stored(self):
+        self.assertEqual(self.post("/update-check", b'{"enabled": false}'), (200, '{"enabled": false}'))
+        self.assertFalse(update_check.enabled())
+        self.assertEqual(self.post("/update-check", b'{"enabled": true}'), (200, '{"enabled": true}'))
+        self.assertTrue(update_check.enabled())
+
+    def test_unwritable_settings_answer_with_the_actual_state(self):
+        with mock.patch.object(update_check, "_store", side_effect=OSError("read-only")):
+            self.assertEqual(self.post("/update-check", b'{"enabled": false}'), (200, '{"enabled": true}'))
+
+    def test_malformed_body_is_refused(self):
+        for body in (b"x", b"[]", b"{}", b'{"action": "rm"}', b'{"enabled": "no"}'):
+            with self.subTest(body=body):
+                self.assertEqual(self.post("/update-check", body)[0], 400)
+        self.assertFalse(self.settings.exists())
+
+    def test_message_container_and_empty_windows_may_use_it(self):
+        message = app.new_session({"name": "zprava", "message": isds_message.read_message(isds_sample("prijata"))})
+        container = app.new_session({"name": "kontejner", "entries": []})
+        empty = app.new_session({"empty": True})
+        for token in (message, container, empty):
+            with self.subTest(token=token):
+                with mock.patch.object(update_check, "check_now", return_value={"status": "current"}):
+                    self.assertEqual(self.post("/update-check", b'{"action": "check"}', token)[0], 200)
+                self.assertEqual(self.post("/save", b"{}", token)[0], 404)
