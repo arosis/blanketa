@@ -44,12 +44,13 @@ Blanketa pod „Nastavení…“ (⌘,), na Windows a Linuxu v menu Soubor pod
 
 ## Nahlášení chyby
 
-Chybu nahlásíte v aplikaci volbou „Nahlásit chybu…“ (na Macu v menu Blanketa, jinde v menu Nápověda). Blanketa připraví e-mail na **podpora@blanketa.cz** a otevře ho ve vašem poštovním programu;
-nic neodešle sama. Hlášení obsahuje to, co do něj napíšete, a technické údaje: verzi Blankety, systém, druh dokumentu
-(formulář ZFO, PDF, datová zpráva, podepsaný kontejner) a posledních nejvýš 5 chyb skriptu stránky. Neobsahuje vyplněné
-údaje, obsah formuláře, názvy souborů, certifikáty ani hesla. Celý text vidíte a můžete ho před odesláním upravit nebo
-smazat. Hlášení čte jen autor Blankety a slouží jen k opravě chyby. Návrhy na zlepšení můžete psát i do
-[GitHub Issues](https://github.com/arosis/blanketa/issues).
+Chybu nahlásíte v aplikaci volbou „Nahlásit chybu…“ (na Macu v menu Blanketa, jinde v menu Nápověda). Blanketa připraví
+e-mail na **podpora@blanketa.cz** a otevře ho ve vašem poštovním programu; nic neodešle sama. Hlášení obsahuje to, co do
+něj napíšete, a technické údaje: verzi Blankety, systém, druh dokumentu (formulář ZFO, PDF, datová zpráva, podepsaný
+kontejner) a posledních nejvýš 5 chyb skriptu stránky. Neobsahuje vyplněné údaje, obsah formuláře, názvy souborů,
+certifikáty ani hesla. Celý text vidíte a můžete ho před odesláním upravit nebo smazat. Hlášení čte jen autor Blankety
+a slouží jen k opravě chyby. Návrhy na zlepšení můžete psát i do [GitHub
+Issues](https://github.com/arosis/blanketa/issues).
 
 Když při práci s dokumentem selže server okna nebo nečekaně skončí, Blanketa si uloží krátký technický záznam: druh
 chyby, místa v kódu Blankety, kde vznikla, činnost a datum – bez textu chyby, hodnot a názvů souborů. Při dalším
@@ -64,8 +65,9 @@ a to, že se ptá Blanketa. Když vyšla novější verze, nabídne ji při dal
 „Stáhnout…“ otevře v prohlížeči balíček pro váš systém (na Linuxu stránku vydání s postupem instalace), „Připomenout za
 týden“ nabídku o sedm dní odloží.
 
-Automatické kontroly vypnete v [Nastavení](#nastavení) volbou „Automaticky kontrolovat nové verze“. Volba „Zkontrolovat aktualizace…“ (na Macu v menu Blanketa, jinde v menu Nápověda) zjistí novou verzi i při vypnutých kontrolách a řekne, zda máte nejnovější. Instalace zůstává ruční, Blanketa se sama
-nepřepíše.
+Automatické kontroly vypnete v [Nastavení](#nastavení) volbou „Automaticky kontrolovat nové verze“. Volba „Zkontrolovat
+aktualizace…“ (na Macu v menu Blanketa, jinde v menu Nápověda) zjistí novou verzi i při vypnutých kontrolách a řekne,
+zda máte nejnovější. Instalace zůstává ruční, Blanketa se sama nepřepíše.
 
 ## Stažení a instalace
 
