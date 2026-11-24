@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from unittest import mock
 
-from support import ROOT
+from support import ROOT as ROOT
 
 import update_check
 
@@ -158,11 +158,11 @@ class Offer(WithOwnSettingsFolder):
             self.assertEqual(update_check.check_now("0.4.0", NOW)["status"], "newer")
 
     def test_settings_folder_that_is_a_file(self):
-        blocker = ROOT / "update_check.py"
+        blocker = self.folder / "file"
+        blocker.write_text("x")
         self.answering(release_json())
         with mock.patch.object(update_check.certstore, "config_dir", return_value=blocker):
-            with mock.patch.object(update_check, "refresh_in_background"):
-                self.assertIsNone(update_check.offer_for_page("0.4.0", NOW))
+            self.assertIsNone(update_check.offer_for_page("0.4.0", NOW))
             self.assertEqual(update_check.check_now("0.4.0", NOW)["status"], "newer")
 
 
