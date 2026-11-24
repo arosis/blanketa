@@ -84,7 +84,7 @@ CODELISTS_PAGE = (RESOURCES / "ui/codelists.html").read_text(encoding="utf-8").r
 APP_VERSION = (RESOURCES / "VERSION").read_text(encoding="utf-8").strip()
 SYSTEM = error_report.system_description()
 PAGE_SCRIPTS = {f"/{name}": RESOURCES / "ui" / name
-                for name in ("files.js", "shell.js", "pdf.mjs", "message.js", "container.js", "codelists.js")}
+                for name in ("files.js", "shell.js", "pdf.mjs", "message.js", "container.js", "codelists.js", "settings.js")}
 
 
 def json_for_script(value):
@@ -705,6 +705,8 @@ class Handler(BaseHTTPRequestHandler):
             progress = codelists.download_progress(first_query_value(url.query, "t"))
             return self._send_json(progress) if progress else self._send_not_found()
         if SETTINGS_ONLY:
+            if url.path != "/":
+                return self._send_not_found()
             return self._send_response(200, render_settings_page().encode(), HTML_UTF8)
         name = first_query_value(url.query, "form", None)
         if not name and SINGLE_FILE and not FORMS:

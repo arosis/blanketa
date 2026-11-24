@@ -7,7 +7,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
-from support import page_data
+from support import needs_node, page_data, run_ui_scripts, ui_source
 
 import app
 import preferences
@@ -55,6 +55,22 @@ class InTheLocalServer(unittest.TestCase):
         self.assertEqual(app.SESSIONS[data["session"]], {"settings": True})
         self.assertIn("app_version", data)
         self.assertIn("system", data)
+
+    def test_settings_page_is_served_with_its_script(self):
+        status, body = self.request("GET", "/settings.js")
+        self.assertEqual(status, 200)
+        self.assertEqual(body, ui_source("settings.js"))
+
+    def test_the_page_is_served_whatever_its_query(self):
+        status, html = self.request("GET", "/?form=x")
+        self.assertEqual(status, 200)
+        self.assertIn("data-update-checks", html)
+
+    def test_other_paths_answer_404_and_open_no_session(self):
+        before = dict(app.SESSIONS)
+        self.assertEqual(self.request("GET", "/favicon.ico")[0], 404)
+        self.assertEqual(self.request("GET", "/anything?form=x")[0], 404)
+        self.assertEqual(app.SESSIONS, before)
 
     def test_every_load_has_its_own_session(self):
         self.assertNotEqual(self.settings_page()["session"], self.settings_page()["session"])
@@ -117,3 +133,149 @@ class InTheLocalServer(unittest.TestCase):
                 mock.patch.object(app, "pdf_info", return_value={}):
             html = app.render_pdf_page("zadost")
         self.assertFalse(page_data(html)["time_stamp"]["usable"])
+
+
+class TheSettingsPage(unittest.TestCase):
+    LABELS = (
+        "Aktualizace", "Automaticky kontrolovat nové verze",
+        "Hlášení chyb", "Po chybě nabídnout hlášení při dalším otevření okna",
+        "Podpora", "Občas připomenout možnost přispět na vývoj",
+        "Časová razítka (podpis PDF)", "Veřejná služba Sectigo", "Vlastní služba", "Adresa služby",
+        "Jméno (jen když ho služba vyžaduje)", "Heslo k\u00a0vlastní službě se zadává při každém podpisu.",
+    )
+
+    def test_page_has_all_sections_and_labels(self):
+        html = ui_source("settings.html")
+        for label in self.LABELS:
+            with self.subTest(label=label):
+                self.assertIn(label, html)
+
+    def test_script_is_listed_among_the_page_scripts(self):
+        self.assertIn("/settings.js", app.PAGE_SCRIPTS)
+
+
+STORED = {"update_checks": True, "crash_offers": True, "support_reminder": True,
+          "time_stamp": {"service": "public", "url": "", "user": "", "usable": True}}
+
+FAKE_PAGE = """
+    const listeners = {};
+    const control = (extra = {}) => ({hidden: false, textContent: '', value: '', checked: false,
+        addEventListener(type, handler) { (listeners[this.id] ??= {})[type] = handler; }, ...extra});
+    const ids = {};
+    const named = (id, extra) => (ids[id] = control({id, ...extra}));
+    const nodes = {
+        'script[data-zfo-page]': {textContent: JSON.stringify(PAGE)},
+        '[data-update-checks]': named('update_checks'), '[data-crash-offers]': named('crash_offers'),
+        '[data-support-reminder]': named('support_reminder'),
+        '[data-time-stamp-own]': named('own'), '[data-time-stamp-url]': named('url'), '[data-time-stamp-user]': named('user'),
+        '[data-error="update_checks"]': named('e_update', {hidden: true}), '[data-error="crash_offers"]': named('e_crash', {hidden: true}),
+        '[data-error="support_reminder"]': named('e_support', {hidden: true}), '[data-error="time_stamp"]': named('e_stamp', {hidden: true}),
+    };
+    const radios = [named('public', {value: 'public'}), named('own_radio', {value: 'own'})];
+    document.querySelector = selector => nodes[selector];
+    document.querySelectorAll = () => radios;
+    const sent = [];
+    fetch = async (url, options) => {
+        sent.push({url, body: options.body});
+        return ANSWER(options.body);
+    };
+    (0, eval)(SOURCE);
+    const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+    const fire = (id, type) => listeners[id][type]();
+"""
+
+
+@needs_node
+class TheSettingsScript(unittest.TestCase):
+    def run_page(self, steps, answer="async () => ({ok: true, json: async () => STORED_ANSWER})", stored=STORED):
+        script = f"""
+            const PAGE = {json.dumps({"session": "tok", "settings": stored})};
+            const SOURCE = {json.dumps(ui_source("settings.js"))};
+            const STORED_ANSWER = {json.dumps(stored)};
+            const ANSWER = {answer};
+            {FAKE_PAGE}
+            (async () => {{
+                {steps}
+            }})();
+        """
+        return json.loads(run_ui_scripts([], script))
+
+    def test_page_shows_the_stored_values(self):
+        stored = {**STORED, "update_checks": False, "time_stamp": {"service": "own", "url": "https://t.example.cz/", "user": "u", "usable": True}}
+        result = self.run_page("""console.log(JSON.stringify({
+            update: ids.update_checks.checked, crash: ids.crash_offers.checked, own: ids.own.hidden,
+            url: ids.url.value, user: ids.user.value, radios: radios.map(radio => radio.checked)}));""", stored=stored)
+        self.assertEqual(result, {"update": False, "crash": True, "own": False, "url": "https://t.example.cz/",
+                                  "user": "u", "radios": [False, True]})
+
+    def test_toggle_posts_only_its_key(self):
+        result = self.run_page("""
+            ids.update_checks.checked = false;
+            fire('update_checks', 'change');
+            await pause(10);
+            console.log(JSON.stringify(sent));""")
+        self.assertEqual(result, [{"url": "/settings?s=tok", "body": '{"update_checks":false}'}])
+
+    def test_public_service_posts_the_whole_time_stamp(self):
+        stored = {**STORED, "time_stamp": {"service": "own", "url": "https://t.example.cz/", "user": "u", "usable": True}}
+        result = self.run_page("""
+            radios[0].checked = true; radios[1].checked = false;
+            fire('public', 'change');
+            await pause(10);
+            console.log(JSON.stringify(sent.map(call => JSON.parse(call.body))));""", stored=stored)
+        self.assertEqual(result, [{"time_stamp": {"service": "public", "url": "https://t.example.cz/", "user": "u"}}])
+
+    def test_own_service_without_an_address_only_opens_the_fields(self):
+        result = self.run_page("""
+            radios[0].checked = false; radios[1].checked = true;
+            fire('own_radio', 'change');
+            await pause(10);
+            console.log(JSON.stringify({sent: sent.length, hidden: ids.own.hidden}));""")
+        self.assertEqual(result, {"sent": 0, "hidden": False})
+
+    def test_typing_is_posted_once_after_a_pause(self):
+        result = self.run_page("""
+            radios[0].checked = false; radios[1].checked = true;
+            fire('own_radio', 'change');
+            for (const text of ['h', 'ht', ' https://t.example.cz/ ']) { ids.url.value = text; fire('url', 'input'); await pause(50); }
+            const before = sent.length;
+            await pause(500);
+            console.log(JSON.stringify({before, sent: sent.map(call => JSON.parse(call.body))}));""")
+        self.assertEqual(result["before"], 0)
+        self.assertEqual(result["sent"], [{"time_stamp": {"service": "own", "url": "https://t.example.cz/", "user": ""}}])
+
+    def test_failed_save_restores_and_explains(self):
+        answer = "async () => ({ok: false, text: async () => 'Adresa služby musí začínat http:// nebo https://.'})"
+        result = self.run_page("""
+            ids.update_checks.checked = false;
+            fire('update_checks', 'change');
+            await pause(10);
+            console.log(JSON.stringify({checked: ids.update_checks.checked, text: ids.e_update.textContent, hidden: ids.e_update.hidden}));""",
+                               answer=answer)
+        self.assertEqual(result, {"checked": True, "text": "Adresa služby musí začínat http:// nebo https://.", "hidden": False})
+
+    def test_failed_time_stamp_save_shows_the_reason_under_the_section_and_restores_the_service(self):
+        answer = "async () => ({ok: false, text: async () => 'Adresa je špatně.'})"
+        result = self.run_page("""
+            radios[0].checked = false; radios[1].checked = true;
+            ids.url.value = 'ftp://x';
+            fire('own_radio', 'change');
+            await pause(10);
+            console.log(JSON.stringify({text: ids.e_stamp.textContent, radios: radios.map(radio => radio.checked), url: ids.url.value}));""",
+                               answer=answer)
+        self.assertEqual(result, {"text": "Adresa je špatně.", "radios": [True, False], "url": ""})
+
+    def test_next_success_clears_the_message(self):
+        result = self.run_page("""
+            let fail = true;
+            ANSWER_NOW = () => fail;
+            ids.update_checks.checked = false;
+            fire('update_checks', 'change');
+            await pause(10);
+            const shown = ids.e_update.hidden;
+            fail = false;
+            fire('update_checks', 'change');
+            await pause(10);
+            console.log(JSON.stringify({shown, hidden: ids.e_update.hidden}));""",
+                               answer="""async () => ANSWER_NOW() ? {ok: false, text: async () => 'Chyba.'} : {ok: true, json: async () => STORED_ANSWER}""")
+        self.assertEqual(result, {"shown": False, "hidden": True})

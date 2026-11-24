@@ -4,9 +4,53 @@
 <meta charset="utf-8">
 <title>Nastavení</title>
 __SHELL_STYLE__
+<style>
+  html, body { overflow: auto !important; }
+  body.zfo-settings { display: block; background: #fff; font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--text); }
+  .zfo-settings main { display: grid; gap: 18px; padding: 18px 22px; }
+  .zfo-settings section { display: grid; gap: 8px; }
+  .zfo-settings h2 { margin: 0; font-size: 13px; }
+  .zfo-settings label.zfo-choice { display: flex; align-items: center; gap: 8px; font-weight: 400; }
+  .zfo-settings .zfo-own { display: grid; gap: 8px; padding-left: 24px; }
+  .zfo-settings .zfo-own label { display: grid; gap: 4px; }
+  .zfo-settings input.zfo-cert { max-width: none; width: 100%; box-sizing: border-box; }
+  .zfo-settings p { margin: 0; color: var(--muted); font-size: 12px; }
+  .zfo-settings p.zfo-error { color: var(--bad); }
+</style>
 </head>
-<body class="zfo-app">
-<main></main>
+<body class="zfo-settings">
+<main>
+  <section>
+    <h2>Aktualizace</h2>
+    <label class="zfo-choice"><input type="checkbox" data-update-checks>Automaticky kontrolovat nové verze</label>
+    <p class="zfo-error" data-error="update_checks" hidden></p>
+  </section>
+  <section>
+    <h2>Hlášení chyb</h2>
+    <label class="zfo-choice"><input type="checkbox" data-crash-offers>Po chybě nabídnout hlášení při dalším otevření okna</label>
+    <p class="zfo-error" data-error="crash_offers" hidden></p>
+  </section>
+  <section>
+    <h2>Podpora</h2>
+    <label class="zfo-choice"><input type="checkbox" data-support-reminder>Občas připomenout možnost přispět na vývoj</label>
+    <p class="zfo-error" data-error="support_reminder" hidden></p>
+  </section>
+  <section>
+    <h2>Časová razítka (podpis PDF)</h2>
+    <label class="zfo-choice"><input type="radio" name="time-stamp-service" value="public">Veřejná služba Sectigo</label>
+    <label class="zfo-choice"><input type="radio" name="time-stamp-service" value="own">Vlastní služba</label>
+    <div class="zfo-own" data-time-stamp-own hidden>
+      <label>Adresa služby
+        <input type="url" class="zfo-cert" data-time-stamp-url placeholder="https://" autocomplete="off"></label>
+      <label>Jméno (jen když ho služba vyžaduje)
+        <input type="text" class="zfo-cert" data-time-stamp-user autocomplete="off"></label>
+      <p>Heslo k vlastní službě se zadává při každém podpisu.</p>
+    </div>
+    <p class="zfo-error" data-error="time_stamp" hidden></p>
+  </section>
+</main>
 <script type="application/json" data-zfo-page>__PAGE_DATA__</script>
+<script src="/bridge.js"></script>
+<script src="/settings.js"></script>
 </body>
 </html>
