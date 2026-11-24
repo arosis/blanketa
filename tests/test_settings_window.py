@@ -187,12 +187,13 @@ FAKE_PAGE = """
 
 @needs_node
 class TheSettingsScript(unittest.TestCase):
-    def run_page(self, steps, answer="async () => ({ok: true, json: async () => STORED_ANSWER})", stored=STORED):
+    def run_page(self, steps, answer="async () => ({ok: true, json: async () => STORED_ANSWER})", stored=STORED, preamble=""):
         script = f"""
             const PAGE = {json.dumps({"session": "tok", "settings": stored})};
             const SOURCE = {json.dumps(ui_source("settings.js"))};
             const STORED_ANSWER = {json.dumps(stored)};
             const ANSWER = {answer};
+            {preamble}
             {FAKE_PAGE}
             (async () => {{
                 {steps}
@@ -279,3 +280,51 @@ class TheSettingsScript(unittest.TestCase):
             console.log(JSON.stringify({shown, hidden: ids.e_update.hidden}));""",
                                answer="""async () => ANSWER_NOW() ? {ok: false, text: async () => 'Chyba.'} : {ok: true, json: async () => STORED_ANSWER}""")
         self.assertEqual(result, {"shown": False, "hidden": True})
+
+    def test_overlapping_saves_end_with_the_last_answer(self):
+        answer = """async body => {
+            const wanted = JSON.parse(body);
+            if ('update_checks' in wanted) await pause(80);
+            if ('support_reminder' in wanted) return {ok: false, text: async () => 'Chyba.'};
+            const settings = {...current, ...wanted};
+            current = settings;
+            return {ok: true, json: async () => settings};
+        }"""
+        result = self.run_page("""
+            ids.update_checks.checked = false;
+            fire('update_checks', 'change');
+            ids.crash_offers.checked = false;
+            fire('crash_offers', 'change');
+            await pause(300);
+            ids.support_reminder.checked = false;
+            fire('support_reminder', 'change');
+            await pause(50);
+            console.log(JSON.stringify({sent: sent.map(call => call.body),
+                update: ids.update_checks.checked, crash: ids.crash_offers.checked, support: ids.support_reminder.checked}));""",
+                               answer=answer, preamble="let current = STORED_ANSWER;")
+        self.assertEqual(result["sent"], ['{"update_checks":false}', '{"crash_offers":false}', '{"support_reminder":false}'])
+        self.assertEqual((result["update"], result["crash"], result["support"]), (False, False, True))
+
+    def test_late_failure_does_not_reset_controls_changed_since(self):
+        answer = """async body => {
+            if (body.includes('update_checks')) { await pause(60); return {ok: false, text: async () => 'Chyba.'}; }
+            return {ok: true, json: async () => ({...STORED_ANSWER, crash_offers: false})};
+        }"""
+        result = self.run_page("""
+            ids.update_checks.checked = false;
+            fire('update_checks', 'change');
+            ids.crash_offers.checked = false;
+            fire('crash_offers', 'change');
+            await pause(300);
+            console.log(JSON.stringify({crash: ids.crash_offers.checked, update: ids.update_checks.checked, text: ids.e_update.textContent}));""",
+                               answer=answer)
+        self.assertEqual(result, {"crash": False, "update": True, "text": "Chyba."})
+
+    def test_rejected_request_shows_the_czech_message(self):
+        result = self.run_page("""
+            ids.update_checks.checked = false;
+            fire('update_checks', 'change');
+            await pause(10);
+            console.log(JSON.stringify({text: ids.e_update.textContent, checked: ids.update_checks.checked}));""",
+                               answer="""async () => { throw new TypeError('Failed to fetch'); }""")
+        self.assertEqual(result, {"text": "Nastavení se nepodařilo uložit.", "checked": True})

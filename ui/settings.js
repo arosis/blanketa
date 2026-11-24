@@ -28,18 +28,44 @@ const render = settings => {
   USER_FIELD.value = settings.time_stamp.user;
   showOwnFields();
 };
-const save = async (key, body, keepTyping = false) => {
-  try {
-    const response = await fetch(`/settings?s=${encodeURIComponent(SESSION)}`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
-    });
-    if (!response.ok) throw new Error(await response.text());
-    stored = await response.json();
-    showError(key, '');
-  } catch (error) {
-    showError(key, error.message || SAVE_FAILED);
-    if (!keepTyping) render(stored);
+const restore = key => {
+  if (SWITCHES[key]) {
+    SWITCHES[key].checked = stored[key];
+    return;
   }
+  for (const radio of SERVICES) radio.checked = radio.value === stored.time_stamp.service;
+  URL_FIELD.value = stored.time_stamp.url;
+  USER_FIELD.value = stored.time_stamp.user;
+  showOwnFields();
+};
+let queue = Promise.resolve();
+const send = async body => {
+  const response = await fetch(`/settings?s=${encodeURIComponent(SESSION)}`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+  });
+  if (!response.ok) return {refusal: await response.text()};
+  return {answer: await response.json()};
+};
+const saveInOrder = async (key, body, keepTyping) => {
+  let failed = false;
+  try {
+    const {answer, refusal} = await send(body);
+    if (answer) {
+      stored = answer;
+      showError(key, '');
+    } else {
+      failed = true;
+      showError(key, refusal || SAVE_FAILED);
+    }
+  } catch {
+    failed = true;
+    showError(key, SAVE_FAILED);
+  }
+  if (failed && !keepTyping) restore(key);
+};
+const save = (key, body, keepTyping = false) => {
+  queue = queue.then(() => saveInOrder(key, body, keepTyping));
+  return queue;
 };
 const timeStampBody = () => ({time_stamp: {service: chosenService(), url: URL_FIELD.value.trim(), user: USER_FIELD.value.trim()}});
 const saveTimeStamp = keepTyping => save('time_stamp', timeStampBody(), keepTyping);
