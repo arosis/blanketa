@@ -71,10 +71,15 @@ class WithOwnSettingsFolder(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
         self.addCleanup(setattr, update_check, "_background_running", False)
+        self.new_window()
+        self.addCleanup(self.new_window)
         self.real_refresh = REAL_REFRESH_IN_BACKGROUND
         patcher = mock.patch.object(update_check, "refresh_in_background")
         patcher.start()
         self.addCleanup(patcher.stop)
+
+    def new_window(self):
+        update_check._window_considered = False
 
     def store(self, **values):
         self.settings.write_text(json.dumps(values), encoding="utf-8")
@@ -94,7 +99,7 @@ class VersionTuple(unittest.TestCase):
     def test_only_plain_version_tags_count(self):
         self.assertEqual(update_check.version_tuple("0.4.0"), (0, 4, 0))
         self.assertEqual(update_check.version_tuple("v0.4.0"), (0, 4, 0))
-        for text in ("v0.5.0-rc1", "latest", "0.5", "", None, 5):
+        for text in ("v0.5.0-rc1", "latest", "0.5", "", None, 5, "v\u0661.\u0662.\u0663"):
             with self.subTest(text=text):
                 self.assertIsNone(update_check.version_tuple(text))
 
@@ -105,9 +110,22 @@ class Offer(WithOwnSettingsFolder):
         offer = update_check.offer_for_page("0.4.0", NOW)
         self.assertEqual(offer["version"], "0.5.0")
         self.assertEqual(offer["current"], "0.4.0")
+        self.new_window()
         self.assertIsNone(update_check.offer_for_page("0.4.0", NOW))
+        self.new_window()
         self.assertIsNone(update_check.offer_for_page("0.4.0", datetime(2026, 11, 30, 10, 0)))
+        self.new_window()
         self.assertIsNotNone(update_check.offer_for_page("0.4.0", datetime(2026, 12, 1, 10, 0)))
+
+    def test_only_the_first_render_of_a_window_may_offer(self):
+        self.assertIsNone(update_check.offer_for_page("0.4.0", NOW))
+        self.fresh_state()
+        self.assertIsNone(update_check.offer_for_page("0.4.0", NOW))
+        self.new_window()
+        self.assertEqual(update_check.offer_for_page("0.4.0", NOW)["version"], "0.5.0")
+
+    def test_the_flag_does_not_leak_between_tests(self):
+        self.assertFalse(update_check._window_considered)
 
     def test_newer_version_than_postponed_is_offered_at_once(self):
         self.fresh_state("0.5.1", postponed={"version": "0.5.0", "until": datetime(2026, 12, 1, 10, 0).isoformat()})
@@ -203,7 +221,7 @@ class Request(WithOwnSettingsFolder):
                 self.assertEqual(update_check.check_now("0.4.0", NOW), {"status": "unknown"})
 
     def test_only_plain_version_tags_count(self):
-        for tag in ("v0.5.0-rc1", "0.5.0", "latest"):
+        for tag in ("v0.5.0-rc1", "0.5.0", "latest", "v\u0661.\u0662.\u0663"):
             with self.subTest(tag=tag):
                 self.answering(release_json(tag))
                 self.assertIsNone(update_check.fetch_latest())
@@ -213,6 +231,7 @@ class Request(WithOwnSettingsFolder):
 
 class DownloadUrl(WithOwnSettingsFolder):
     def offer(self, assets=None):
+        self.new_window()
         self.store(latest={"version": "0.5.0", "assets": ASSETS if assets is None else assets}, checked_at=NOW.isoformat())
         return update_check.offer_for_page("0.4.0", NOW)
 
@@ -236,6 +255,11 @@ class DownloadUrl(WithOwnSettingsFolder):
             "https://example.com/arosis/blanketa/releases/download/v0.5.0/" + name,
             "http://github.com/arosis/blanketa/releases/download/v0.5.0/" + name,
             "https://github.com/arosis/blanketa/releases/download/v0.4.0/" + name,
+            RELEASE_DOWNLOADS + "../../../../evil/x/releases/download/v1/" + name,
+            RELEASE_DOWNLOADS + "..%2f..%2fevil/" + name,
+            RELEASE_DOWNLOADS + "%2e%2e/" + name,
+            RELEASE_DOWNLOADS + "..\\" + name,
+            RELEASE_DOWNLOADS + name + "?x=1",
         ):
             with self.subTest(url=url):
                 self.assertEqual(

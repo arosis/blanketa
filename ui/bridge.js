@@ -195,11 +195,12 @@ window.zfoAbout = (() => {
       const result = dialog.querySelector('[data-update-result]');
       switchBox.checked = page.update_checks !== false;
       switchBox.addEventListener('change', async () => {
-        try { switchBox.checked = (await window.zfoUpdateOffer.store(switchBox.checked)).enabled; } catch {}
+        const wanted = switchBox.checked;
+        try { switchBox.checked = (await window.zfoUpdateOffer.store(wanted)).enabled; } catch { switchBox.checked = !wanted; }
       });
       checkButton.addEventListener('click', async () => {
         checkButton.disabled = true;
-        result.textContent = '';
+        result.textContent = 'Zjišťuji…';
         const answer = await window.zfoUpdateOffer.check();
         checkButton.disabled = false;
         if (answer.status === 'newer') { dialog.close(); window.zfoUpdateOffer(answer.offer); }

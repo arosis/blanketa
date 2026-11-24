@@ -21,9 +21,10 @@ MAX_ANSWER_BYTES = 1_000_000
 
 PLATFORM = "mac" if certstore.IS_MAC else "windows" if certstore.IS_WINDOWS else "linux"
 
-_TAG = re.compile(r"v?(\d+)\.(\d+)\.(\d+)")
+_TAG = re.compile(r"v?([0-9]+)\.([0-9]+)\.([0-9]+)")
 _background = threading.Lock()
 _background_running = False
+_window_considered = False
 
 
 def version_tuple(text):
@@ -77,7 +78,7 @@ def fetch_latest():
         with public_services.opener().open(request, timeout=SECONDS_TO_WAIT) as answer:
             release = json.loads(answer.read(MAX_ANSWER_BYTES))
         tag = release["tag_name"]
-        if not re.fullmatch(r"v\d+\.\d+\.\d+", tag):
+        if not isinstance(tag, str) or not tag.startswith("v") or version_tuple(tag) is None:
             return None
         assets = {
             asset["name"]: asset["browser_download_url"]
@@ -109,8 +110,7 @@ def _offer(latest, current):
     version = latest["version"]
     release_page = f"{RELEASES_URL}/tag/v{version}"
     download_url = latest["assets"].get(_asset_name(version))
-    trusted_prefix = f"{RELEASES_URL}/download/v{version}/"
-    if not (isinstance(download_url, str) and download_url.startswith(trusted_prefix)):
+    if download_url != f"{RELEASES_URL}/download/v{version}/{_asset_name(version)}":
         download_url = release_page
     return {
         "version": version,
@@ -173,6 +173,8 @@ def refresh_in_background():
 
 
 def offer_for_page(current, now=None):
+    global _window_considered
+    first_render, _window_considered = not _window_considered, True
     try:
         now = now or datetime.now()
         stored = _stored()
@@ -181,7 +183,7 @@ def offer_for_page(current, now=None):
         if _stale(stored, now):
             refresh_in_background()
         latest = _latest(stored)
-        if latest is None or not _is_newer(latest, current) or _postponed(stored, latest["version"], now):
+        if not first_render or latest is None or not _is_newer(latest, current) or _postponed(stored, latest["version"], now):
             return None
         _postpone(stored, latest["version"], now)
         return _offer(latest, current)
