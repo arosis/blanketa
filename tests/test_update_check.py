@@ -10,7 +10,14 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest import mock
 
-from support import isds_sample, needs_node, page_data, run_ui_scripts, ui_source
+from support import (
+    REAL_REFRESH_IN_BACKGROUND,
+    isds_sample,
+    needs_node,
+    page_data,
+    run_ui_scripts,
+    ui_source,
+)
 
 import app
 import crash_report
@@ -64,7 +71,7 @@ class WithOwnSettingsFolder(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
         self.addCleanup(setattr, update_check, "_background_running", False)
-        self.real_refresh = update_check.refresh_in_background
+        self.real_refresh = REAL_REFRESH_IN_BACKGROUND
         patcher = mock.patch.object(update_check, "refresh_in_background")
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -451,3 +458,13 @@ class AboutWindow(unittest.TestCase):
             self.assertIn(fragment, result["html"])
         for selector in ("[data-update-checks]", "[data-update-check]", "[data-update-result]"):
             self.assertIn(selector, result["wired"])
+
+
+class TheSuiteStaysOffline(unittest.TestCase):
+    def test_rendering_a_page_neither_reaches_the_network_nor_the_real_settings(self):
+        with mock.patch.object(update_check.public_services, "opener", side_effect=AssertionError("network")) as opener, \
+                mock.patch.object(update_check.threading, "Thread", side_effect=AssertionError("thread")):
+            data = page_data(app.render_empty_window())
+        opener.assert_not_called()
+        self.assertIn("update_offer", data)
+        self.assertNotIn(str(Path.home()), str(update_check.certstore.config_dir()))
