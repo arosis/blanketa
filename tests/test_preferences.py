@@ -115,6 +115,30 @@ class SettingsFilesAreReplacedWhole(WithOwnSettingsFolder):
         self.assertEqual([path.name for path in self.folder.iterdir()], [update_check.SETTINGS_FILE])
         self.assertFalse(update_check.enabled())
 
+    def test_file_read_by_another_window_is_replaced_once_it_lets_go(self):
+        update_check.set_enabled(False)
+        real_replace = update_check.certstore.os.replace
+        refusals = [PermissionError("in use"), PermissionError("in use")]
+
+        def replace(source, target):
+            if refusals:
+                raise refusals.pop()
+            real_replace(source, target)
+
+        with mock.patch.object(update_check.certstore.os, "replace", side_effect=replace), \
+                mock.patch.object(update_check.certstore.time, "sleep"):
+            update_check.set_enabled(True)
+        self.assertTrue(update_check.enabled())
+        self.assertEqual([path.name for path in self.folder.iterdir()], [update_check.SETTINGS_FILE])
+
+    def test_file_held_for_good_is_refused_without_a_partial_one(self):
+        update_check.set_enabled(False)
+        with mock.patch.object(update_check.certstore.os, "replace", side_effect=PermissionError("in use")), \
+                mock.patch.object(update_check.certstore.time, "sleep"), self.assertRaises(PermissionError):
+            update_check.set_enabled(True)
+        self.assertEqual([path.name for path in self.folder.iterdir()], [update_check.SETTINGS_FILE])
+        self.assertFalse(update_check.enabled())
+
     def test_written_file_is_never_seen_partial(self):
         replaced = []
         real_replace = update_check.certstore.os.replace

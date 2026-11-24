@@ -267,6 +267,17 @@ class TheSettingsScript(unittest.TestCase):
         self.assertEqual(result["before"], 0)
         self.assertEqual(result["sent"], [{"time_stamp": {"service": "own", "url": "https://t.example.cz/", "user": ""}}])
 
+    def test_choosing_a_service_while_typing_posts_once(self):
+        stored = {**STORED, "time_stamp": {"service": "own", "url": "https://t.example.cz/", "user": "", "usable": True}}
+        result = self.run_page("""
+            ids.user.value = 'u';
+            fire('user', 'input');
+            radios[0].checked = true; radios[1].checked = false;
+            fire('public', 'change');
+            await pause(500);
+            console.log(JSON.stringify(sent.map(call => JSON.parse(call.body))));""", stored=stored)
+        self.assertEqual(result, [{"time_stamp": {"service": "public", "url": "https://t.example.cz/", "user": "u"}}])
+
     def test_failed_save_restores_and_explains(self):
         answer = "async () => ({ok: false, text: async () => 'Adresa služby musí začínat http:// nebo https://.'})"
         result = self.run_page("""

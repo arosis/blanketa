@@ -77,6 +77,7 @@ for (const [key, control] of Object.entries(SWITCHES)) {
 }
 for (const radio of SERVICES) {
   radio.addEventListener('change', () => {
+    clearTimeout(typingTimer);
     showOwnFields();
     if (chosenService() === 'own' && !URL_FIELD.value.trim()) return;
     saveTimeStamp(false);
