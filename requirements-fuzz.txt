@@ -1366,9 +1366,9 @@ pycparser==3.12 ; implementation_name != 'PyPy' and platform_python_implementati
     # via
     #   -c requirements.txt
     #   cffi
-pyhanko==0.38.1 \
-    --hash=sha256:27348b2bb5c6756402102a930b3404a1ccce4d1102f81e56399df268dd90f70d \
-    --hash=sha256:723fdf1a6e27be72d0d7fbf65deccf03aeaa6fafbdddc5c698b6b2eba06c543d
+pyhanko==0.38.2 \
+    --hash=sha256:041051105ddf3ace6571605ddccae0f3e444a6e99f0bd54ec88281684282ad41 \
+    --hash=sha256:2c18ab33367ee8df2df81637a2a321951d769ed7194d9c5aa04a5b5041c33d82
     # via
     #   -c requirements.txt
     #   -r deps/runtime.in
@@ -1401,9 +1401,9 @@ pyinstaller-hooks-contrib==2026.10 \
     # via
     #   -c requirements.txt
     #   pyinstaller
-pypdf==7.1.0 \
-    --hash=sha256:47cca6b24bdcf4c4d65b5f7b8b972535c61710a061261e737688777cfd9a7bfb \
-    --hash=sha256:ca3fa902369e98a6d2cb7b56396de902b72ef9bb3c1e8706c1bfc7d8bd0cf0d7
+pypdf==7.1.1 \
+    --hash=sha256:04c5680d4b4cfa04ab505b09393fc949860c34a4dad6565284d11a2f5c3ce8b1 \
+    --hash=sha256:2eff4e2fc5fb22a6d6711e6f1166cdc9ab5765d90cd0d77dfea3f4aa91a27b1d
     # via
     #   -c requirements.txt
     #   -r deps/runtime.in
@@ -1469,9 +1469,9 @@ uharfbuzz==0.57.0 \
     # via
     #   -c requirements.txt
     #   pyhanko
-uritools==7.0.0 \
-    --hash=sha256:110b773e3f8fbaebcdcbe1377d04e418b1985adf69deeca4ed569f3e328cbf48 \
-    --hash=sha256:41a5d1c0ff82d73fc3c59a34e8103f699791d41fff9e3bd272a055249641b889
+uritools==7.0.1 \
+    --hash=sha256:68ef533cebb6b5b6a79cc94c9e8c06d7521e3fe60a11f6689ec51795f25b4617 \
+    --hash=sha256:abf09f899b925fad05407d7f39061318c6be62cce065db727a024daadf96eebf
     # via
     #   -c requirements.txt
     #   pyhanko-certvalidator

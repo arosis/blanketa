@@ -1374,9 +1374,9 @@ pycparser==3.12 ; (implementation_name != 'PyPy' and platform_python_implementat
     # via
     #   -c requirements.txt
     #   cffi
-pyhanko==0.38.1 \
-    --hash=sha256:27348b2bb5c6756402102a930b3404a1ccce4d1102f81e56399df268dd90f70d \
-    --hash=sha256:723fdf1a6e27be72d0d7fbf65deccf03aeaa6fafbdddc5c698b6b2eba06c543d
+pyhanko==0.38.2 \
+    --hash=sha256:041051105ddf3ace6571605ddccae0f3e444a6e99f0bd54ec88281684282ad41 \
+    --hash=sha256:2c18ab33367ee8df2df81637a2a321951d769ed7194d9c5aa04a5b5041c33d82
     # via
     #   -c requirements.txt
     #   -r deps/runtime.in
@@ -1479,9 +1479,9 @@ pyobjc-framework-webkit==13.0 ; sys_platform == 'darwin' \
     --hash=sha256:a6e6685f2684ff0c1cb09e8fe26f94fc58d2ed146102a3513828a421a04bb57b \
     --hash=sha256:d97dd5077360d1e019d26bc26492e1c30fd3ef60e98ae48c9a9d555b8856ead0
     # via pywebview
-pypdf==7.1.0 \
-    --hash=sha256:47cca6b24bdcf4c4d65b5f7b8b972535c61710a061261e737688777cfd9a7bfb \
-    --hash=sha256:ca3fa902369e98a6d2cb7b56396de902b72ef9bb3c1e8706c1bfc7d8bd0cf0d7
+pypdf==7.1.1 \
+    --hash=sha256:04c5680d4b4cfa04ab505b09393fc949860c34a4dad6565284d11a2f5c3ce8b1 \
+    --hash=sha256:2eff4e2fc5fb22a6d6711e6f1166cdc9ab5765d90cd0d77dfea3f4aa91a27b1d
     # via
     #   -c requirements.txt
     #   -r deps/runtime.in
@@ -1510,13 +1510,13 @@ pypdfium2==5.15.2 ; sys_platform == 'linux' \
     --hash=sha256:fddd832b17f11cae080c395530eed01da0c003c66d6c233ba656e93ddf570ee0 \
     --hash=sha256:fe64472c32d0717669c99758ce234066500b0234730dad0327248f09399e9736
     # via -r deps/desktop.in
-pyqt6==6.12.0 ; sys_platform == 'linux' \
-    --hash=sha256:1922bf7440310845a4fd06f4242288084dc26cf682a67e561b115570a8def3d1 \
-    --hash=sha256:2799f2e75594af313222a2dc2da9f965fe88be29ee4293d7937e7763630f5610 \
-    --hash=sha256:c4db4696d70bdaa224545190283d070cffeca54b4060b8a10676b5b16aa96f67 \
-    --hash=sha256:c764f22d101ea9885533ee8452752b929e2ad1d3d77a5c1c12ac82e5f30c99ae \
-    --hash=sha256:d3e021b716bae880224422f9d1b894d2d53de7e60e60dbc43f860723f9cc300b \
-    --hash=sha256:fd173c00432fa60580e6c4e44aa0c30b60160b0873832799fc65aa0d582647a0
+pyqt6==6.12.1 ; sys_platform == 'linux' \
+    --hash=sha256:04d189a18acdd8d5d64f3e99152af42381f26761f1e84c049dec317efe5372a9 \
+    --hash=sha256:17bb18b3ae953ab54b23026291ecea2579b028597b56c281a752c8ed66dd1a58 \
+    --hash=sha256:86f77dcb30882014fce9fe0912d9d7aed7f20f17b957b7c5fb0ee67410e89870 \
+    --hash=sha256:91c3a6a520f3e35e022bb7e05a6bf7d47d5b25eb0f0d6ca9c734c18d12d470ff \
+    --hash=sha256:b432aa5ffbdaf90a0b909fd47cb1aa908808ae20928561beed0db9fe2ac6347e \
+    --hash=sha256:f3c5588b42e786e25d94e070366762225a863de77c884a6aabc7553a9eeb98ad
     # via
     #   -r deps/desktop.in
     #   pyqt6-webengine
@@ -1562,13 +1562,13 @@ pyqt6-sip==13.13.1 ; sys_platform == 'linux' \
     # via
     #   pyqt6
     #   pyqt6-webengine
-pyqt6-webengine==6.140.0 ; sys_platform == 'linux' \
-    --hash=sha256:22116d9341731f5300236e819807189ad58d02e218b50489b785d37a118f45b7 \
-    --hash=sha256:4b971079c3bebc14acf143acc2651c920afb9631bc4d42f331e1924e452b76c8 \
-    --hash=sha256:4d5090047945bb588ce29a788c94f6426eac933786f5df831e2d37d3e236a3ef \
-    --hash=sha256:a89592445ed3353f38b236467418ee86aeb366cb5318571b3feb5655cd69e98e \
-    --hash=sha256:f48a7838c230f9cba822d3c2afa39f199e74ada5c219075879993760c7f9457c \
-    --hash=sha256:f630dc6125373423003cd82e21bac24a8bd0f31e4be9ff05bc6f328516fc878d
+pyqt6-webengine==6.140.1 ; sys_platform == 'linux' \
+    --hash=sha256:016e6f2831923ffd7cdef3f3ccffaecc6dd3077a5eab7a8f1751ec968102d747 \
+    --hash=sha256:0fa8633bb373d4606a9c39a036749542d33f81b156e6e3ad9ab5e86641985391 \
+    --hash=sha256:411ea16bf1d7f59bb085d4ab7b0af3e4f8e51a24af13da0be4cb2c93d9e9930d \
+    --hash=sha256:48aba612359aebb73dd0e03540e8db9d16eedd10b4449c7e1a010337f552f7ac \
+    --hash=sha256:7e8b228d2f35806b50135b8fdc7572f3deea09263d2fe878d2fcae8c47c30f72 \
+    --hash=sha256:9836d982a2178f7c0ec604290a78f2de5ab1712108fcc4afa3ca9db95484856a
     # via -r deps/desktop.in
 pyqt6-webengine-qt6==6.140.0 ; sys_platform == 'linux' \
     --hash=sha256:1771f0699ff968e08ab1962252468c0b921c94cab56ecda6d7e8c4cb6b0eda41 \
@@ -1663,9 +1663,9 @@ uharfbuzz==0.57.0 \
     # via
     #   -c requirements.txt
     #   pyhanko
-uritools==7.0.0 \
-    --hash=sha256:110b773e3f8fbaebcdcbe1377d04e418b1985adf69deeca4ed569f3e328cbf48 \
-    --hash=sha256:41a5d1c0ff82d73fc3c59a34e8103f699791d41fff9e3bd272a055249641b889
+uritools==7.0.1 \
+    --hash=sha256:68ef533cebb6b5b6a79cc94c9e8c06d7521e3fe60a11f6689ec51795f25b4617 \
+    --hash=sha256:abf09f899b925fad05407d7f39061318c6be62cce065db727a024daadf96eebf
     # via
     #   -c requirements.txt
     #   pyhanko-certvalidator
