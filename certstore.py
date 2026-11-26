@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from cryptography import x509
@@ -19,6 +20,9 @@ import trustlist
 ROOT = Path(__file__).resolve().parent
 RESOURCES = Path(getattr(sys, "_MEIPASS", ROOT))
 IS_MAC, IS_WINDOWS = sys.platform == "darwin", sys.platform == "win32"
+# Windows refuses to replace a file another process has open; another window only reads a settings file for a moment.
+REPLACE_ATTEMPTS = 3
+SECONDS_BEFORE_NEXT_REPLACE = 0.05
 
 
 def config_dir():
@@ -30,6 +34,26 @@ def config_dir():
         base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "blanketa"
     base.mkdir(parents=True, exist_ok=True)
     return base
+
+
+def replace_file(path, text):
+    partial = None
+    try:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", suffix=".part",
+                                         delete=False) as partial:
+            partial.write(text)
+        for attempt in range(REPLACE_ATTEMPTS):
+            try:
+                os.replace(partial.name, path)
+                return
+            except PermissionError:
+                if attempt == REPLACE_ATTEMPTS - 1:
+                    raise
+                time.sleep(SECONDS_BEFORE_NEXT_REPLACE)
+    except BaseException:
+        if partial is not None:
+            Path(partial.name).unlink(missing_ok=True)
+        raise
 
 
 FROZEN = hasattr(sys, "_MEIPASS")

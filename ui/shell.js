@@ -58,7 +58,8 @@
       const recent = event.target.closest('[data-path]');
       if (recent) native?.postMessage({action: 'openFile', path: recent.dataset.path});
     });
-    const emptyWindowActions = {open, support: () => zfoSupport(), about: () => zfoAbout(), 'report-error': () => zfoReportError()};
+    const emptyWindowActions = {open, support: () => zfoSupport(), about: () => zfoAbout(), 'report-error': () => zfoReportError(),
+      'check-updates': () => zfoUpdateOffer.report()};
     window.zfoAction = name => { if (Object.hasOwn(emptyWindowActions, name)) emptyWindowActions[name](); };
     return;
   }
@@ -1185,6 +1186,7 @@
     support: () => zfoSupport(),
     about: () => zfoAbout(),
     'report-error': () => zfoReportError(),
+    'check-updates': () => zfoUpdateOffer.report(),
     'zoom-in': () => manualZoom(zoom + .1),
     'zoom-out': () => manualZoom(zoom - .1),
     'zoom-fit': () => { autoFit = false; fitWidth(); },
@@ -1231,7 +1233,7 @@
     },
   };
   // A hidden page has no visible fields: until it is shown, a check would find nothing wrong and the zoom nothing to fit.
-  const AVAILABLE_WHILE_OPENING = new Set(['open', 'support', 'about', 'report-error', 'help', 'panel']);
+  const AVAILABLE_WHILE_OPENING = new Set(['open', 'support', 'about', 'report-error', 'check-updates', 'help', 'panel']);
   const runAction = name => { if (ready || AVAILABLE_WHILE_OPENING.has(name)) actions[name]?.(); };
   for (const button of document.querySelectorAll('.zfo-bar [data-action], .zfo-close[data-action]')) {
     button.addEventListener('click', () => runAction(button.dataset.action));

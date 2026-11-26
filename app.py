@@ -30,6 +30,7 @@ import isds_message
 import lookups
 import pdf_form_data
 import pdf_sign
+import preferences
 import ruian
 import support_reminder
 import time_stamps
@@ -53,6 +54,9 @@ OPENING_PLACEHOLDER_STYLE = ('<style>body:not(.zfo-app) > * { display: none; } b
 XSLT = etree.XSLT(etree.parse(str(RESOURCES / "ui/fo2html.xsl")))
 FORMS = {}
 SINGLE_FILE = False
+SETTINGS_ONLY = False
+SETTINGS_NOT_STORED = "Nastavení se nepodařilo uložit."
+TIME_STAMP_SETTINGS_SHAPE = "Nastavení časových razítek nemá očekávaný tvar."
 DAMAGED_PAGE = ("<!doctype html><meta charset=utf-8><title>Soubor nelze otevřít</title>"
                 "<body style='font:14px system-ui,sans-serif;padding:24px'><h1 style='font-size:18px'>Soubor nelze otevřít</h1>"
                 "<p>Soubor může být poškozený nebo nejde o formulář, který Blanketa umí přečíst. Může jít i o chybu Blankety; "
@@ -77,11 +81,12 @@ SHELL_STYLE = re.search(r"<style>.*?</style>", SHELL, re.S).group(0).replace("__
 PDF_PAGE = (RESOURCES / "ui/pdf.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
 MESSAGE_PAGE = (RESOURCES / "ui/message.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
 CONTAINER_PAGE = (RESOURCES / "ui/container.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
+SETTINGS_PAGE = (RESOURCES / "ui/settings.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
 CODELISTS_PAGE = (RESOURCES / "ui/codelists.html").read_text(encoding="utf-8").replace("__SHELL_STYLE__", SHELL_STYLE)
 APP_VERSION = (RESOURCES / "VERSION").read_text(encoding="utf-8").strip()
 SYSTEM = error_report.system_description()
 PAGE_SCRIPTS = {f"/{name}": RESOURCES / "ui" / name
-                for name in ("files.js", "shell.js", "pdf.mjs", "message.js", "container.js", "codelists.js")}
+                for name in ("files.js", "shell.js", "pdf.mjs", "message.js", "container.js", "codelists.js", "settings.js")}
 
 
 def json_for_script(value):
@@ -97,8 +102,7 @@ def page_with_data(template, data, fonts=""):
 def document_page(template, document, data, fonts=""):
     pending_crash_report = crash_report.take_pending()
     update_offer = None if pending_crash_report else update_check.offer_for_page(APP_VERSION)
-    offer = {"document": document, "crash_report": pending_crash_report, "crash_reports": crash_report.enabled(),
-             "update_offer": update_offer, "update_checks": update_check.enabled()}
+    offer = {"document": document, "crash_report": pending_crash_report, "update_offer": update_offer}
     return page_with_data(template, {**data, **offer}, fonts)
 
 
@@ -147,6 +151,10 @@ def is_publisher_signature(signature):
 def remove_data_objects(layer):
     for data_object in layer.xpath("dsig:Object[not(@Id)]", namespaces={"dsig": DS}):
         layer.remove(data_object)
+
+
+def render_settings_page():
+    return page_with_data(SETTINGS_PAGE, {"session": new_session({"settings": True}), "settings": preferences.current()})
 
 
 def render_empty_window():
@@ -209,12 +217,17 @@ def pdf_info(pdf):
             "signature_field": pdf_sign.empty_signature_field(pdf), "xfa": pdf_xfa_usage(reader, fields)}
 
 
+def time_stamp_state():
+    stored = time_stamps.settings()
+    return {**stored, "usable": time_stamps.usable(stored)}
+
+
 def render_pdf_page(name):
     pdf = form_path(name).read_bytes()
     session = new_session({"name": name, "pdf": pdf})
     return document_page(PDF_PAGE, "PDF", {"session": session, "file": form_path(name).name,
                                            "signatures": pdf_signatures(pdf), "info": pdf_info(pdf),
-                                           "time_stamp": time_stamps.settings()})
+                                           "time_stamp": time_stamp_state()})
 
 
 def container_signatures(signatures):
@@ -673,6 +686,8 @@ class Handler(BaseHTTPRequestHandler):
         if self._is_foreign_request():
             return self._send_response(403, b"forbidden", PLAIN_TEXT)
         url = urlparse(self.path)
+        if SETTINGS_ONLY:
+            return self._serve_settings_window(url.path)
         if url.path.startswith("/static/"):
             return self._serve_file_inside(EDITOR, url.path[len("/static/"):], STATIC_CONTENT_TYPES)
         if url.path.startswith("/pdfjs/"):
@@ -700,6 +715,15 @@ class Handler(BaseHTTPRequestHandler):
         if not name:
             return self._serve_form_list()
         return self._serve_form_page(name, url.query)
+
+    def _serve_settings_window(self, path):
+        if path == "/":
+            return self._send_response(200, render_settings_page().encode(), HTML_UTF8)
+        if path == "/bridge.js":
+            return self._serve_bridge_script()
+        if path == "/settings.js":
+            return self._serve_page_script(PAGE_SCRIPTS[path])
+        return self._send_not_found()
 
     def _add_certificate(self):
         request = json.loads(self._read_body() or b"{}")
@@ -790,10 +814,25 @@ class Handler(BaseHTTPRequestHandler):
 
     def _store_time_stamp_settings(self, body):
         try:
-            stored = time_stamps.store_settings(json.loads(body or b"{}"))
+            wanted = json.loads(body or b"{}")
+            if not isinstance(wanted, dict):
+                raise ValueError(TIME_STAMP_SETTINGS_SHAPE)
+            enabled = wanted.get("enabled")
+            if enabled is not None and not isinstance(enabled, bool):
+                raise ValueError(TIME_STAMP_SETTINGS_SHAPE)
+            if isinstance(enabled, bool):
+                time_stamps.store_enabled(enabled)
         except (ValueError, OSError) as error:
             return self._send_error_message(error)
-        return self._send_json(stored)
+        return self._send_json(time_stamp_state())
+
+    def _store_settings(self, body):
+        try:
+            return self._send_json(preferences.change(json.loads(body or b"{}")))
+        except ValueError as error:
+            return self._send_error_message(error)
+        except OSError:
+            return self._send_error_message(SETTINGS_NOT_STORED)
 
     def _store_crash_report_choice(self, body):
         try:
@@ -811,20 +850,11 @@ class Handler(BaseHTTPRequestHandler):
     def _answer_update_check(self, body):
         try:
             request = json.loads(body or b"{}")
-            wanted, action = request.get("enabled"), request.get("action")
-        except (ValueError, AttributeError):
+        except ValueError:
+            request = None
+        if request != {"action": "check"}:
             return self._send_response(400, b"bad request", PLAIN_TEXT)
-        if action == "check" and wanted is None:
-            return self._send_json(update_check.check_now(APP_VERSION))
-        if action == "state" and wanted is None:
-            return self._send_json({"enabled": update_check.enabled()})
-        if not isinstance(wanted, bool) or action is not None:
-            return self._send_response(400, b"bad request", PLAIN_TEXT)
-        try:
-            update_check.set_enabled(wanted)
-        except OSError:
-            pass
-        return self._send_json({"enabled": update_check.enabled()})
+        return self._send_json(update_check.check_now(APP_VERSION))
 
     def _answer_support_reminder(self, body):
         try:
@@ -867,6 +897,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_not_found()
         if "empty" in session and url.path not in ("/crash-report", "/update-check"):
             return self._send_not_found()
+        if ("settings" in session) != (url.path == "/settings"):
+            return self._send_not_found()
         if url.path == "/add-certificate":
             return self._add_certificate()
         body = self._read_body()
@@ -878,6 +910,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._answer_update_check(body)
         if url.path == "/check-addresses":
             return self._check_addresses(session)
+        if url.path == "/settings":
+            return self._store_settings(body)
         with LOCK:
             if url.path == "/ipc":
                 return self._answer_engine_message(session, body)
@@ -927,8 +961,9 @@ def exit_together_with_host_app():
 
 
 def main(args):
-    global SINGLE_FILE
-    if args[:1] in (["--file"], ["--empty"]):
+    global SINGLE_FILE, SETTINGS_ONLY
+    if args[:1] in (["--file"], ["--empty"], ["--settings"]):
+        SETTINGS_ONLY = args[0] == "--settings"
         if args[0] == "--file":
             path = Path(args[1]).expanduser().resolve()
             FORMS[path.stem] = path

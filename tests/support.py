@@ -73,7 +73,7 @@ UI_SCRIPTS_IN_NODE = """
 const vm = require('node:vm'), fs = require('node:fs');
 const element = () => ({style: {}, append() {}, addEventListener() {}});
 const document = {addEventListener() {}, querySelector: () => null, querySelectorAll: () => [], createElement: element, head: element(), body: element()};
-const context = vm.createContext({console, setTimeout, process, navigator: {platform: 'Linux'}, document, URL, addEventListener() {}});
+const context = vm.createContext({console, setTimeout, clearTimeout, process, navigator: {platform: 'Linux'}, document, URL, addEventListener() {}});
 context.window = context;
 for (const path of %s) vm.runInContext(fs.readFileSync(path, 'utf8'), context, {filename: path});
 vm.runInContext(%s, context);

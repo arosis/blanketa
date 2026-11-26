@@ -355,7 +355,7 @@ class OnThePages(WithOwnSettingsFolder):
             data = page_data(app.document_page(app.SHELL, "formulář ZFO", {"session": "x"}))
         offered.assert_called_once_with(app.APP_VERSION)
         self.assertEqual(data["update_offer"]["version"], "0.5.0")
-        self.assertIs(data["update_checks"], True)
+        self.assertNotIn("update_checks", data)
 
     def test_page_without_an_offer_says_so(self):
         with mock.patch.object(update_check, "offer_for_page", return_value=None):
@@ -373,7 +373,7 @@ class OnThePages(WithOwnSettingsFolder):
         with mock.patch.object(update_check.certstore, "config_dir", return_value=self.folder / "missing" / "deeper"):
             data = page_data(app.render_empty_window())
         self.assertIsNone(data["update_offer"])
-        self.assertIs(data["update_checks"], True)
+        self.assertNotIn("update_checks", data)
 
 
 class InTheLocalServer(WithOwnSettingsFolder):
@@ -400,23 +400,14 @@ class InTheLocalServer(WithOwnSettingsFolder):
         checked.assert_called_once_with(app.APP_VERSION)
         self.assertEqual((status, json.loads(body)), (200, answer))
 
-    def test_switch_is_stored(self):
-        self.assertEqual(self.post("/update-check", b'{"enabled": false}'), (200, '{"enabled": false}'))
-        self.assertFalse(update_check.enabled())
-        self.assertEqual(self.post("/update-check", b'{"enabled": true}'), (200, '{"enabled": true}'))
+    def test_switch_is_changed_only_in_settings(self):
+        for body in (b'{"enabled": false}', b'{"enabled": true}', b'{"action": "state"}'):
+            with self.subTest(body=body):
+                self.assertEqual(self.post("/update-check", body)[0], 400)
         self.assertTrue(update_check.enabled())
 
-    def test_switch_state_is_read_without_changing_it(self):
-        update_check.set_enabled(False)
-        self.assertEqual(self.post("/update-check", b'{"action": "state"}'), (200, '{"enabled": false}'))
-        self.assertFalse(update_check.enabled())
-
-    def test_unwritable_settings_answer_with_the_actual_state(self):
-        with mock.patch.object(update_check, "_store", side_effect=OSError("read-only")):
-            self.assertEqual(self.post("/update-check", b'{"enabled": false}'), (200, '{"enabled": true}'))
-
     def test_malformed_body_is_refused(self):
-        for body in (b"x", b"[]", b"{}", b'{"action": "rm"}', b'{"enabled": "no"}'):
+        for body in (b"x", b"[]", b"{}", b'{"action": "rm"}', b'{"enabled": "no"}', b'{"action": "check", "enabled": true}'):
             with self.subTest(body=body):
                 self.assertEqual(self.post("/update-check", body)[0], 400)
         self.assertFalse(self.settings.exists())
@@ -479,40 +470,58 @@ class AboutWindow(unittest.TestCase):
         console.log(JSON.stringify({shown: about.shown, html: about.innerHTML, wired: Object.keys(controls)}));
     """
 
-    def test_about_dialog_has_the_update_controls_and_opens(self):
+    def test_about_dialog_opens_without_settings(self):
         result = json.loads(run_ui_scripts(["bridge.js"], self.SCRIPT))
         self.assertTrue(result["shown"])
-        for fragment in ("data-update-checks", "data-update-check>", "data-update-result",
-                         "Automaticky kontrolovat nové verze", "Zkontrolovat aktualizace"):
+        for fragment in ("data-update-check", "Automaticky kontrolovat", "Zkontrolovat aktualizace"):
+            self.assertNotIn(fragment, result["html"])
+        for fragment in ("Nahlásit chybu…", "Podpořit Blanketu…", "Zavřít"):
             self.assertIn(fragment, result["html"])
-        for selector in ("[data-update-checks]", "[data-update-check]", "[data-update-result]"):
-            self.assertIn(selector, result["wired"])
 
-    def test_every_opening_shows_the_switch_as_stored_now(self):
+
+@needs_node
+class ManualCheckInThePage(unittest.TestCase):
+    def run_check(self, answer):
         script = """
-            const controls = {};
-            const node = () => ({style: {}, append() {}, addEventListener() {}, close() {}, showModal() {}});
+            const dialogs = [];
             document.createElement = () => {
-                const created = node();
-                created.querySelector = selector => (controls[selector] ??= {...node(), textContent: '', checked: true});
+                const created = {style: {}, append() {}, addEventListener() {}, close() {}, showModal() { this.shown = true; },
+                                 querySelector: () => ({textContent: '', append() {}, addEventListener() {}})};
+                dialogs.push(created);
                 return created;
             };
-            const asked = [];
-            let stored = true;
-            fetch = async (url, options) => { asked.push(options.body); return {ok: true, json: async () => ({enabled: stored})}; };
+            document.body.append = () => {};
+            fetch = async () => (ANSWER);
             (async () => {
-                zfoAbout();
-                await new Promise(resolve => setTimeout(resolve));
-                const first = controls['[data-update-checks]'].checked;
-                stored = false;
-                zfoAbout();
-                await new Promise(resolve => setTimeout(resolve));
-                console.log(JSON.stringify({first, second: controls['[data-update-checks]'].checked, asked}));
+                await zfoUpdateOffer.report();
+                console.log(JSON.stringify(dialogs.map(dialog => ({shown: dialog.shown, html: dialog.innerHTML}))));
             })();
-        """
-        result = json.loads(run_ui_scripts(["bridge.js"], script))
-        self.assertEqual((result["first"], result["second"]), (True, False))
-        self.assertEqual(result["asked"], ['{"action":"state"}', '{"action":"state"}'])
+        """.replace("ANSWER", answer)
+        return json.loads(run_ui_scripts(["bridge.js"], script))
+
+    def test_current_version_is_said_so(self):
+        shown = self.run_check("{ok: true, json: async () => ({status: 'current'})}")
+        self.assertEqual(len(shown), 1)
+        self.assertTrue(shown[0]["shown"])
+        self.assertIn("data-message", shown[0]["html"])
+        self.assertIn("OK</button>", shown[0]["html"])
+
+    def test_unreachable_server_is_unknown(self):
+        shown = self.run_check("{ok: false, status: 500}")
+        self.assertEqual(len(shown), 1)
+        self.assertTrue(shown[0]["shown"])
+
+    def test_newer_version_opens_the_offer(self):
+        offer = "{version: '9.9', current: '1.0', news_url: 'n', download_url: 'd'}"
+        shown = self.run_check("{ok: true, json: async () => ({status: 'newer', offer: %s})}" % offer)
+        opened = [dialog for dialog in shown if dialog.get("shown")]
+        self.assertEqual(len(opened), 1)
+        self.assertIn("Stáhnout…", opened[0]["html"])
+
+    def test_texts(self):
+        source = ui_source("bridge.js")
+        self.assertIn("'Máte nejnovější verzi.'", source)
+        self.assertIn("'Novou verzi teď nešlo zjistit. Zkuste to později.'", source)
 
 
 class TheSuiteStaysOffline(unittest.TestCase):

@@ -20,6 +20,7 @@ SERVER_START_ATTEMPTS = 300
 MAX_RECENT_FILES = 10
 ATTACHMENT_URL = re.compile(r"/(?:attachment|container-file)\?s=[A-Za-z0-9_-]+&i=\d+", re.ASCII)
 ATTACHMENT_DOWNLOAD_SECONDS = 120
+APP_ACTIONS = ("about", "check-updates", "report-error", "support")
 OPEN_DIALOG_FILE_TYPES = ("Podporované soubory (*.zfo;*.fo;*.pdf;*.asice;*.sce;*.asics;*.scs)", "Všechny soubory (*.*)")
 
 
@@ -196,23 +197,30 @@ class Bridge:
 
 
 class FormWindow:
-    def __init__(self, app, path=None):
-        self.path = path
+    def __init__(self, app, path=None, kind="document"):
+        self.path, self.kind = path, kind
         # The port is chosen here: a windowed Windows build has no stdout to report one on.
         port = free_local_port()
         self.server = self._start_server(port)
         self.server_stop_requested = False
         threading.Thread(target=self._record_unexpected_server_exit, daemon=True).start()
         self.home = f"http://127.0.0.1:{port}/"
-        self.window = app.webview.create_window(path.name if path else "Blanketa", self.home,
-                                                js_api=Bridge(app, self), width=1280, height=900, text_select=True)
+        if kind == "settings":
+            title, size = "Nastavení", {"width": 520, "height": 460, "resizable": False}
+        else:
+            title, size = path.name if path else "Blanketa", {"width": 1280, "height": 900}
+        self.window = app.webview.create_window(title, self.home, js_api=Bridge(app, self), text_select=True, **size)
         self.window.events.closed += self.stop_server
         self.window.events.loaded += self.return_to_form_server
 
     def _start_server(self, port):
         import certstore
         env = dict(os.environ, ZFO_DESKTOP="1", ZFO_WATCH_STDIN="1")
-        args = (["--file", str(self.path)] if self.path else ["--empty"]) + [str(port)]
+        if self.kind == "settings":
+            mode = ["--settings"]
+        else:
+            mode = ["--file", str(self.path)] if self.path else ["--empty"]
+        args = mode + [str(port)]
         log = certstore.config_dir() / "server.log"
         with open(log, "ab") as errors:
             server = subprocess.Popen(server_command(args), stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
@@ -253,6 +261,7 @@ class DesktopApp:
         import webview
         self.webview = webview
         self.windows = []
+        self.settings_window = None
 
     def _recent_files_path(self):
         import certstore
@@ -269,7 +278,7 @@ class DesktopApp:
 
     def open_window(self, path=None):
         path = path.resolve() if path else None
-        empty_windows = [form for form in self.windows if form.path is None] if path else []
+        empty_windows = [form for form in self.windows if form.kind == "document" and form.path is None] if path else []
         form = FormWindow(self, path)
         self.windows.append(form)
         form.window.events.closed += lambda: self.windows.remove(form)
@@ -277,6 +286,31 @@ class DesktopApp:
             self._remember_recent_file(path)
         for empty_window in empty_windows:
             empty_window.window.destroy()
+        return form
+
+    def open_settings(self):
+        self._note_active_document_window()
+        if self.settings_window:
+            self.settings_window.window.restore()
+            self.settings_window.window.show()
+            return
+        self.settings_window = FormWindow(self, kind="settings")
+        self.settings_window.window.events.closed += self._forget_settings_window
+
+    def _forget_settings_window(self):
+        self.settings_window = None
+
+    def _settings_window_is_active(self):
+        return self.settings_window is not None and self.webview.active_window() is self.settings_window.window
+
+    def _note_active_document_window(self):
+        active = self.webview.active_window()
+        for form in self.windows:
+            if form.window is active:
+                self.windows.remove(form)
+                self.windows.append(form)
+                return form
+        return None
 
     def open_dialog(self, window):
         chosen = window.create_file_dialog(self.webview.FileDialog.OPEN, allow_multiple=True,
@@ -285,9 +319,21 @@ class DesktopApp:
             self.open_window(Path(path))
 
     def _send_action_to_page(self, name):
-        window = self.webview.active_window()
-        if window:
-            window.evaluate_js(f"window.zfoAction && zfoAction({json.dumps(name)})")
+        if self._settings_window_is_active() and name not in APP_ACTIONS:
+            return
+        script = f"window.zfoAction && zfoAction({json.dumps(name)})"
+        active = self._note_active_document_window()
+        form = active or (self.windows[-1] if self.windows else None)
+        if form:
+            if not active:
+                form.window.restore()
+                form.window.show()
+            form.window.evaluate_js(script)
+            return
+        if name not in APP_ACTIONS:
+            return
+        form, unsent = self.open_window(), [script]
+        form.window.events.loaded += lambda: unsent and form.window.evaluate_js(unsent.pop())
 
     def build_menu(self):
         from webview.menu import Menu, MenuAction, MenuSeparator
@@ -298,6 +344,8 @@ class DesktopApp:
         return [
             Menu("Soubor", [
                 MenuAction("Otevřít…", lambda: self.open_dialog(self.webview.active_window())),
+                MenuSeparator(),
+                MenuAction("Nastavení…", self.open_settings),
                 MenuSeparator(),
                 page_action("Uložit bez podpisu (Ctrl+S)", "save-plain"),
                 page_action("Podepsat a uložit… (Ctrl+Shift+S)", "save"),
@@ -326,6 +374,7 @@ class DesktopApp:
             ]),
             Menu("Nápověda", [
                 page_action("O aplikaci Blanketa", "about"),
+                page_action("Zkontrolovat aktualizace…", "check-updates"),
                 page_action("Nahlásit chybu…", "report-error"),
                 page_action("Podpořit Blanketu…", "support"),
             ]),

@@ -16,7 +16,7 @@ def _stored():
 
 
 def _store(values):
-    (certstore.config_dir() / SETTINGS_FILE).write_text(json.dumps(values), encoding="utf-8")
+    certstore.replace_file(certstore.config_dir() / SETTINGS_FILE, json.dumps(values))
 
 
 def _last_shown(stored):
@@ -40,3 +40,11 @@ def offer(today=None):
 
 def hide():
     _store({**_stored(), "hidden": True})
+
+
+def hidden():
+    return _stored().get("hidden") is True
+
+
+def show_again():
+    _store({name: value for name, value in _stored().items() if name != "hidden"})

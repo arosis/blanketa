@@ -111,13 +111,9 @@ __SHELL_STYLE__
     <label>Certifikát<span data-cert-slot></span></label>
     <fieldset class="zfo-time-stamp" data-time-stamp>
       <label class="zfo-choice"><input type="checkbox" data-time-stamp-enabled>Připojit časové razítko</label>
+      <p data-time-stamp-unusable role="alert" hidden>Služba časových razítek není správně nastavená – upravte ji v Nastavení.</p>
       <div data-time-stamp-details hidden>
-        <label class="zfo-choice"><input type="radio" name="time-stamp-service" value="public" checked>Veřejná služba Sectigo (kvalifikovaná razítka)</label>
-        <label class="zfo-choice"><input type="radio" name="time-stamp-service" value="own">Vlastní služba</label>
-        <label data-time-stamp-own hidden>Adresa služby
-          <input type="url" class="zfo-cert" data-time-stamp-url placeholder="https://" autocomplete="off"></label>
-        <label data-time-stamp-own hidden>Jméno (jen když ho služba vyžaduje)
-          <input type="text" class="zfo-cert" data-time-stamp-user autocomplete="off"></label>
+        <p><span data-time-stamp-service></span><br>Službu změníte v Nastavení.</p>
         <label data-time-stamp-password hidden>Heslo ke službě
           <input type="password" class="zfo-cert" autocomplete="off"></label>
         <p>Službě se pošle jen otisk podpisu, ne dokument. Poskytovatel se dozví vaši IP adresu a čas podpisu.
