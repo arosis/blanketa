@@ -669,6 +669,13 @@ class UpdateScreens(unittest.TestCase):
                          "Přesuňte ji do složky Aplikace a otevřete ji znovu.")
         self.assertNotIn("Přesuňte", " ".join(self.screen()["lines"]))
 
+    def test_mac_without_write_permission_asks_for_a_manual_download(self):
+        view = self.screen(install=False, reason="not-writable")
+        self.assertEqual(view["lines"][-1], "Blanketu teď nejde aktualizovat, protože do její složky nemáte právo zapisovat. "
+                         "Stáhněte novou verzi ručně.")
+        self.assertEqual(self.labels(view)[-1], "Stáhnout…")
+        self.assertEqual(self.screen(reason="not-writable")["lines"], ["Blanketa 0.5.0 (máte 0.4.0)"])
+
     def test_progress_shows_percent_or_none(self):
         view = self.screen({"name": "progress", "percent": 42})
         self.assertEqual(view["lines"], ["Stahuji Blanketu 0.5.0… 42\u00a0%"])

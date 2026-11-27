@@ -80,11 +80,13 @@ další okno či proces Blankety; Blanketa to řekne a nainstaluje se po zavře
 
 Kde to funguje:
 
-- macOS: aplikace ve složce Aplikace. Z obrazu disku ani ze složky Stažené soubory aktualizovat nejde, Blanketa vás
-  vyzve, ať ji přesunete do Aplikací a otevřete znovu.
+- macOS: aplikace ve složce Aplikace nebo v jiné složce, do které smíte zapisovat. Z obrazu disku ani z kopie, kterou
+  macOS po otevření ze Stažených souborů spouští z náhodného umístění, aktualizovat nejde; Blanketa vás vyzve, ať ji
+  přesunete do Aplikací a otevřete znovu. Když do složky s Blanketou nemáte právo zapisovat, nabídne jen ruční stažení.
 - Windows: instalovaná i přenosná verze.
-- Linux: archiv nainstalovaný přes `install.sh`. Balíček `.deb` se aktualizuje ručně jako dosud
-  (`sudo apt install ./blanketa_<verze>_amd64.deb`).
+- Linux: archiv nainstalovaný přes `install.sh`. Aktualizace vymění program; položka v nabídce aplikací, typy souborů
+  a ikona zůstanou z posledního spuštění `install.sh`, což stačí, pokud vydání neřekne jinak. Balíček `.deb` se
+  aktualizuje ručně jako dosud (`sudo apt install ./blanketa_<verze>_amd64.deb`).
 
 Když se instalace nepodaří, zůstane předchozí verze a Blanketa to při dalším spuštění oznámí. Na Macu se po aktualizaci
 může Blanketa znovu zeptat na přístup ke klíči v Klíčence, stejně jako po ruční instalaci, protože se změní podpis

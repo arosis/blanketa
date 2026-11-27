@@ -321,6 +321,8 @@ window.zfoUpdateOffer = (() => {
     return {title: 'Je k dispozici nová verze Blankety', lines};
   };
   const MOVE_TEXT = 'Blanketu nejde aktualizovat, dokud běží z obrazu disku nebo ze Stažených souborů. Přesuňte ji do složky Aplikace a otevřete ji znovu.';
+  const NOT_WRITABLE_TEXT = 'Blanketu teď nejde aktualizovat, protože do její složky nemáte právo zapisovat. Stáhněte novou verzi ručně.';
+  const REASON_TEXTS = new Map([['move-to-applications', MOVE_TEXT], ['not-writable', NOT_WRITABLE_TEXT]]);
   const FAILED_TEXT = failed => `Aktualizaci na Blanketu ${failed.version} se nepodařilo nainstalovat, zůstala verze ${failed.current}.`;
   const VERIFY_TEXT = 'Aktualizaci se nepodařilo ověřit, nic se nezměnilo.';
   const DOWNLOAD_TEXT = 'Aktualizaci se nepodařilo stáhnout. Zkuste to později.';
@@ -346,7 +348,7 @@ window.zfoUpdateOffer = (() => {
     }
     const {title, lines} = text(offer);
     if (failedLine) lines.unshift(failedLine);
-    if (!offer.install && offer.reason === 'move-to-applications') lines.push(MOVE_TEXT);
+    if (!offer.install && REASON_TEXTS.has(offer.reason)) lines.push(REASON_TEXTS.get(offer.reason));
     return {title, lines, buttons: [button('news', 'Co je nového'), button('later', 'Připomenout za týden'),
       button(offer.install ? 'install' : 'download', offer.install ? 'Aktualizovat' : 'Stáhnout…', true)]};
   };

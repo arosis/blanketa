@@ -96,16 +96,14 @@ def updates_dir():
 def _mac_app():
     parents = Path(sys.executable).parents
     if len(parents) < 4:
-        return None, False
+        return None, "move-to-applications"
     app = parents[3]
     path = str(app)
-    replaceable = (
-        app.suffix == ".app"
-        and "/AppTranslocation/" not in path
-        and not path.startswith("/Volumes/")
-        and os.access(app.parent, os.W_OK)
-    )
-    return app, replaceable
+    if app.suffix != ".app" or "/AppTranslocation/" in path or path.startswith("/Volumes/"):
+        return app, "move-to-applications"
+    if not os.access(app.parent, os.W_OK):
+        return app, "not-writable"
+    return app, None
 
 
 def _inside(path, folder):
@@ -133,16 +131,16 @@ def target():
     if not getattr(sys, "frozen", False):
         return None
     if certstore.IS_MAC:
-        app, replaceable = _mac_app()
-        return {"kind": "mac-app", "app": app, "all_users": False} if replaceable else None
+        app, reason = _mac_app()
+        return {"kind": "mac-app", "app": app, "all_users": False} if reason is None else None
     if certstore.IS_WINDOWS:
         return _windows_target()
     return _linux_target()
 
 
 def not_replaceable_reason():
-    if getattr(sys, "frozen", False) and certstore.IS_MAC and not _mac_app()[1]:
-        return "move-to-applications"
+    if getattr(sys, "frozen", False) and certstore.IS_MAC:
+        return _mac_app()[1]
     return None
 
 

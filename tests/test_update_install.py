@@ -90,9 +90,14 @@ class Mac(WithPatches):
         self.assertIsNone(update_install.target())
         self.assertEqual(update_install.not_replaceable_reason(), "move-to-applications")
 
-    def test_unwritable_parent_gives_the_move_reason(self):
+    def test_unwritable_parent_gives_its_own_reason(self):
         self.run_as(self.app_executable("/Applications"), mac=True, writable=False)
         self.assertIsNone(update_install.target())
+        self.assertEqual(update_install.not_replaceable_reason(), "not-writable")
+
+    @posix_only
+    def test_disk_image_wins_over_an_unwritable_parent(self):
+        self.run_as(self.app_executable("/Volumes/Blanketa"), mac=True, writable=False)
         self.assertEqual(update_install.not_replaceable_reason(), "move-to-applications")
 
 
