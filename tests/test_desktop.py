@@ -351,23 +351,46 @@ class UpdateInstall(unittest.TestCase):
         self.assertLessEqual(sum(timeouts), desktop.SECONDS_TO_WAIT_FOR_SERVERS)
         self.assertTrue(all(timeout > 0 for timeout in timeouts))
 
-    def test_windows_holds_the_session_and_global_running_mutexes(self):
-        kernel32 = mock.Mock()
-        kernel32.CreateMutexW.side_effect = ["session", "global"]
+    def hold_mutexes(self, created, last_error=0, opened=None):
+        kernel32, advapi32 = mock.Mock(), mock.Mock()
+        kernel32.CreateMutexW.side_effect = created
+        kernel32.OpenMutexW.return_value = opened
+        advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW.side_effect = \
+            lambda sddl, revision, pointer, size: setattr(pointer._obj, "value", 0x1234) or True
+        kernel32.LocalFree.side_effect = lambda descriptor: self.assertEqual(kernel32.CreateMutexW.call_count, 2)
+        libraries = {"kernel32": kernel32, "advapi32": advapi32}
         with mock.patch.object(desktop, "IS_WINDOWS", True), \
-                mock.patch.dict(sys.modules, {"ctypes": mock.Mock(windll=mock.Mock(kernel32=kernel32))}):
-            handles = desktop.hold_running_mutexes()
-        self.assertEqual(kernel32.CreateMutexW.call_args_list,
-                         [mock.call(None, False, "BlanketaRunning"), mock.call(None, False, r"Global\BlanketaRunning")])
+                mock.patch.object(desktop.ctypes, "WinDLL", lambda name, **_: libraries[name], create=True), \
+                mock.patch.object(desktop.ctypes, "get_last_error", return_value=last_error, create=True):
+            return desktop.hold_running_mutexes(), kernel32, advapi32
+
+    def test_windows_holds_the_session_and_global_running_mutexes(self):
+        handles, kernel32, advapi32 = self.hold_mutexes(["session", "global"])
         self.assertEqual(handles, ["session", "global"])
+        self.assertEqual([call.args[1:] for call in kernel32.CreateMutexW.call_args_list],
+                         [(False, "BlanketaRunning"), (False, r"Global\BlanketaRunning")])
+        self.assertEqual(advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW.call_args.args[:2], ("D:(A;;GA;;;WD)", 1))
+        for call in kernel32.CreateMutexW.call_args_list:
+            attributes = call.args[0]._obj
+            self.assertIsInstance(attributes, desktop.SecurityAttributes)
+            self.assertEqual(attributes.nLength, desktop.ctypes.sizeof(desktop.SecurityAttributes))
+            self.assertFalse(attributes.bInheritHandle)
+            self.assertEqual(attributes.lpSecurityDescriptor, 0x1234)
+        self.assertEqual(kernel32.LocalFree.call_args.args[0].value, 0x1234)
+        kernel32.OpenMutexW.assert_not_called()
         self.assertEqual(desktop.hold_running_mutexes(), [])
 
-    def test_global_mutex_that_cannot_be_created_is_skipped(self):
-        kernel32 = mock.Mock()
-        kernel32.CreateMutexW.side_effect = ["session", 0]
-        with mock.patch.object(desktop, "IS_WINDOWS", True), \
-                mock.patch.dict(sys.modules, {"ctypes": mock.Mock(windll=mock.Mock(kernel32=kernel32))}):
-            self.assertEqual(desktop.hold_running_mutexes(), ["session"])
+    def test_mutex_held_by_another_user_is_opened_instead(self):
+        handles, kernel32, _ = self.hold_mutexes(["session", None], last_error=desktop.ERROR_ACCESS_DENIED, opened="opened")
+        self.assertEqual(handles, ["session", "opened"])
+        kernel32.OpenMutexW.assert_called_once_with(desktop.SYNCHRONIZE, False, r"Global\BlanketaRunning")
+
+    def test_global_mutex_that_cannot_be_held_is_skipped(self):
+        handles, kernel32, _ = self.hold_mutexes(["session", None], last_error=2)
+        self.assertEqual(handles, ["session"])
+        kernel32.OpenMutexW.assert_not_called()
+        handles, _, _ = self.hold_mutexes([None, None], last_error=desktop.ERROR_ACCESS_DENIED, opened=None)
+        self.assertEqual(handles, [])
 
 
 class LinuxPdfPrinting(unittest.TestCase):

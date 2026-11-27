@@ -1,4 +1,5 @@
 import contextlib
+import ctypes
 import json
 import os
 import re
@@ -10,6 +11,7 @@ import threading
 import time
 import urllib.request
 import webbrowser
+from ctypes import wintypes
 from pathlib import Path
 
 import error_report
@@ -24,6 +26,10 @@ ATTACHMENT_URL = re.compile(r"/(?:attachment|container-file)\?s=[A-Za-z0-9_-]+&i
 ATTACHMENT_DOWNLOAD_SECONDS = 120
 SECONDS_TO_WAIT_FOR_SERVERS = 5
 RUNNING_MUTEXES = ("BlanketaRunning", "Global\\BlanketaRunning")
+EVERYONE_FULL_ACCESS = "D:(A;;GA;;;WD)"
+SDDL_REVISION_1 = 1
+SYNCHRONIZE = 0x00100000
+ERROR_ACCESS_DENIED = 5
 UNSAVED_CHECK = "window.zfoHasUnsavedChanges?.() === true"
 APP_ACTIONS = ("about", "check-updates", "report-error", "support")
 OPEN_DIALOG_FILE_TYPES = ("Podporované soubory (*.zfo;*.fo;*.pdf;*.asice;*.sce;*.asics;*.scs)", "Všechny soubory (*.*)")
@@ -101,12 +107,34 @@ def write_downloaded(url, target):
             partial.unlink(missing_ok=True)
 
 
+class SecurityAttributes(ctypes.Structure):
+    _fields_ = (("nLength", wintypes.DWORD), ("lpSecurityDescriptor", wintypes.LPVOID), ("bInheritHandle", wintypes.BOOL))
+
+
 def hold_running_mutexes():
     if not IS_WINDOWS:
         return []
-    import ctypes
-    handles = [ctypes.windll.kernel32.CreateMutexW(None, False, name) for name in RUNNING_MUTEXES]
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel32.CreateMutexW.restype = kernel32.OpenMutexW.restype = wintypes.HANDLE
+    descriptor = wintypes.LPVOID()
+    if not advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            EVERYONE_FULL_ACCESS, SDDL_REVISION_1, ctypes.byref(descriptor), None):
+        descriptor = wintypes.LPVOID()
+    attributes = SecurityAttributes(ctypes.sizeof(SecurityAttributes), descriptor, False)
+    try:
+        handles = [hold_mutex(kernel32, attributes, name) for name in RUNNING_MUTEXES]
+    finally:
+        if descriptor:
+            kernel32.LocalFree(descriptor)
     return [handle for handle in handles if handle]
+
+
+def hold_mutex(kernel32, attributes, name):
+    handle = kernel32.CreateMutexW(ctypes.byref(attributes), False, name)
+    if not handle and ctypes.get_last_error() == ERROR_ACCESS_DENIED:
+        handle = kernel32.OpenMutexW(SYNCHRONIZE, False, name)
+    return handle
 
 
 def relaunch_command(files):
