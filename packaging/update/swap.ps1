@@ -5,7 +5,7 @@ param(
     [Parameter(Mandatory = $true)][string]$Staged,
     [Parameter(Mandatory = $true)][string]$Target,
     [Parameter(Mandatory = $true)][string]$UpdatesDir,
-    [Parameter(Mandatory = $true)][ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+$')][string]$Version,
+    [Parameter(Mandatory = $true)][ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+\z')][string]$Version,
     [string]$Sha256 = '',
     [switch]$AllUsers,
     [switch]$Relaunch,
