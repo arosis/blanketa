@@ -383,7 +383,7 @@ class InnoSetupForUpdates(unittest.TestCase):
     def test_setup_leaves_closing_blanketa_to_the_update_script(self):
         setup = INNO_SETUP.read_text(encoding="utf-8").splitlines()
         self.assertIn("CloseApplications=no", setup)
-        self.assertIn("AppMutex=BlanketaRunning", setup)
+        self.assertIn(r"AppMutex=BlanketaRunning,Global\BlanketaRunning", setup)
 
 
 class Bundling(unittest.TestCase):

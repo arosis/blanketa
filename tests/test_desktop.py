@@ -329,14 +329,23 @@ class UpdateInstall(unittest.TestCase):
         self.assertLessEqual(sum(timeouts), desktop.SECONDS_TO_WAIT_FOR_SERVERS)
         self.assertTrue(all(timeout > 0 for timeout in timeouts))
 
-    def test_windows_holds_the_running_mutex(self):
+    def test_windows_holds_the_session_and_global_running_mutexes(self):
         kernel32 = mock.Mock()
+        kernel32.CreateMutexW.side_effect = ["session", "global"]
         with mock.patch.object(desktop, "IS_WINDOWS", True), \
                 mock.patch.dict(sys.modules, {"ctypes": mock.Mock(windll=mock.Mock(kernel32=kernel32))}):
-            handle = desktop.hold_running_mutex()
-        kernel32.CreateMutexW.assert_called_once_with(None, False, "BlanketaRunning")
-        self.assertIs(handle, kernel32.CreateMutexW.return_value)
-        self.assertIsNone(desktop.hold_running_mutex())
+            handles = desktop.hold_running_mutexes()
+        self.assertEqual(kernel32.CreateMutexW.call_args_list,
+                         [mock.call(None, False, "BlanketaRunning"), mock.call(None, False, r"Global\BlanketaRunning")])
+        self.assertEqual(handles, ["session", "global"])
+        self.assertEqual(desktop.hold_running_mutexes(), [])
+
+    def test_global_mutex_that_cannot_be_created_is_skipped(self):
+        kernel32 = mock.Mock()
+        kernel32.CreateMutexW.side_effect = ["session", 0]
+        with mock.patch.object(desktop, "IS_WINDOWS", True), \
+                mock.patch.dict(sys.modules, {"ctypes": mock.Mock(windll=mock.Mock(kernel32=kernel32))}):
+            self.assertEqual(desktop.hold_running_mutexes(), ["session"])
 
 
 class LinuxPdfPrinting(unittest.TestCase):

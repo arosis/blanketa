@@ -22,7 +22,7 @@ MAX_RECENT_FILES = 10
 ATTACHMENT_URL = re.compile(r"/(?:attachment|container-file)\?s=[A-Za-z0-9_-]+&i=\d+", re.ASCII)
 ATTACHMENT_DOWNLOAD_SECONDS = 120
 SECONDS_TO_WAIT_FOR_SERVERS = 5
-RUNNING_MUTEX = "BlanketaRunning"
+RUNNING_MUTEXES = ("BlanketaRunning", "Global\\BlanketaRunning")
 UNSAVED_CHECK = "window.zfoHasUnsavedChanges?.() === true"
 APP_ACTIONS = ("about", "check-updates", "report-error", "support")
 OPEN_DIALOG_FILE_TYPES = ("Podporované soubory (*.zfo;*.fo;*.pdf;*.asice;*.sce;*.asics;*.scs)", "Všechny soubory (*.*)")
@@ -100,11 +100,12 @@ def write_downloaded(url, target):
             partial.unlink(missing_ok=True)
 
 
-def hold_running_mutex():
+def hold_running_mutexes():
     if not IS_WINDOWS:
-        return None
+        return []
     import ctypes
-    return ctypes.windll.kernel32.CreateMutexW(None, False, RUNNING_MUTEX)
+    handles = [ctypes.windll.kernel32.CreateMutexW(None, False, name) for name in RUNNING_MUTEXES]
+    return [handle for handle in handles if handle]
 
 
 def has_unsaved_changes(window):
@@ -439,7 +440,7 @@ class DesktopApp:
         import update_install
         with contextlib.suppress(OSError):
             update_install.register_running()
-        self.running_mutex = hold_running_mutex()
+        self.running_mutexes = hold_running_mutexes()
         for path in paths or [None]:
             self.open_window(path)
         try:
