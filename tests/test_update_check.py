@@ -636,10 +636,10 @@ class UpdateScreens(unittest.TestCase):
 
     def test_progress_shows_percent_or_none(self):
         view = self.screen({"name": "progress", "percent": 42})
-        self.assertEqual(view["lines"], ["Stahuji Blanketu 0.5.0… 42 %"])
+        self.assertEqual(view["lines"], ["Stahuji Blanketu 0.5.0… 42\u00a0%"])
         self.assertEqual(self.labels(view), ["Zrušit"])
         self.assertEqual(self.screen({"name": "progress", "percent": None})["lines"], ["Stahuji Blanketu 0.5.0…"])
-        self.assertEqual(self.screen({"name": "progress", "percent": 0})["lines"], ["Stahuji Blanketu 0.5.0… 0 %"])
+        self.assertEqual(self.screen({"name": "progress", "percent": 0})["lines"], ["Stahuji Blanketu 0.5.0… 0\u00a0%"])
 
     def test_ready_dialog(self):
         view = self.screen({"name": "ready"})
@@ -688,7 +688,7 @@ class UpdateFlow(unittest.TestCase):
         """)
         self.assertEqual(result["posted"], [{"action": "download"}, {"action": "progress"}, {"action": "progress"}])
         self.assertEqual(result["first"], "Stahuji Blanketu 0.5.0…")
-        self.assertEqual(result["second"], "Stahuji Blanketu 0.5.0… 40 %")
+        self.assertEqual(result["second"], "Stahuji Blanketu 0.5.0… 40\u00a0%")
         self.assertIn("je připravená", result["ready"])
         self.assertEqual(result["buttons"], ["Později", "Restartovat teď"])
         self.assertEqual(result["waits"], 0)
@@ -760,12 +760,57 @@ class UpdateFlow(unittest.TestCase):
 
     def test_manual_check_with_a_ready_update_opens_the_ready_dialog(self):
         result = self.run_flow("""
-            answers.push({status: 'newer', ready: true, offer: %s});
+            answers.push({state: 'idle'}, {status: 'newer', ready: true, offer: %s});
             await zfoUpdateOffer.report();
             console.log(JSON.stringify({text: lastDialog().text, buttons: lastDialog().buttons}));
         """ % self.OFFER)
         self.assertIn("je připravená", result["text"][0])
         self.assertEqual(result["buttons"], ["Později", "Restartovat teď"])
+
+    def test_one_update_dialog_at_a_time(self):
+        result = self.run_flow("""
+            zfoUpdateOffer(%s);
+            const auto = lastDialog();
+            answers.push({state: 'idle'}, {status: 'current'});
+            await zfoUpdateOffer.report();
+            zfoUpdateOffer.restartRefused('others');
+            console.log(JSON.stringify({autoClosed: auto.closed, open: dialogs.filter(dialog => !dialog.closed).length}));
+        """ % self.OFFER)
+        self.assertEqual(result, {"autoClosed": True, "open": 1})
+
+    def test_manual_check_during_a_download_joins_it(self):
+        result = self.run_flow("""
+            zfoUpdateOffer(%s);
+            answers.push({state: 'downloading', version: '0.5.0', percent: 30}, {state: 'downloading', version: '0.5.0', percent: 31});
+            await zfoUpdateOffer.report();
+            const text = lastDialog().text.join('|');
+            timers.shift()(); await settle();
+            console.log(JSON.stringify({posted, text, after: lastDialog().text.join('|'), open: dialogs.filter(dialog => !dialog.closed).length,
+                pollers: timers.length}));
+        """ % self.OFFER)
+        self.assertEqual(result["posted"], [{"action": "progress"}, {"action": "progress"}])
+        self.assertEqual(result["text"], "Stahuji Blanketu 0.5.0… 30\u00a0%")
+        self.assertEqual(result["after"], "Stahuji Blanketu 0.5.0… 31\u00a0%")
+        self.assertEqual((result["open"], result["pollers"]), (1, 1))
+
+    def test_manual_check_finding_a_ready_update_opens_the_ready_dialog(self):
+        result = self.run_flow("""
+            answers.push({state: 'ready', version: '0.5.0', percent: 100});
+            await zfoUpdateOffer.report();
+            console.log(JSON.stringify({buttons: lastDialog().buttons, posted}));
+        """)
+        self.assertEqual(result["buttons"], ["Později", "Restartovat teď"])
+        self.assertEqual(result["posted"], [{"action": "progress"}])
+
+    def test_download_cancelled_elsewhere_closes_the_dialog(self):
+        result = self.run_flow(f"""
+            answers.push({{state: 'downloading', percent: 5}}, {{state: 'idle'}});
+            zfoUpdateOffer({self.OFFER});
+            lastDialog().press('install'); await settle();
+            timers.shift()(); await settle();
+            console.log(JSON.stringify({{closed: lastDialog().closed}}));
+        """)
+        self.assertTrue(result["closed"])
 
     def test_pages_report_unsaved_changes(self):
         self.assertEqual(run_ui_scripts(["bridge.js"], "console.log(zfoHasUnsavedChanges());").strip(), "false")
