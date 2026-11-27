@@ -23,6 +23,7 @@ const viewer = new PDFViewer({
 });
 linkService.setViewer(viewer);
 let pdf, fieldObjects = {}, changed = false, autoFit = true;
+window.zfoHasUnsavedChanges = () => changed;
 
 const storeFieldValue = (widget, value) => {
   if (widget.type === 'radiobutton') pdf.annotationStorage.setValue(widget.id, {value: [widget.buttonValue, widget.exportValues].includes(value)});

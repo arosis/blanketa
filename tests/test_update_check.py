@@ -578,6 +578,217 @@ class UpdateDialog(unittest.TestCase):
         self.assertIn("document.addEventListener('DOMContentLoaded', offerOnOpen)", block)
 
 
+FAKE_DIALOGS = """
+    const timers = [], dialogs = [], posted = [], sent = [], opened = [];
+    window.zfoOpenUrl = url => opened.push(url);
+    window.zfoNative = {postMessage: message => sent.push(message)};
+    globalThis.setTimeout = callback => timers.push(callback) - 1;
+    globalThis.clearTimeout = () => {};
+    document.body.append = () => {};
+    document.createElement = tag => {
+        const buttons = {};
+        const created = {style: {}, text: [], texts: {}, closed: false, _html: '',
+            set innerHTML(html) { this._html = html; this.text = []; this.texts = {}; }, get innerHTML() { return this._html; }, append() {},
+                        addEventListener(name, handler) { if (name === 'close') this.onclose = handler; },
+            close() { this.closed = true; this.onclose?.(); }, remove() {}, showModal() { this.shown = true; },
+            querySelector(selector) {
+                const id = /data-id="(.*)"/.exec(selector)?.[1];
+                if (id) return this.innerHTML.includes(`data-id="${id}"`) ? (buttons[id] ??= {addEventListener: (_, handler) => { buttons[id].click = handler; }}) : null;
+                return this.texts[selector] ??= {addEventListener() {}, append: child => this.text.push(child.textContent)};
+            },
+            get buttons() { return [...this.innerHTML.matchAll(/data-id="(\\w+)">([^<]*)</g)].map(match => match[2]); },
+            press(id) { return this.querySelector(`[data-id="${id}"]`) && buttons[id].click(); }};
+        if (tag === 'dialog') dialogs.push(created);
+        return created;
+    };
+    const answers = [];
+    fetch = async (url, init) => { posted.push(JSON.parse(init.body)); return {ok: true, json: async () => answers.shift()}; };
+    const settle = async () => { for (let turn = 0; turn < 20; turn++) await null; };
+    const lastDialog = () => dialogs[dialogs.length - 1];
+"""
+
+
+@needs_node
+class UpdateScreens(unittest.TestCase):
+    OFFER = {"version": "0.5.0", "current": "0.4.0", "linux": False, "download_url": "D", "news_url": "N",
+             "install": True, "reason": None, "failed": None}
+
+    def screen(self, state=None, **fields):
+        script = f"console.log(JSON.stringify(zfoUpdateOffer.screen({json.dumps({**self.OFFER, **fields})}, {json.dumps(state)} ?? undefined)));"
+        return json.loads(run_ui_scripts(["bridge.js"], script))
+
+    def labels(self, view):
+        return [item["label"] for item in view["buttons"]]
+
+    def test_installable_offer_says_update(self):
+        view = self.screen()
+        self.assertEqual(self.labels(view), ["Co je nového", "Připomenout za týden", "Aktualizovat"])
+        self.assertEqual(view["lines"], ["Blanketa 0.5.0 (máte 0.4.0)"])
+
+    def test_offer_that_cannot_install_says_download(self):
+        self.assertEqual(self.labels(self.screen(install=False))[-1], "Stáhnout…")
+
+    def test_mac_that_cannot_be_replaced_explains_the_move(self):
+        view = self.screen(install=False, reason="move-to-applications")
+        self.assertEqual(view["lines"][-1], "Blanketu nejde aktualizovat, dokud běží z obrazu disku nebo ze Stažených souborů. "
+                         "Přesuňte ji do složky Aplikace a otevřete ji znovu.")
+        self.assertNotIn("Přesuňte", " ".join(self.screen()["lines"]))
+
+    def test_progress_shows_percent_or_none(self):
+        view = self.screen({"name": "progress", "percent": 42})
+        self.assertEqual(view["lines"], ["Stahuji Blanketu 0.5.0… 42 %"])
+        self.assertEqual(self.labels(view), ["Zrušit"])
+        self.assertEqual(self.screen({"name": "progress", "percent": None})["lines"], ["Stahuji Blanketu 0.5.0…"])
+        self.assertEqual(self.screen({"name": "progress", "percent": 0})["lines"], ["Stahuji Blanketu 0.5.0… 0 %"])
+
+    def test_ready_dialog(self):
+        view = self.screen({"name": "ready"})
+        self.assertEqual(view["lines"], ["Blanketa 0.5.0 je připravená. Nainstaluje se, až Blanketu zavřete."])
+        self.assertEqual(self.labels(view), ["Později", "Restartovat teď"])
+
+    def test_failures_offer_the_download(self):
+        verify = self.screen({"name": "verify"})
+        self.assertEqual(verify["lines"], ["Aktualizaci se nepodařilo ověřit, nic se nezměnilo."])
+        download = self.screen({"name": "download"})
+        self.assertEqual(download["lines"], ["Aktualizaci se nepodařilo stáhnout. Zkuste to později."])
+        for view in (verify, download):
+            self.assertEqual(self.labels(view), ["Zavřít", "Stáhnout…"])
+
+    def test_failed_install_on_its_own_is_a_report(self):
+        view = self.screen(install=False, failed={"version": "0.5.0"})
+        self.assertEqual(view["lines"], ["Aktualizaci na Blanketu 0.5.0 se nepodařilo nainstalovat, zůstala verze 0.4.0."])
+        self.assertEqual(self.labels(view), ["Zavřít", "Stáhnout…"])
+
+    def test_failed_install_beside_a_newer_release_comes_first(self):
+        view = self.screen(version="0.6.0", failed={"version": "0.5.0"})
+        self.assertEqual(view["lines"][0], "Aktualizaci na Blanketu 0.5.0 se nepodařilo nainstalovat, zůstala verze 0.4.0.")
+        self.assertEqual(view["lines"][1], "Blanketa 0.6.0 (máte 0.4.0)")
+        self.assertEqual(self.labels(view)[-1], "Aktualizovat")
+
+
+@needs_node
+class UpdateFlow(unittest.TestCase):
+    def run_flow(self, body):
+        return json.loads(run_ui_scripts(["bridge.js"], FAKE_DIALOGS + "(async () => {" + body + "})();"))
+
+    OFFER = "{version: '0.5.0', current: '0.4.0', linux: false, download_url: 'D', news_url: 'N', install: true, reason: null, failed: null}"
+
+    def test_update_polls_until_ready_and_sends_nothing_but_actions(self):
+        result = self.run_flow(f"""
+            answers.push({{state: 'downloading', percent: null}}, {{state: 'downloading', percent: 40}}, {{state: 'ready', percent: 100}});
+            zfoUpdateOffer({self.OFFER});
+            lastDialog().press('install');
+            await settle();
+            const first = lastDialog().text.join('|');
+            timers.shift()(); await settle();
+            const second = lastDialog().text.join('|');
+            timers.shift()(); await settle();
+            console.log(JSON.stringify({{posted, first, second, ready: lastDialog().text.join('|'), buttons: lastDialog().buttons,
+                waits: timers.length}}));
+        """)
+        self.assertEqual(result["posted"], [{"action": "download"}, {"action": "progress"}, {"action": "progress"}])
+        self.assertEqual(result["first"], "Stahuji Blanketu 0.5.0…")
+        self.assertEqual(result["second"], "Stahuji Blanketu 0.5.0… 40 %")
+        self.assertIn("je připravená", result["ready"])
+        self.assertEqual(result["buttons"], ["Později", "Restartovat teď"])
+        self.assertEqual(result["waits"], 0)
+
+    def test_restart_sends_only_the_action(self):
+        result = self.run_flow("""
+            zfoUpdateOffer(%s, {name: 'ready'});
+            lastDialog().press('restart');
+            console.log(JSON.stringify({sent, closed: lastDialog().closed}));
+        """ % self.OFFER)
+        self.assertEqual(result["sent"], [{"action": "installUpdate", "restart": True}])
+        self.assertTrue(result["closed"])
+
+    def test_later_just_closes_the_ready_dialog(self):
+        result = self.run_flow("""
+            zfoUpdateOffer(%s, {name: 'ready'});
+            lastDialog().press('later');
+            console.log(JSON.stringify({sent, posted, closed: lastDialog().closed}));
+        """ % self.OFFER)
+        self.assertEqual((result["sent"], result["posted"], result["closed"]), ([], [], True))
+
+    def test_cancel_stops_polling_and_closes(self):
+        result = self.run_flow(f"""
+            answers.push({{state: 'downloading', percent: 5}}, {{state: 'idle'}});
+            zfoUpdateOffer({self.OFFER});
+            lastDialog().press('install'); await settle();
+            lastDialog().press('cancel'); await settle();
+            timers.shift()(); await settle();
+            console.log(JSON.stringify({{posted, closed: lastDialog().closed}}));
+        """)
+        self.assertEqual(result["posted"], [{"action": "download"}, {"action": "cancel"}])
+        self.assertTrue(result["closed"])
+
+    def test_verify_failure_while_downloading(self):
+        result = self.run_flow(f"""
+            answers.push({{state: 'downloading', percent: 5}}, {{state: 'failed', error: 'verify'}});
+            zfoUpdateOffer({self.OFFER});
+            lastDialog().press('install'); await settle();
+            timers.shift()(); await settle();
+            lastDialog().press('download');
+            console.log(JSON.stringify({{text: lastDialog().text, opened}}));
+        """)
+        self.assertEqual(result["text"], ["Aktualizaci se nepodařilo ověřit, nic se nezměnilo."])
+        self.assertEqual(result["opened"], ["D"])
+
+    def test_download_failure_and_unreachable_server(self):
+        result = self.run_flow(f"""
+            answers.push({{state: 'failed', error: 'download'}});
+            zfoUpdateOffer({self.OFFER});
+            lastDialog().press('install'); await settle();
+            const first = lastDialog().text;
+            fetch = async () => {{ throw new Error('x'); }};
+            zfoUpdateOffer({self.OFFER});
+            lastDialog().press('install'); await settle();
+            console.log(JSON.stringify({{first, second: lastDialog().text}}));
+        """)
+        expected = ["Aktualizaci se nepodařilo stáhnout. Zkuste to později."]
+        self.assertEqual((result["first"], result["second"]), (expected, expected))
+
+    def test_restart_refused_texts(self):
+        result = self.run_flow("""
+            zfoUpdateOffer.restartRefused('unsaved');
+            const first = lastDialog().texts['[data-message]'].textContent;
+            zfoUpdateOffer.restartRefused('others');
+            console.log(JSON.stringify([first, lastDialog().texts['[data-message]'].textContent]));
+        """)
+        self.assertEqual(result, ["Nejdřív uložte nebo zavřete rozpracované dokumenty.",
+                                  "Zavřete ostatní okna Blankety; aktualizace se nainstaluje po zavření posledního."])
+
+    def test_manual_check_with_a_ready_update_opens_the_ready_dialog(self):
+        result = self.run_flow("""
+            answers.push({status: 'newer', ready: true, offer: %s});
+            await zfoUpdateOffer.report();
+            console.log(JSON.stringify({text: lastDialog().text, buttons: lastDialog().buttons}));
+        """ % self.OFFER)
+        self.assertIn("je připravená", result["text"][0])
+        self.assertEqual(result["buttons"], ["Později", "Restartovat teď"])
+
+    def test_pages_report_unsaved_changes(self):
+        self.assertEqual(run_ui_scripts(["bridge.js"], "console.log(zfoHasUnsavedChanges());").strip(), "false")
+        for name, expected in (("shell.js", "window.zfoHasUnsavedChanges = () => changed;"), ("pdf.mjs", "window.zfoHasUnsavedChanges = () => changed;")):
+            self.assertIn(expected, ui_source(name))
+
+
+class ReadyUpdateIsOfferedAgain(WithOwnSettingsFolder):
+    def test_manual_check_answers_ready_without_asking_github(self):
+        with mock.patch.object(update_install, "ready", return_value={"version": "0.5.0"}), \
+                mock.patch.object(update_check, "fetch_latest", side_effect=AssertionError("network")):
+            answer = update_check.check_now("0.4.0")
+        self.assertEqual(answer["status"], "newer")
+        self.assertIs(answer["ready"], True)
+        self.assertEqual(answer["offer"]["version"], "0.5.0")
+
+    def test_manual_check_without_a_ready_update_has_no_flag(self):
+        with mock.patch.object(update_install, "ready", return_value=None), \
+                mock.patch.object(update_check, "fetch_latest", return_value={"version": "0.5.0", "assets": {}}):
+            answer = update_check.check_now("0.4.0")
+        self.assertNotIn("ready", answer)
+
+
 @needs_node
 class AboutWindow(unittest.TestCase):
     SCRIPT = """

@@ -160,6 +160,19 @@ def _offer(latest, current):
     }
 
 
+def _ready_offer(version, current):
+    return {
+        "version": version,
+        "current": current,
+        "download_url": f"{RELEASES_URL}/tag/v{version}",
+        "news_url": NEWS_URL + version,
+        "linux": False,
+        "install": False,
+        "reason": None,
+        "failed": None,
+    }
+
+
 def _is_newer(latest, current):
     latest_version, current_version = version_tuple(latest["version"]), version_tuple(current)
     return current_version is not None and latest_version > current_version
@@ -236,6 +249,9 @@ def offer_for_page(current, now=None):
 def check_now(current, now=None):
     try:
         now = now or datetime.now()
+        prepared = update_install.ready(current)
+        if prepared is not None:
+            return {"status": "newer", "ready": True, "offer": _ready_offer(prepared["version"], current)}
         latest = fetch_latest()
         if latest is None:
             return {"status": "unknown"}
