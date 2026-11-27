@@ -251,6 +251,9 @@ class UpdateInstall(unittest.TestCase):
         self.app.windows = list(self.documents)
         self.app.settings_window = self.form(None, kind="settings")
         self.app.servers = [form.server for form in [*self.documents, self.app.settings_window]]
+        build_menu = mock.patch.object(self.app, "build_menu")
+        build_menu.start()
+        self.addCleanup(build_menu.stop)
         self.others = mock.patch.object(update_install, "others_running", return_value=False)
         self.others_running = self.others.start()
         self.addCleanup(self.others.stop)
@@ -305,7 +308,8 @@ class UpdateInstall(unittest.TestCase):
         with mock.patch.object(update_install, "register_running", calls.register), \
                 mock.patch.object(update_install, "unregister_running", calls.unregister), \
                 mock.patch.object(update_install, "start_pending_install", calls.install), \
-                mock.patch.object(self.app, "open_window"):
+                mock.patch.object(self.app, "open_window"), \
+                mock.patch.object(desktop, "hold_running_mutexes", return_value=[]):
             self.app.webview.start.side_effect = calls.start
             for server in self.app.servers:
                 server.wait.side_effect = lambda timeout, server=server: calls.wait(server)
@@ -324,7 +328,8 @@ class UpdateInstall(unittest.TestCase):
                 mock.patch.object(update_install, "unregister_running"), \
                 mock.patch.object(update_install, "start_pending_install") as install, \
                 mock.patch.object(desktop.subprocess, "Popen") as started, \
-                mock.patch.object(self.app, "open_window"):
+                mock.patch.object(self.app, "open_window"), \
+                mock.patch.object(desktop, "hold_running_mutexes", return_value=[]):
             for installs, restart, expected in ((False, True, [desktop.relaunch_command(files)]), (True, True, []), (False, False, [])):
                 with self.subTest(installs=installs, restart=restart):
                     install.return_value = installs
@@ -378,7 +383,8 @@ class UpdateInstall(unittest.TestCase):
             self.assertEqual(attributes.lpSecurityDescriptor, 0x1234)
         self.assertEqual(kernel32.LocalFree.call_args.args[0].value, 0x1234)
         kernel32.OpenMutexW.assert_not_called()
-        self.assertEqual(desktop.hold_running_mutexes(), [])
+        with mock.patch.object(desktop, "IS_WINDOWS", False):
+            self.assertEqual(desktop.hold_running_mutexes(), [])
 
     def test_mutex_held_by_another_user_is_opened_instead(self):
         handles, kernel32, _ = self.hold_mutexes(["session", None], last_error=desktop.ERROR_ACCESS_DENIED, opened="opened")

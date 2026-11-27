@@ -45,6 +45,9 @@ def running(executable, *, mac=False, windows=False, writable=True, env=None):
     return patches
 
 
+posix_only = unittest.skipIf(sys.platform == "win32", "macOS and Linux paths, process groups and /bin/sh")
+
+
 class WithPatches(unittest.TestCase):
     def run_as(self, *args, **kwargs):
         for patcher in running(*args, **kwargs):
@@ -74,6 +77,7 @@ class Mac(WithPatches):
         )
         self.assertIsNone(update_install.not_replaceable_reason())
 
+    @posix_only
     def test_dmg_and_translocated_app_give_the_move_reason(self):
         for folder in ("/Volumes/Blanketa", "/private/var/folders/x/AppTranslocation/ABC/d"):
             with self.subTest(folder=folder):
@@ -290,6 +294,8 @@ class Downloads(unittest.TestCase):
         deadline = time.monotonic() + 10
         while update_install.progress("0.4.0")["state"] == "downloading" and time.monotonic() < deadline:
             time.sleep(0.01)
+        if update_install._worker is not None:
+            update_install._worker.join(10)
         return update_install.progress("0.4.0")
 
     def download(self, current="0.4.0"):
@@ -981,6 +987,8 @@ class PendingInstall(Downloads):
             ("windows-setup", elsewhere / "Blanketa-0.5.0-setup.exe"),
             ("windows-setup", self.apps / "Blanketa-0.5.0-setup.exe"),
         ):
+            if kind == "mac-app" and sys.platform == "win32":
+                continue
             with self.subTest(kind=kind, staged=staged):
                 self.ready_for(kind, staged=staged)
                 self.assertFalse(self.start())
@@ -996,6 +1004,7 @@ class PendingInstall(Downloads):
                 self.assertFalse(self.start())
         self.launched.assert_not_called()
 
+    @posix_only
     def test_script_arguments_per_kind(self):
         files = ["/doklady/žádost.zfo", "relativni.pdf", "/doklady/b.pdf"]
         for kind in ("linux-folder", "mac-app"):
@@ -1066,6 +1075,7 @@ class ReopenWithoutInstalling(WithPatches):
             update_install.reopen_mac_app(4321, files)
         return checked, slept, opened
 
+    @posix_only
     def test_mac_app_is_opened_again_with_the_files_once_the_host_exits(self):
         self.run_as(self.SERVER, mac=True)
         checked, slept, opened = self.reopen(["/doklady/a.zfo", "-x", "b.pdf", "/doklady/c.pdf"], alive=(True, True))
@@ -1074,6 +1084,7 @@ class ReopenWithoutInstalling(WithPatches):
         self.assertEqual(opened.call_args.args[0],
                          ["/usr/bin/open", "-a", "/Applications/Blanketa.app", "/doklady/a.zfo", "/doklady/c.pdf"])
 
+    @posix_only
     def test_waiting_for_the_host_is_bounded(self):
         self.run_as(self.SERVER, mac=True)
         clock = iter(range(0, 1000, 10))
