@@ -10,7 +10,10 @@ from pathlib import Path
 from unittest import mock
 
 from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from cryptography.hazmat.primitives.asymmetric.ed25519 import (
+    Ed25519PrivateKey,
+    Ed25519PublicKey,
+)
 from support import ROOT
 
 import update_signature
@@ -180,6 +183,21 @@ class SignReleaseToolTest(unittest.TestCase):
         private, public = tokens
         body = json.dumps({"version": VERSION, "files": {}}).encode()
         update_signature.verified_manifest(body, update_signature.sign(body, private), keys=(public,))
+
+
+class ReleaseKeysTest(unittest.TestCase):
+    def test_app_carries_a_main_and_a_spare_release_key(self):
+        keys = update_signature.RELEASE_PUBLIC_KEYS
+        self.assertEqual(len(keys), 2)
+        self.assertEqual(len(set(keys)), 2)
+        for key in keys:
+            Ed25519PublicKey.from_public_bytes(base64.b64decode(key, validate=True))
+
+    def test_a_signature_by_an_unlisted_key_is_refused_by_default(self):
+        private, _ = new_key()
+        body = json.dumps({"version": VERSION, "files": {}}).encode()
+        with self.assertRaises(ValueError):
+            update_signature.verified_manifest(body, update_signature.sign(body, private))
 
 
 if __name__ == "__main__":

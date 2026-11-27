@@ -11,7 +11,10 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PublicKey,
 )
 
-RELEASE_PUBLIC_KEYS: tuple[str, ...] = ()
+RELEASE_PUBLIC_KEYS: tuple[str, ...] = (
+    "Jadcas2Xo6tc4vxWrK4NMSrGP5uabqCNa/9BwytVXJw=",
+    "Ylqu+RDshdNW+ls7+Sl0ryMoR+MRFV4i1hB73mAQKLM=",
+)
 
 PLATFORM_FILES = {
     "mac": "Blanketa-{version}-macos.zip",
