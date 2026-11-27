@@ -50,8 +50,11 @@ function Start-Blanketa {
     }
 }
 
-function Remove-InstallLock {
+function Remove-InstallFiles {
     Remove-Item -LiteralPath (Join-Path $UpdatesDir 'install.lock') -Force -ErrorAction SilentlyContinue
+    if ([System.IO.Path]::GetDirectoryName($PSCommandPath) -eq [System.IO.Path]::GetFullPath($UpdatesDir).TrimEnd('\')) {
+        Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Write-Failure {
@@ -64,7 +67,7 @@ function Write-Failure {
 function Exit-Failed {
     Write-Failure
     Start-Blanketa
-    Remove-InstallLock
+    Remove-InstallFiles
     exit 1
 }
 
@@ -72,7 +75,7 @@ function Exit-Succeeded {
     Remove-Item -LiteralPath (Join-Path $UpdatesDir $Version) -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath (Join-Path $UpdatesDir 'ready.json') -Force -ErrorAction SilentlyContinue
     Start-Blanketa
-    Remove-InstallLock
+    Remove-InstallFiles
     exit 0
 }
 
@@ -81,7 +84,7 @@ function Wait-ForExit {
     while (Get-Process -Id $WaitPid -ErrorAction SilentlyContinue) {
         if ((Get-Date) -gt $Deadline) {
             Write-Failure
-            Remove-InstallLock
+            Remove-InstallFiles
             exit 1
         }
         Start-Sleep -Milliseconds $MillisecondsPerPoll

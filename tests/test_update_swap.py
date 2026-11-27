@@ -90,12 +90,15 @@ class Installation(unittest.TestCase):
 
 @unittest.skipIf(sys.platform == "win32", "swap.sh runs on macOS and Linux")
 class SwapScript(Installation):
-    def test_install_lock_is_removed_after_success_and_failure(self):
+    def test_install_lock_and_script_copy_are_removed_after_success_and_failure(self):
         self.assertEqual(self.swap(), 0)
         self.assertFalse((self.updates / "install.lock").exists())
+        self.assertFalse(self.helper.exists())
         (self.updates / "install.lock").write_text("{}", encoding="utf-8")
+        shutil.copy(self.script, self.helper)
         self.assertNotEqual(self.swap(staged=self.root / "chybi"), 0)
         self.assertFalse((self.updates / "install.lock").exists())
+        self.assertFalse(self.helper.exists())
 
     def start(self, pid, relaunch=0, files=(), staged=None):
         arguments = [str(pid), str(staged or self.staged), str(self.target), str(self.updates), VERSION, str(relaunch),
@@ -106,6 +109,15 @@ class SwapScript(Installation):
     def swap(self, **options):
         script = self.start(ended_process_id(), **options)
         return script.wait(timeout=SECONDS_FOR_A_SWAP)
+
+    def test_script_outside_the_updates_folder_is_kept(self):
+        outside = self.root / "elsewhere" / SWAP_SH.name
+        outside.parent.mkdir()
+        shutil.copy(SWAP_SH, outside)
+        self.helper.unlink()
+        self.helper = outside
+        self.assertEqual(self.swap(), 0)
+        self.assertTrue(outside.exists())
 
     def test_script_is_valid_shell(self):
         subprocess.run(["/bin/sh", "-n", str(SWAP_SH)], check=True)
@@ -269,12 +281,15 @@ class WindowsScript(Installation):
 
 @unittest.skipUnless(IS_WINDOWS_WITH_POWERSHELL, "swap.ps1 runs on Windows")
 class PortableSwapOnWindows(WindowsScript):
-    def test_install_lock_is_removed_after_success_and_failure(self):
+    def test_install_lock_and_script_copy_are_removed_after_success_and_failure(self):
         self.assertEqual(self.swap(), 0)
         self.assertFalse((self.updates / "install.lock").exists())
+        self.assertFalse(self.helper.exists())
         (self.updates / "install.lock").write_text("{}", encoding="utf-8")
+        shutil.copy(self.script, self.helper)
         self.assertNotEqual(self.swap(staged=self.root / "chybi"), 0)
         self.assertFalse((self.updates / "install.lock").exists())
+        self.assertFalse(self.helper.exists())
 
     def test_swap_replaces_after_the_process_exits(self):
         running = waiting_process()
