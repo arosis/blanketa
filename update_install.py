@@ -18,7 +18,6 @@ from urllib.parse import urlsplit
 
 import certstore
 import public_services
-import update_check
 import update_signature
 
 KIND_FILES = {
@@ -111,6 +110,8 @@ def _inside(path, folder):
 
 
 def _windows_target():
+    import update_check
+
     folder = Path(sys.executable).parent
     if update_check.portable_windows():
         return {"kind": "windows-portable", "app": folder, "all_users": False}
@@ -146,6 +147,8 @@ def not_replaceable_reason():
 
 def start_download(current):
     global _worker
+    import update_check
+
     with _guard:
         if _worker is not None and _worker.is_alive():
             return dict(_state)
@@ -235,6 +238,8 @@ def discard_version(version):
 
 
 def _is_usable_ready_record(record, current):
+    import update_check
+
     if not isinstance(record, dict) or not isinstance(record.get("kind"), str) or record["kind"] not in KIND_FILES:
         return False
     fields = READY_FIELDS | {"sha256"} if record["kind"] == "windows-setup" else READY_FIELDS
@@ -269,6 +274,8 @@ def _holder_progress(holder):
 
 
 def _plan(latest):
+    import update_check
+
     destination = target()
     if destination is None:
         return None
@@ -350,6 +357,8 @@ def _open(url):
 
 
 def _download_small(url):
+    import update_check
+
     with _open(url) as answer:
         body = answer.read(update_check.MAX_ANSWER_BYTES + 1)
     if len(body) > update_check.MAX_ANSWER_BYTES:
