@@ -855,7 +855,7 @@ class UpdateFlow(unittest.TestCase):
 
 class ReadyUpdateIsOfferedAgain(WithOwnSettingsFolder):
     def test_manual_check_answers_ready_without_asking_github(self):
-        with mock.patch.object(update_install, "ready", return_value={"version": "0.5.0"}), \
+        with mock.patch.object(update_install, "ready_for_this_app", return_value={"version": "0.5.0"}), \
                 mock.patch.object(update_check, "fetch_latest", side_effect=AssertionError("network")):
             answer = update_check.check_now("0.4.0")
         self.assertEqual(answer["status"], "newer")
@@ -863,7 +863,7 @@ class ReadyUpdateIsOfferedAgain(WithOwnSettingsFolder):
         self.assertEqual(answer["offer"]["version"], "0.5.0")
 
     def test_manual_check_without_a_ready_update_has_no_flag(self):
-        with mock.patch.object(update_install, "ready", return_value=None), \
+        with mock.patch.object(update_install, "ready_for_this_app", return_value=None), \
                 mock.patch.object(update_check, "fetch_latest", return_value={"version": "0.5.0", "assets": {}}):
             answer = update_check.check_now("0.4.0")
         self.assertNotIn("ready", answer)

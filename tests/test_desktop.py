@@ -318,6 +318,28 @@ class UpdateInstall(unittest.TestCase):
             self.app.run([])
             calls.install.assert_called_once_with(os.getpid(), True, [str(Path("/doklady/a.zfo")), str(Path("/doklady/b.pdf"))])
 
+    def test_restart_reopens_blanketa_when_nothing_installs(self):
+        files = [str(Path("/doklady/a.zfo")), str(Path("/doklady/b.pdf"))]
+        with mock.patch.object(update_install, "register_running"), \
+                mock.patch.object(update_install, "unregister_running"), \
+                mock.patch.object(update_install, "start_pending_install") as install, \
+                mock.patch.object(desktop.subprocess, "Popen") as started, \
+                mock.patch.object(self.app, "open_window"):
+            for installs, restart, expected in ((False, True, [desktop.relaunch_command(files)]), (True, True, []), (False, False, [])):
+                with self.subTest(installs=installs, restart=restart):
+                    install.return_value = installs
+                    started.reset_mock()
+                    self.app.relaunch = False
+                    self.app.webview.start.side_effect = (lambda **_: self.restart_from(self.documents[0])) if restart else None
+                    self.app.run([])
+                    self.assertEqual([call.args[0] for call in started.call_args_list], expected)
+
+    def test_relaunch_command_starts_this_blanketa(self):
+        with mock.patch.object(desktop, "FROZEN", True), mock.patch.object(desktop.sys, "executable", "/opt/Blanketa/Blanketa"):
+            self.assertEqual(desktop.relaunch_command(["/doklady/a.zfo"]), ["/opt/Blanketa/Blanketa", "/doklady/a.zfo"])
+        with mock.patch.object(desktop, "FROZEN", False), mock.patch.object(desktop.sys, "executable", "/venv/python"):
+            self.assertEqual(desktop.relaunch_command([]), ["/venv/python", str((ROOT / "desktop.py").resolve())])
+
     def test_waiting_for_the_servers_is_bounded(self):
         clock = iter(range(0, 100, 3))
         servers = [mock.Mock() for _ in range(4)]

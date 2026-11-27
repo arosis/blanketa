@@ -619,6 +619,22 @@ class ReadyRecord(Downloads):
                 self.assertEqual([folder for folder in kept if not folder.is_dir()], [])
                 self.assertTrue((self.apps / ".blanketa-update-0.5.0/Blanketa").is_dir())
 
+    def test_record_of_another_copy_is_not_ready_here(self):
+        updates = update_install.updates_dir()
+        updates.mkdir(parents=True)
+        other = self.folder / "elsewhere"
+        record = write_ready(updates, other, staged=other / ".blanketa-update-0.5.0/Blanketa")
+        self.assertEqual(update_install.ready("0.4.0"), record)
+        self.assertIsNone(update_install.ready_for_this_app("0.4.0"))
+        self.assertEqual(update_install.progress("0.4.0")["state"], "idle")
+        with mock.patch.object(update_check, "fetch_latest", return_value=None) as fetched:
+            self.assertEqual(update_check.check_now("0.4.0"), {"status": "unknown"})
+        fetched.assert_called_once_with()
+        self.assertTrue((updates / "ready.json").exists())
+        own = write_ready(updates, self.apps)
+        self.assertEqual(update_install.ready_for_this_app("0.4.0"), own)
+        self.assertEqual(update_install.progress("0.4.0")["state"], "ready")
+
     def test_setup_record_needs_its_digest(self):
         updates = update_install.updates_dir()
         updates.mkdir(parents=True)
@@ -1040,7 +1056,65 @@ class PendingInstall(Downloads):
                 self.assertEqual(update_install.helper_script("linux-folder"), Path("/bundle/update/swap.sh"))
 
 
+class ReopenWithoutInstalling(WithPatches):
+    SERVER = "/Applications/Blanketa.app/Contents/Resources/zfo-server/zfo-server"
+
+    def reopen(self, files, alive=(False,)):
+        with mock.patch.object(update_install, "process_alive", side_effect=[*alive, False]) as checked, \
+                mock.patch.object(update_install.time, "sleep") as slept, \
+                mock.patch.object(update_install.subprocess, "run") as opened:
+            update_install.reopen_mac_app(4321, files)
+        return checked, slept, opened
+
+    def test_mac_app_is_opened_again_with_the_files_once_the_host_exits(self):
+        self.run_as(self.SERVER, mac=True)
+        checked, slept, opened = self.reopen(["/doklady/a.zfo", "-x", "b.pdf", "/doklady/c.pdf"], alive=(True, True))
+        self.assertEqual(checked.call_args_list, [mock.call(4321)] * 3)
+        self.assertEqual(slept.call_count, 2)
+        self.assertEqual(opened.call_args.args[0],
+                         ["/usr/bin/open", "-a", "/Applications/Blanketa.app", "/doklady/a.zfo", "/doklady/c.pdf"])
+
+    def test_waiting_for_the_host_is_bounded(self):
+        self.run_as(self.SERVER, mac=True)
+        clock = iter(range(0, 1000, 10))
+        with mock.patch.object(update_install, "process_alive", return_value=True), \
+                mock.patch.object(update_install.time, "monotonic", lambda: next(clock)), \
+                mock.patch.object(update_install.time, "sleep"), \
+                mock.patch.object(update_install.subprocess, "run") as opened:
+            update_install.reopen_mac_app(4321, [])
+        self.assertEqual(opened.call_args.args[0], ["/usr/bin/open", "-a", "/Applications/Blanketa.app"])
+
+    def test_nothing_is_opened_outside_a_mac_app(self):
+        for executable, mac in ((self.SERVER, False), ("/usr/local/bin/zfo-server", True), ("/x", True)):
+            with self.subTest(executable=executable, mac=mac):
+                patches = running(executable, mac=mac)
+                try:
+                    _, _, opened = self.reopen([])
+                finally:
+                    for patcher in patches:
+                        patcher.stop()
+                opened.assert_not_called()
+
+    def test_source_run_opens_nothing(self):
+        with mock.patch.object(update_install.certstore, "IS_MAC", True):
+            _, _, opened = self.reopen([])
+        opened.assert_not_called()
+
+
 class InstallUpdateMode(unittest.TestCase):
+    def test_restart_reopens_blanketa_when_nothing_installs(self):
+        with mock.patch.object(update_install, "start_pending_install", return_value=False), \
+                mock.patch.object(update_install, "reopen_mac_app") as reopened:
+            app.main(["--install-update", "123", "--relaunch", "/doklady/a.zfo"])
+            reopened.assert_called_once_with(123, ["/doklady/a.zfo"])
+            reopened.reset_mock()
+            app.main(["--install-update", "123"])
+            reopened.assert_not_called()
+        with mock.patch.object(update_install, "start_pending_install", return_value=True), \
+                mock.patch.object(update_install, "reopen_mac_app") as reopened:
+            app.main(["--install-update", "123", "--relaunch"])
+            reopened.assert_not_called()
+
     def test_install_update_mode_of_the_server(self):
         with mock.patch.object(update_install, "start_pending_install", return_value=True) as started, \
                 mock.patch.object(app, "ThreadingHTTPServer") as server:

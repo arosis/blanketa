@@ -971,8 +971,10 @@ def exit_together_with_host_app():
 def install_update(args):
     if not args or re.fullmatch(r"[1-9][0-9]*", args[0]) is None:
         return
-    relaunch = args[1:2] == ["--relaunch"]
-    update_install.start_pending_install(int(args[0]), relaunch, args[2 if relaunch else 1:])
+    host_pid, relaunch = int(args[0]), args[1:2] == ["--relaunch"]
+    files = args[2 if relaunch else 1:]
+    if not update_install.start_pending_install(host_pid, relaunch, files) and relaunch:
+        update_install.reopen_mac_app(host_pid, files)
 
 
 def main(args):

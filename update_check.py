@@ -251,7 +251,7 @@ def offer_for_page(current, now=None):
 def check_now(current, now=None):
     try:
         now = now or datetime.now()
-        prepared = update_install.ready(current)
+        prepared = update_install.ready_for_this_app(current)
         if prepared is not None:
             return {"status": "newer", "ready": True, "offer": _ready_offer(prepared["version"], current)}
         latest = fetch_latest()

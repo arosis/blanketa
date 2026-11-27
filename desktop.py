@@ -17,6 +17,7 @@ import error_report
 FROZEN = hasattr(sys, "_MEIPASS")
 IS_WINDOWS = sys.platform == "win32"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+DETACHED = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
 SERVER_START_ATTEMPTS = 300
 MAX_RECENT_FILES = 10
 ATTACHMENT_URL = re.compile(r"/(?:attachment|container-file)\?s=[A-Za-z0-9_-]+&i=\d+", re.ASCII)
@@ -106,6 +107,19 @@ def hold_running_mutexes():
     import ctypes
     handles = [ctypes.windll.kernel32.CreateMutexW(None, False, name) for name in RUNNING_MUTEXES]
     return [handle for handle in handles if handle]
+
+
+def relaunch_command(files):
+    program = [sys.executable] if FROZEN else [sys.executable, str(Path(__file__).resolve())]
+    return [*program, *files]
+
+
+def relaunch_without_installing(files):
+    streams = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    if IS_WINDOWS:
+        subprocess.Popen(relaunch_command(files), creationflags=DETACHED, **streams)
+    else:
+        subprocess.Popen(relaunch_command(files), start_new_session=True, **streams)
 
 
 def has_unsaved_changes(window):
@@ -449,7 +463,8 @@ class DesktopApp:
         finally:
             update_install.unregister_running()
         wait_for_servers(self.servers)
-        update_install.start_pending_install(os.getpid(), self.relaunch, self.relaunch_files)
+        if not update_install.start_pending_install(os.getpid(), self.relaunch, self.relaunch_files) and self.relaunch:
+            relaunch_without_installing(self.relaunch_files)
 
 
 def main(argv):

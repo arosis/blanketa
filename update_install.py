@@ -43,6 +43,8 @@ CREATE_NO_WINDOW = 0x08000000
 SECONDS_PER_READ = 30
 SECONDS_TO_WRITE_A_LOCK = 10
 SECONDS_TO_WAIT_FOR_CANCEL = SECONDS_PER_READ + 5
+SECONDS_TO_WAIT_FOR_HOST = 30
+SECONDS_BETWEEN_HOST_CHECKS = 0.1
 BYTES_PER_READ = 1 << 16
 MAX_DOWNLOAD_BYTES = 1 << 30
 MAX_REDIRECTS = 3
@@ -186,7 +188,7 @@ def progress(current):
     holder = _other_holder()
     if holder is not None:
         return _holder_progress(holder)
-    found = ready(current)
+    found = ready_for_this_app(current)
     if found is not None:
         return _ready_progress(found)
     return local if local["state"] == "failed" else dict(IDLE)
@@ -214,6 +216,11 @@ def ready(current):
         discard_version(record.get("version") if isinstance(record, dict) else None)
         return None
     return record
+
+
+def ready_for_this_app(current):
+    record = ready(current)
+    return record if record is not None and _matches_this_app(record) else None
 
 
 def discard_version(version):
@@ -537,6 +544,20 @@ def start_pending_install(host_pid, relaunch, files):
     with contextlib.suppress(OSError):
         certstore.replace_file(lock, json.dumps({"pid": swap.pid}))
     return True
+
+
+def reopen_mac_app(host_pid, files):
+    if not (getattr(sys, "frozen", False) and certstore.IS_MAC):
+        return
+    app = _mac_app()[0]
+    if app is None or app.suffix != ".app":
+        return
+    deadline = time.monotonic() + SECONDS_TO_WAIT_FOR_HOST
+    while process_alive(host_pid) and time.monotonic() < deadline:
+        time.sleep(SECONDS_BETWEEN_HOST_CHECKS)
+    files = [file for file in files if isinstance(file, str) and os.path.isabs(file)]
+    subprocess.run(["/usr/bin/open", "-a", str(app), *files], check=False,
+                   stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 def _matches_this_app(record):
