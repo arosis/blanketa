@@ -803,3 +803,185 @@ class Route(Downloads):
             with self.subTest(action=action):
                 self.assertEqual(self.post(json.dumps({"action": action}).encode(), settings)[0], 404)
         self.assertEqual(self.release.requests, [])
+
+
+class UnexpectedFailure(Downloads):
+    def test_unexpected_failure_releases_the_lock(self):
+        self.publish()
+        with mock.patch.object(update_install, "_outcome", side_effect=RuntimeError), \
+                mock.patch.object(threading, "excepthook"):
+            self.download()
+        self.assertFalse((update_install.updates_dir() / "download.lock").exists())
+
+
+def finished_process_id():
+    finished = subprocess.run([sys.executable, "-c", "import os; print(os.getpid())"], capture_output=True, text=True, check=True)
+    return int(finished.stdout)
+
+
+class PendingInstall(Downloads):
+    @classmethod
+    def setUpClass(cls):
+        cls.dead_pid = finished_process_id()
+
+    def setUp(self):
+        super().setUp()
+        self.updates = update_install.updates_dir()
+        self.updates.mkdir(parents=True)
+        for patcher in (
+            mock.patch.object(update_install, "running_version", return_value="0.4.0"),
+            mock.patch.object(update_install.subprocess, "Popen"),
+        ):
+            self.launched = patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def ready_for(self, kind, sha256=None, staged=None):
+        self.kind = kind
+        app = str(self.target()["app"])
+        if kind == "windows-setup":
+            staged = staged or self.updates / "0.5.0/Blanketa-0.5.0-setup.exe"
+            staged.parent.mkdir(parents=True, exist_ok=True)
+            staged.write_bytes(b"setup")
+        else:
+            folder = ".Blanketa-update-0.5.0/Blanketa.app" if kind == "mac-app" else ".blanketa-update-0.5.0/Blanketa"
+            staged = staged or self.apps / folder
+            staged.mkdir(parents=True, exist_ok=True)
+        record = {"version": "0.5.0", "kind": kind, "app": app, "staged": str(staged), "all_users": kind == "windows-setup"}
+        if kind == "windows-setup":
+            record["sha256"] = sha256 or hashlib.sha256(b"setup").hexdigest()
+        (self.updates / "ready.json").write_text(json.dumps(record))
+        return record
+
+    def start(self, relaunch=False, files=()):
+        return update_install.start_pending_install(4321, relaunch, list(files))
+
+    def running_entry(self, pid):
+        (self.updates / "running").mkdir(exist_ok=True)
+        (self.updates / "running" / str(pid)).touch()
+
+    def test_nothing_starts_without_ready(self):
+        self.assertFalse(self.start())
+        self.launched.assert_not_called()
+
+    def test_nothing_starts_while_another_process_runs(self):
+        self.ready_for("linux-folder")
+        self.running_entry(os.getppid())
+        self.assertTrue(update_install.others_running())
+        self.assertFalse(self.start())
+        self.launched.assert_not_called()
+        (self.updates / "running" / str(os.getppid())).unlink()
+        self.assertTrue(self.start())
+
+    def test_dead_process_entries_are_ignored(self):
+        self.ready_for("linux-folder")
+        self.running_entry(self.dead_pid)
+        self.running_entry(os.getpid())
+        (self.updates / "running/nesmysl").touch()
+        self.assertFalse(update_install.others_running())
+        self.assertTrue(self.start())
+
+    def test_running_entry_is_registered_and_removed(self):
+        update_install.register_running()
+        self.assertTrue((self.updates / "running" / str(os.getpid())).exists())
+        update_install.unregister_running()
+        self.assertFalse((self.updates / "running" / str(os.getpid())).exists())
+
+    def test_staged_path_outside_is_refused(self):
+        elsewhere = self.folder / "elsewhere"
+        for kind, staged in (
+            ("linux-folder", elsewhere / "Blanketa"),
+            ("linux-folder", self.apps / ".blanketa-update-0.5.0/../../elsewhere/Blanketa"),
+            ("linux-folder", self.apps),
+            ("windows-setup", elsewhere / "Blanketa-0.5.0-setup.exe"),
+            ("windows-setup", self.apps / "Blanketa-0.5.0-setup.exe"),
+        ):
+            with self.subTest(kind=kind, staged=staged):
+                self.ready_for(kind, staged=staged)
+                self.assertFalse(self.start())
+        self.launched.assert_not_called()
+
+    def test_other_app_or_damaged_digest_is_refused(self):
+        record = self.ready_for("linux-folder")
+        (self.updates / "ready.json").write_text(json.dumps({**record, "app": str(self.folder / "jina")}))
+        self.assertFalse(self.start())
+        for digest in ("0" * 63, "g" * 64, "0" * 64 + "\n", "; rm -rf /" + "0" * 54):
+            with self.subTest(digest=digest):
+                self.ready_for("windows-setup", sha256=digest)
+                self.assertFalse(self.start())
+        self.launched.assert_not_called()
+
+    def test_script_arguments_per_kind(self):
+        files = ["/doklady/žádost.zfo", "relativni.pdf", "/doklady/b.pdf"]
+        for kind in ("linux-folder", "mac-app"):
+            with self.subTest(kind=kind):
+                self.launched.reset_mock()
+                record = self.ready_for(kind)
+                self.assertTrue(self.start(relaunch=True, files=files))
+                script = self.updates / "swap.sh"
+                self.assertEqual(script.read_bytes(), (certstore.ROOT / "packaging/update/swap.sh").read_bytes())
+                command, options = self.launched.call_args.args[0], self.launched.call_args.kwargs
+                self.assertEqual(command, ["/bin/sh", str(script), "4321", record["staged"], record["app"], str(self.updates),
+                                           "0.5.0", "1", "/doklady/žádost.zfo", "/doklady/b.pdf"])
+                self.assertEqual((options["cwd"], options["start_new_session"]), (self.updates, True))
+        self.launched.reset_mock()
+        self.ready_for("linux-folder")
+        self.start()
+        self.assertEqual(self.launched.call_args.args[0][-1], "0")
+
+    def test_windows_script_arguments(self):
+        with mock.patch.object(update_install.certstore, "IS_WINDOWS", True), \
+                mock.patch.dict(os.environ, {"SystemRoot": "/windows"}):
+            record = self.ready_for("windows-setup")
+            self.assertTrue(self.start(relaunch=True, files=["/doklady/a.zfo"]))
+            script = self.updates / "swap.ps1"
+            self.assertEqual(script.read_bytes(), (certstore.ROOT / "packaging/update/swap.ps1").read_bytes())
+            command, options = self.launched.call_args.args[0], self.launched.call_args.kwargs
+            self.assertEqual(command, [
+                str(Path("/windows/System32/WindowsPowerShell/v1.0/powershell.exe")), "-NoProfile", "-NonInteractive",
+                "-ExecutionPolicy", "Bypass", "-File", str(script), "-WaitPid", "4321", "-Kind", "windows-setup",
+                "-Staged", record["staged"], "-Target", record["app"], "-UpdatesDir", str(self.updates), "-Version", "0.5.0",
+                "-Sha256", record["sha256"], "-AllUsers", "-Relaunch", "/doklady/a.zfo"])
+            self.assertEqual(options["cwd"], self.updates)
+            self.assertEqual(options["creationflags"], 0x00000008 | 0x08000000 | 0x00000200)
+            self.launched.reset_mock()
+            record = self.ready_for("windows-portable")
+            self.assertTrue(self.start())
+            self.assertEqual(self.launched.call_args.args[0][7:], [
+                "-WaitPid", "4321", "-Kind", "windows-portable", "-Staged", record["staged"], "-Target", record["app"],
+                "-UpdatesDir", str(self.updates), "-Version", "0.5.0"])
+
+    def test_failed_start_is_reported(self):
+        self.ready_for("linux-folder")
+        self.launched.side_effect = OSError
+        self.assertFalse(self.start())
+
+    def test_helper_script_locations(self):
+        self.assertEqual(update_install.helper_script("linux-folder"), certstore.ROOT / "packaging/update/swap.sh")
+        self.assertEqual(update_install.helper_script("windows-setup"), certstore.ROOT / "packaging/update/swap.ps1")
+        with mock.patch.object(update_install.sys, "frozen", True, create=True):
+            with mock.patch.object(update_install.certstore, "IS_MAC", True), \
+                    mock.patch.object(update_install.sys, "executable", "/Applications/Blanketa.app/Contents/Resources/zfo-server/zfo-server"):
+                self.assertEqual(update_install.helper_script("mac-app"),
+                                 Path("/Applications/Blanketa.app/Contents/Resources/update/swap.sh"))
+            with mock.patch.object(update_install.certstore, "IS_MAC", False), \
+                    mock.patch.object(update_install.certstore, "RESOURCES", Path("/bundle")):
+                self.assertEqual(update_install.helper_script("windows-portable"), Path("/bundle/update/swap.ps1"))
+                self.assertEqual(update_install.helper_script("linux-folder"), Path("/bundle/update/swap.sh"))
+
+
+class InstallUpdateMode(unittest.TestCase):
+    def test_install_update_mode_of_the_server(self):
+        with mock.patch.object(update_install, "start_pending_install", return_value=True) as started, \
+                mock.patch.object(app, "ThreadingHTTPServer") as server:
+            app.main(["--install-update", "123", "--relaunch", "/doklady/a.zfo", "/doklady/b.pdf"])
+            started.assert_called_once_with(123, True, ["/doklady/a.zfo", "/doklady/b.pdf"])
+            started.reset_mock()
+            app.main(["--install-update", "123"])
+            started.assert_called_once_with(123, False, [])
+            started.reset_mock()
+            for args in (["--install-update"], ["--install-update", "x"], ["--install-update", "-5"], ["--install-update", "0"],
+                         ["--install-update", "\u0661"]):
+                with self.subTest(args=args):
+                    app.main(args)
+            started.assert_not_called()
+        server.assert_not_called()

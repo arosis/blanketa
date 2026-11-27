@@ -34,6 +34,11 @@ OTHER_STAGING_FOLDER = ".blanketa-update-{version}"
 
 READY_FILE = "ready.json"
 LOCK_FILE = "download.lock"
+RUNNING_FOLDER = "running"
+HELPER_SCRIPTS = {"mac-app": "swap.sh", "linux-folder": "swap.sh", "windows-setup": "swap.ps1", "windows-portable": "swap.ps1"}
+DETACHED_PROCESS = 0x00000008
+CREATE_NEW_PROCESS_GROUP = 0x00000200
+CREATE_NO_WINDOW = 0x08000000
 SECONDS_PER_READ = 30
 SECONDS_TO_WRITE_A_LOCK = 10
 SECONDS_TO_WAIT_FOR_CANCEL = SECONDS_PER_READ + 5
@@ -51,6 +56,7 @@ IDLE = {"state": "idle", "version": None, "percent": None, "error": None}
 LOCK_BEING_WRITTEN = {"pid": None, "version": None, "percent": None}
 
 _RELEASE_VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
+_SHA256 = re.compile(r"[0-9a-fA-F]{64}")
 _STAGING_FOLDER = re.compile(r"\.[Bb]lanketa-update-[0-9]+\.[0-9]+\.[0-9]+")
 _guard = threading.Lock()
 _state = dict(IDLE)
@@ -259,8 +265,8 @@ def _download_in_background(plan):
     outcome = {**IDLE, "state": "failed", "version": plan["version"], "error": "download"}
     try:
         outcome = _outcome(plan)
-        _release_lock()
     finally:
+        _release_lock()
         with _guard:
             _state.update(outcome)
 
@@ -448,6 +454,103 @@ def _remove(path):
         return
     with contextlib.suppress(OSError):
         path.unlink()
+
+
+def running_version():
+    return (certstore.RESOURCES / "VERSION").read_text(encoding="utf-8").strip()
+
+
+def register_running():
+    folder = updates_dir() / RUNNING_FOLDER
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / str(os.getpid())).touch()
+
+
+def unregister_running():
+    _remove(updates_dir() / RUNNING_FOLDER / str(os.getpid()))
+
+
+def others_running():
+    return _running_besides({os.getpid()})
+
+
+def _running_besides(own):
+    try:
+        entries = list((updates_dir() / RUNNING_FOLDER).iterdir())
+    except OSError:
+        return False
+    for entry in entries:
+        if not (entry.name.isascii() and entry.name.isdigit()) or int(entry.name) in own:
+            continue
+        if process_alive(int(entry.name)):
+            return True
+        _remove(entry)
+    return False
+
+
+def helper_script(kind):
+    name = HELPER_SCRIPTS[kind]
+    if not getattr(sys, "frozen", False):
+        return certstore.ROOT / "packaging/update" / name
+    if certstore.IS_MAC:
+        return Path(sys.executable).parents[1] / "update" / name
+    return certstore.RESOURCES / "update" / name
+
+
+def start_pending_install(host_pid, relaunch, files):
+    try:
+        record = ready(running_version())
+    except OSError:
+        return False
+    if record is None or not _matches_this_app(record) or _running_besides({os.getpid(), host_pid}):
+        return False
+    try:
+        script = updates_dir() / HELPER_SCRIPTS[record["kind"]]
+        shutil.copyfile(helper_script(record["kind"]), script)
+        _start_detached(_install_command(record, script, host_pid, relaunch, files))
+    except OSError:
+        return False
+    return True
+
+
+def _matches_this_app(record):
+    destination = target()
+    if destination is None or (record["kind"], record["app"]) != (destination["kind"], str(destination["app"])):
+        return False
+    if record["kind"] == "windows-setup":
+        allowed, digest = updates_dir(), record["sha256"]
+        if _SHA256.fullmatch(digest) is None:
+            return False
+    else:
+        allowed = Path(record["app"]).parent
+    staged = Path(os.path.realpath(record["staged"]))
+    return Path(os.path.realpath(allowed)) in staged.parents
+
+
+def _install_command(record, script, host_pid, relaunch, files):
+    files = [file for file in files if isinstance(file, str) and os.path.isabs(file)]
+    if not record["kind"].startswith("windows"):
+        return ["/bin/sh", str(script), str(host_pid), record["staged"], record["app"], str(updates_dir()),
+                record["version"], "1" if relaunch else "0", *files]
+    powershell = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+    command = [str(powershell), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(script),
+               "-WaitPid", str(host_pid), "-Kind", record["kind"], "-Staged", record["staged"], "-Target", record["app"],
+               "-UpdatesDir", str(updates_dir()), "-Version", record["version"]]
+    if record["kind"] == "windows-setup":
+        command += ["-Sha256", record["sha256"]]
+    if record["all_users"]:
+        command.append("-AllUsers")
+    if relaunch:
+        command.append("-Relaunch")
+    return command + files
+
+
+def _start_detached(command):
+    streams = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "cwd": updates_dir()}
+    if certstore.IS_WINDOWS:
+        subprocess.Popen(command, creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP, **streams)
+    else:
+        subprocess.Popen(command, start_new_session=True, **streams)
 
 
 def _lock_text(version, percent):

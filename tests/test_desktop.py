@@ -1,7 +1,9 @@
 """The desktop host desktop.py: file associations, file dialogs, saving attachments, printing and fonts on Linux."""
 import importlib.util
 import json
+import os
 import plistlib
+import sys
 import tempfile
 import threading
 import unittest
@@ -14,6 +16,7 @@ import app
 import desktop
 import isds_message
 import linux_print
+import update_install
 
 PYWEBVIEW_FILE_TYPE_PATTERN = r"^([\w ]+)\((\*(?:\.(?:\w+|\*))*(?:;\*(?:\.(?:\w+|\*))*)*)\)$"
 
@@ -236,6 +239,89 @@ class DesktopContainerFileSaving(DesktopAttachmentSaving):
         for extension in ("asice", "sce", "asics", "scs"):
             self.assertIn(f'"{extension}"', main)
         self.assertIn('&i=[0-9]+\\z"#', main)
+
+
+class UpdateInstall(unittest.TestCase):
+    UNSAVED_CHECK = "window.zfoHasUnsavedChanges?.() === true"
+
+    def setUp(self):
+        with mock.patch.dict(sys.modules, {"webview": mock.Mock()}):
+            self.app = desktop.DesktopApp()
+        self.documents = [self.form("/doklady/a.zfo"), self.form(None), self.form("/doklady/b.pdf")]
+        self.app.windows = list(self.documents)
+        self.app.settings_window = self.form(None, kind="settings")
+        self.others = mock.patch.object(update_install, "others_running", return_value=False)
+        self.others_running = self.others.start()
+        self.addCleanup(self.others.stop)
+
+    def form(self, path, kind="document"):
+        form = mock.Mock(kind=kind, path=Path(path) if path else None, home="http://127.0.0.1:1/")
+        form.window.get_current_url.return_value = form.home
+        form.window.evaluate_js.return_value = False
+        return form
+
+    def restart_from(self, form):
+        desktop.Bridge(self.app, form).message({"action": "installUpdate", "restart": True})
+
+    def assert_refused(self, form, reason):
+        form.window.evaluate_js.assert_called_with(f"window.zfoUpdateOffer && zfoUpdateOffer.restartRefused('{reason}')")
+        for each in [*self.documents, self.app.settings_window]:
+            each.window.destroy.assert_not_called()
+        self.assertFalse(self.app.relaunch)
+
+    def test_restart_refused_with_unsaved_window(self):
+        self.documents[2].window.evaluate_js.return_value = True
+        self.restart_from(self.documents[0])
+        self.assert_refused(self.documents[0], "unsaved")
+        self.documents[2].window.show.assert_called_once_with()
+        for form in self.documents:
+            self.assertIn(mock.call(self.UNSAVED_CHECK), form.window.evaluate_js.call_args_list)
+
+    def test_failed_unsaved_check_counts_as_unsaved(self):
+        for answer in (None, Exception("JavaScript error")):
+            with self.subTest(answer=answer):
+                if isinstance(answer, Exception):
+                    self.documents[1].window.evaluate_js.side_effect = answer
+                else:
+                    self.documents[1].window.evaluate_js.return_value = answer
+                self.restart_from(self.documents[0])
+                self.assert_refused(self.documents[0], "unsaved")
+
+    def test_restart_refused_with_other_process(self):
+        self.others_running.return_value = True
+        self.restart_from(self.documents[1])
+        self.assert_refused(self.documents[1], "others")
+
+    def test_restart_closes_windows_and_relaunches_with_files(self):
+        self.restart_from(self.documents[1])
+        for each in [*self.documents, self.app.settings_window]:
+            each.window.destroy.assert_called_once_with()
+        self.assertTrue(self.app.relaunch)
+        self.assertEqual(self.app.relaunch_files, [str(Path("/doklady/a.zfo")), str(Path("/doklady/b.pdf"))])
+
+    def test_quit_starts_pending_install(self):
+        calls = mock.Mock()
+        with mock.patch.object(update_install, "register_running", calls.register), \
+                mock.patch.object(update_install, "unregister_running", calls.unregister), \
+                mock.patch.object(update_install, "start_pending_install", calls.install), \
+                mock.patch.object(self.app, "open_window"):
+            self.app.webview.start.side_effect = calls.start
+            self.app.run([])
+            self.assertEqual([name for name, *_ in calls.mock_calls], ["register", "start", "unregister", "install"])
+            calls.install.assert_called_once_with(os.getpid(), False, [])
+            calls.reset_mock()
+            self.app.webview.start.side_effect = lambda **_: self.restart_from(self.documents[0])
+            self.app.run([])
+            calls.install.assert_called_once_with(os.getpid(), True, [str(Path("/doklady/a.zfo")), str(Path("/doklady/b.pdf"))])
+
+    def test_windows_holds_the_running_mutex(self):
+        kernel32 = mock.Mock()
+        with mock.patch.object(desktop, "IS_WINDOWS", True), \
+                mock.patch.dict(sys.modules, {"ctypes": mock.Mock(windll=mock.Mock(kernel32=kernel32))}):
+            handle = desktop.hold_running_mutex()
+        kernel32.CreateMutexW.assert_called_once_with(None, False, "BlanketaRunning")
+        self.assertIs(handle, kernel32.CreateMutexW.return_value)
+        self.assertIsNone(desktop.hold_running_mutex())
 
 
 class LinuxPdfPrinting(unittest.TestCase):

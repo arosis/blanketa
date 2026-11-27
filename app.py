@@ -968,8 +968,18 @@ def exit_together_with_host_app():
         exit_when_parent_changes()
 
 
+def install_update(args):
+    if not args or re.fullmatch(r"[1-9][0-9]*", args[0]) is None:
+        return
+    relaunch = args[1:2] == ["--relaunch"]
+    update_install.start_pending_install(int(args[0]), relaunch, args[2 if relaunch else 1:])
+
+
 def main(args):
     global SINGLE_FILE, SETTINGS_ONLY
+    if args[:1] == ["--install-update"]:
+        install_update(args[1:])
+        return
     if args[:1] in (["--file"], ["--empty"], ["--settings"]):
         SETTINGS_ONLY = args[0] == "--settings"
         if args[0] == "--file":

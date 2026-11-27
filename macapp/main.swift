@@ -71,6 +71,7 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
     var onClose: (() -> Void)?
     var onOpen: ((URL?) -> Void)?
     var onBecomeKey: (() -> Void)?
+    var onInstallUpdate: (() -> Void)?
     var formServerPort: Int?
     var pendingAction: String?
     private var serverStopRequested = false
@@ -174,6 +175,7 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
             let json = String(data: try! JSONEncoder().encode(paths), encoding: .utf8)!
             webView.evaluateJavaScript("window.zfoRecent && zfoRecent(\(json))")
         case "print": printPage()
+        case "installUpdate": onInstallUpdate?()
         case "close":
             // A form's own button asks; the window closes once this call has returned.
             DispatchQueue.main.async { [weak self] in self?.window.performClose(nil) }
@@ -206,6 +208,16 @@ final class FormWindow: NSObject, NSWindowDelegate, WKScriptMessageHandler, WKUI
             }
         default: break
         }
+    }
+
+    func hasUnsavedChanges(_ answer: @escaping (Bool) -> Void) {
+        webView.evaluateJavaScript("window.zfoHasUnsavedChanges?.() === true") { result, error in
+            answer(error != nil || result as? Bool != false)
+        }
+    }
+
+    func refuseRestart(_ reason: String) {
+        webView.evaluateJavaScript("window.zfoUpdateOffer && zfoUpdateOffer.restartRefused('\(reason)')")
     }
 
     func sendActionToPage(_ action: String) {
@@ -378,6 +390,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     var windows: [FormWindow] = []
     var settingsWindow: FormWindow?
     var openedFile = false
+    var relaunchFiles: [String]?
 
     func application(_ application: NSApplication, open urls: [URL]) {
         openedFile = true
@@ -419,6 +432,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         windows.forEach { $0.stopServer() }
         settingsWindow?.stopServer()
+        startPendingInstall()
+    }
+
+    private func startPendingInstall() {
+        let installer = Process()
+        installer.executableURL = Bundle.main.resourceURL!.appendingPathComponent("zfo-server/zfo-server")
+        installer.arguments = ["--install-update", String(getpid())] + (relaunchFiles.map { ["--relaunch"] + $0 } ?? [])
+        installer.standardInput = FileHandle.nullDevice
+        installer.standardOutput = FileHandle.nullDevice
+        installer.standardError = FileHandle.nullDevice
+        try? installer.run()
+    }
+
+    func installUpdate(requestedBy requesting: FormWindow) {
+        let documents = windows
+        var unsaved: [FormWindow] = []
+        let answers = DispatchGroup()
+        for form in documents {
+            answers.enter()
+            form.hasUnsavedChanges { isUnsaved in
+                if isUnsaved { unsaved.append(form) }
+                answers.leave()
+            }
+        }
+        answers.notify(queue: .main) { [weak self] in
+            if let first = documents.first(where: { form in unsaved.contains { $0 === form } }) {
+                if first.window.isMiniaturized { first.window.deminiaturize(nil) }
+                first.window.makeKeyAndOrderFront(nil)
+                requesting.refuseRestart("unsaved")
+                return
+            }
+            self?.relaunchFiles = documents.compactMap { $0.file?.path }
+            NSApp.terminate(nil)
+        }
     }
 
     func open(_ url: URL) {
@@ -438,6 +485,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         form.onOpen = { [weak self] url in
             if let url { self?.open(url) } else { self?.openDocument(nil) }
+        }
+        form.onInstallUpdate = { [weak self, weak form] in
+            guard let self, let form else { return }
+            self.installUpdate(requestedBy: form)
         }
         windows.append(form)
     }

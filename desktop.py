@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 import re
@@ -20,6 +21,8 @@ SERVER_START_ATTEMPTS = 300
 MAX_RECENT_FILES = 10
 ATTACHMENT_URL = re.compile(r"/(?:attachment|container-file)\?s=[A-Za-z0-9_-]+&i=\d+", re.ASCII)
 ATTACHMENT_DOWNLOAD_SECONDS = 120
+RUNNING_MUTEX = "BlanketaRunning"
+UNSAVED_CHECK = "window.zfoHasUnsavedChanges?.() === true"
 APP_ACTIONS = ("about", "check-updates", "report-error", "support")
 OPEN_DIALOG_FILE_TYPES = ("Podporované soubory (*.zfo;*.fo;*.pdf;*.asice;*.sce;*.asics;*.scs)", "Všechny soubory (*.*)")
 
@@ -94,6 +97,24 @@ def write_downloaded(url, target):
             partial.replace(target)
         finally:
             partial.unlink(missing_ok=True)
+
+
+def hold_running_mutex():
+    if not IS_WINDOWS:
+        return None
+    import ctypes
+    return ctypes.windll.kernel32.CreateMutexW(None, False, RUNNING_MUTEX)
+
+
+def has_unsaved_changes(window):
+    try:
+        return window.evaluate_js(UNSAVED_CHECK) is not False
+    except Exception:  # a page that cannot answer may hold unsaved work
+        return True
+
+
+def refuse_restart(window, reason):
+    window.evaluate_js(f"window.zfoUpdateOffer && zfoUpdateOffer.restartRefused('{reason}')")
 
 
 def free_local_port():
@@ -192,6 +213,8 @@ class Bridge:
             self._save_file_from_dialog(window, msg)
         elif action == "saveAttachment":
             self._save_attachments(window, msg)
+        elif action == "installUpdate":
+            self._app.install_update(window)
         elif action == "close":
             window.destroy()
 
@@ -262,6 +285,7 @@ class DesktopApp:
         self.webview = webview
         self.windows = []
         self.settings_window = None
+        self.relaunch, self.relaunch_files = False, []
 
     def _recent_files_path(self):
         import certstore
@@ -335,6 +359,22 @@ class DesktopApp:
         form, unsent = self.open_window(), [script]
         form.window.events.loaded += lambda: unsent and form.window.evaluate_js(unsent.pop())
 
+    def install_update(self, requesting):
+        import update_install
+        if update_install.others_running():
+            refuse_restart(requesting, "others")
+            return
+        unsaved = [form for form in self.windows if form.kind == "document" and has_unsaved_changes(form.window)]
+        if unsaved:
+            unsaved[0].window.restore()
+            unsaved[0].window.show()
+            refuse_restart(requesting, "unsaved")
+            return
+        self.relaunch_files = [str(form.path) for form in self.windows if form.kind == "document" and form.path]
+        self.relaunch = True
+        for form in [*self.windows, *([self.settings_window] if self.settings_window else [])]:
+            form.window.destroy()
+
     def build_menu(self):
         from webview.menu import Menu, MenuAction, MenuSeparator
 
@@ -382,10 +422,18 @@ class DesktopApp:
 
     def run(self, paths):
         import certstore
+        import update_install
+        with contextlib.suppress(OSError):
+            update_install.register_running()
+        self.running_mutex = hold_running_mutex()
         for path in paths or [None]:
             self.open_window(path)
-        self.webview.start(gui="qt" if sys.platform.startswith("linux") else None, menu=self.build_menu(), private_mode=False,
-                           storage_path=str(certstore.config_dir() / "webview"))
+        try:
+            self.webview.start(gui="qt" if sys.platform.startswith("linux") else None, menu=self.build_menu(), private_mode=False,
+                               storage_path=str(certstore.config_dir() / "webview"))
+        finally:
+            update_install.unregister_running()
+        update_install.start_pending_install(os.getpid(), self.relaunch, self.relaunch_files)
 
 
 def main(argv):
