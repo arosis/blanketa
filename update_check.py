@@ -147,14 +147,14 @@ def _failed_install():
 def _offer(latest, current):
     version = latest["version"]
     name = _asset_name(version)
-    target = update_install.target()
+    install = _can_install(latest, update_install.target())
     return {
         "version": version,
         "current": current,
         "download_url": _release_asset(latest, name) or f"{RELEASES_URL}/tag/v{version}",
         "news_url": NEWS_URL + version,
-        "linux": PLATFORM == "linux",
-        "install": _can_install(latest, target),
+        "linux": PLATFORM == "linux" and not install,
+        "install": install,
         "reason": update_install.not_replaceable_reason(),
         "failed": _failed_install(),
     }

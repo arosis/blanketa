@@ -329,6 +329,14 @@ class Installable(WithOwnSettingsFolder):
                 without = {n: u for n, u in INSTALLABLE_ASSETS.items() if n != name}
                 self.assertFalse(self.offer(without, target)["install"])
 
+    def test_installable_linux_offer_has_no_manual_install_line(self):
+        folder = {"kind": "linux-folder", "app": Path("/home/u/.local/share/blanketa"), "all_users": False}
+        with mock.patch.object(update_check, "PLATFORM", "linux"):
+            installable = self.offer(INSTALLABLE_ASSETS, folder)
+            manual = self.offer(INSTALLABLE_ASSETS, None)
+        self.assertEqual((installable["install"], installable["linux"]), (True, False))
+        self.assertEqual((manual["install"], manual["linux"]), (False, True))
+
     def test_not_replaceable_copy_carries_the_reason(self):
         offer = self.offer(INSTALLABLE_ASSETS, None, "move-to-applications")
         self.assertFalse(offer["install"])
@@ -562,6 +570,17 @@ class UpdateDialog(unittest.TestCase):
         lines = self.offer_text(linux=True)["lines"]
         self.assertEqual(lines[0], "Blanketa 0.5.0 (máte 0.4.0)")
         self.assertIn("sudo apt install ./blanketa_0.5.0_amd64.deb", lines[1])
+
+    def test_installable_linux_folder_shows_no_apt_line(self):
+        folder = {"kind": "linux-folder", "app": Path("/home/u/.local/share/blanketa"), "all_users": False}
+        latest = {"version": "0.5.0", "assets": INSTALLABLE_ASSETS}
+        for target, has_apt_line in ((folder, False), (None, True)):
+            with self.subTest(target=target), mock.patch.object(update_check, "PLATFORM", "linux"), \
+                    mock.patch.object(update_install, "target", return_value=target), \
+                    mock.patch.object(update_check, "_failed_install", return_value=None):
+                offer = update_check._offer(latest, "0.4.0")
+            screen = json.loads(run_ui_scripts(["bridge.js"], f"console.log(JSON.stringify(zfoUpdateOffer.screen({json.dumps(offer)})));"))
+            self.assertEqual(any("sudo apt install" in line for line in screen["lines"]), has_apt_line)
 
     def test_bridge_opens_only_the_offered_urls(self):
         source = ui_source("bridge.js")
