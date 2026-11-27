@@ -206,8 +206,18 @@ jobs:
     runs-on: ubuntu-latest
     permissions: {contents: write}
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with: {python-version: "3.12"}
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with: {pattern: "blanketa-*", merge-multiple: true, path: release}
+      - name: Install signing dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -q --require-hashes --only-binary :all: -r requirements.txt
+      - name: Sign release manifest
+        env: {UPDATE_SIGNING_KEY: "${{ secrets.UPDATE_SIGNING_KEY }}"}
+        run: .venv/bin/python -I tools/sign_release.py release "${GITHUB_REF_NAME#v}"
       - name: Publish release
         env: {GH_TOKEN: "${{ github.token }}"}
         run: gh release create "$GITHUB_REF_NAME" release/* --repo "$GITHUB_REPOSITORY" --title "Blanketa ${GITHUB_REF_NAME#v}" --generate-notes

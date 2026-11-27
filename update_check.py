@@ -8,6 +8,8 @@ from pathlib import Path
 
 import certstore
 import public_services
+import update_install
+import update_signature
 
 SETTINGS_FILE = "update-check.json"
 SECONDS_TO_WAIT = 5
@@ -18,6 +20,7 @@ LATEST_RELEASE_URL = "https://api.github.com/repos/arosis/blanketa/releases/late
 RELEASES_URL = "https://github.com/arosis/blanketa/releases"
 NEWS_URL = "https://blanketa.cz/novinky/#"
 MAX_ANSWER_BYTES = 1_000_000
+FAILED_FILE = "failed.json"
 
 PLATFORM = "mac" if certstore.IS_MAC else "windows" if certstore.IS_WINDOWS else "linux"
 
@@ -106,18 +109,69 @@ def _asset_name(version):
     return None
 
 
+def _release_asset(latest, name):
+    url = latest["assets"].get(name)
+    return url if url == f"{RELEASES_URL}/download/v{latest['version']}/{name}" else None
+
+
+def _can_install(latest, target):
+    if target is None:
+        return False
+    version = latest["version"]
+    names = [
+        update_signature.PLATFORM_FILES[update_install.KIND_FILES[target["kind"]]],
+        update_signature.MANIFEST_NAME,
+        update_signature.SIGNATURE_NAME,
+    ]
+    return all(_release_asset(latest, name.format(version=version)) for name in names)
+
+
+def _read_failed():
+    try:
+        failed = json.loads((update_install.updates_dir() / FAILED_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    version = failed.get("version") if isinstance(failed, dict) else None
+    return {"version": version} if version_tuple(version) is not None else None
+
+
+def _failed_install():
+    failed = _read_failed()
+    try:
+        (update_install.updates_dir() / FAILED_FILE).unlink()
+    except OSError:
+        pass
+    if failed is not None:
+        update_install.discard_version(failed["version"])
+    return failed
+
+
 def _offer(latest, current):
     version = latest["version"]
-    release_page = f"{RELEASES_URL}/tag/v{version}"
-    download_url = latest["assets"].get(_asset_name(version))
-    if download_url != f"{RELEASES_URL}/download/v{version}/{_asset_name(version)}":
-        download_url = release_page
+    name = _asset_name(version)
+    install = _can_install(latest, update_install.target())
     return {
         "version": version,
         "current": current,
-        "download_url": download_url,
+        "download_url": _release_asset(latest, name) or f"{RELEASES_URL}/tag/v{version}",
         "news_url": NEWS_URL + version,
-        "linux": PLATFORM == "linux",
+        "linux": PLATFORM == "linux" and not install,
+        "install": install,
+        "reason": update_install.not_replaceable_reason(),
+        "failed": _failed_install(),
+    }
+
+
+def _ready_offer(version, current):
+    return {
+        "version": version,
+        "current": current,
+        "download_url": f"{RELEASES_URL}/tag/v{version}",
+        "news_url": NEWS_URL + version,
+        "linux": False,
+        "install": False,
+        "reason": None,
+        "failed": None,
     }
 
 
@@ -178,13 +232,16 @@ def offer_for_page(current, now=None):
     try:
         now = now or datetime.now()
         stored = _stored()
+        failed = _read_failed() if first_render else None
         if stored.get("disabled") is True:
-            return None
+            return _offer({"version": failed["version"], "assets": {}}, current) if failed else None
         if _stale(stored, now):
             refresh_in_background()
         latest = _latest(stored)
-        if not first_render or latest is None or not _is_newer(latest, current) or _postponed(stored, latest["version"], now):
+        if not first_render:
             return None
+        if latest is None or not _is_newer(latest, current) or _postponed(stored, latest["version"], now):
+            return _offer({"version": failed["version"], "assets": {}}, current) if failed else None
         _postpone(stored, latest["version"], now)
         return _offer(latest, current)
     except Exception:
@@ -194,6 +251,9 @@ def offer_for_page(current, now=None):
 def check_now(current, now=None):
     try:
         now = now or datetime.now()
+        prepared = update_install.ready_for_this_app(current)
+        if prepared is not None:
+            return {"status": "newer", "ready": True, "offer": _ready_offer(prepared["version"], current)}
         latest = fetch_latest()
         if latest is None:
             return {"status": "unknown"}

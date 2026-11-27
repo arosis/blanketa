@@ -304,6 +304,8 @@ window.zfoReportError = (() => {
   return Object.assign(() => open(), {record, template, fitIntoMailLink});
 })();
 
+window.zfoHasUnsavedChanges = () => false;
+
 window.zfoUpdateOffer = (() => {
   const pageData = () => JSON.parse(document.querySelector('script[data-zfo-page]')?.textContent || '{}');
   const post = async body => {
@@ -318,27 +320,102 @@ window.zfoUpdateOffer = (() => {
     }
     return {title: 'Je k dispozici nová verze Blankety', lines};
   };
-  const open = offer => {
+  const MOVE_TEXT = 'Blanketu nejde aktualizovat, dokud běží z obrazu disku nebo ze Stažených souborů. Přesuňte ji do složky Aplikace a otevřete ji znovu.';
+  const NOT_WRITABLE_TEXT = 'Blanketu teď nejde aktualizovat, protože do její složky nemáte právo zapisovat. Stáhněte novou verzi ručně.';
+  const REASON_TEXTS = new Map([['move-to-applications', MOVE_TEXT], ['not-writable', NOT_WRITABLE_TEXT]]);
+  const FAILED_TEXT = failed => `Aktualizaci na Blanketu ${failed.version} se nepodařilo nainstalovat, zůstala verze ${failed.current}.`;
+  const VERIFY_TEXT = 'Aktualizaci se nepodařilo ověřit, nic se nezměnilo.';
+  const DOWNLOAD_TEXT = 'Aktualizaci se nepodařilo stáhnout. Zkuste to později.';
+  const UPDATE_TITLE = 'Aktualizace Blankety';
+  const button = (id, label, primary) => ({id, label, primary: !!primary});
+  const failureReportOnly = offer => !!offer.failed && !offer.install && offer.failed.version === offer.version;
+  const screen = (offer, state = {name: 'offer'}) => {
+    const failedLine = offer.failed ? FAILED_TEXT({version: offer.failed.version, current: offer.current}) : null;
+    if (state.name === 'progress') {
+      const number = Number.isInteger(state.percent) ? ` ${state.percent}\u00a0%` : '';
+      return {title: UPDATE_TITLE, lines: [`Stahuji Blanketu ${offer.version}…${number}`], buttons: [button('cancel', 'Zrušit', true)]};
+    }
+    if (state.name === 'ready') {
+      return {title: UPDATE_TITLE, lines: [`Blanketa ${offer.version} je připravená. Nainstaluje se, až Blanketu zavřete.`],
+        buttons: [button('later', 'Později'), button('restart', 'Restartovat teď', true)]};
+    }
+    if (state.name === 'verify' || state.name === 'download') {
+      return {title: UPDATE_TITLE, lines: [state.name === 'verify' ? VERIFY_TEXT : DOWNLOAD_TEXT],
+        buttons: [button('close', 'Zavřít'), button('download', 'Stáhnout…', true)]};
+    }
+    if (failureReportOnly(offer)) {
+      return {title: UPDATE_TITLE, lines: [failedLine], buttons: [button('close', 'Zavřít'), button('download', 'Stáhnout…', true)]};
+    }
     const {title, lines} = text(offer);
+    if (failedLine) lines.unshift(failedLine);
+    if (!offer.install && REASON_TEXTS.has(offer.reason)) lines.push(REASON_TEXTS.get(offer.reason));
+    return {title, lines, buttons: [button('news', 'Co je nového'), button('later', 'Připomenout za týden'),
+      button(offer.install ? 'install' : 'download', offer.install ? 'Aktualizovat' : 'Stáhnout…', true)]};
+  };
+  const POLL_MILLISECONDS = 500;
+  let shown = null;
+  const replaceShown = dialog => {
+    shown?.close();
+    shown = dialog;
+    dialog.addEventListener('close', () => { if (shown === dialog) shown = null; });
+  };
+  const open = (offer, startState = {name: 'offer'}) => {
     const dialog = document.createElement('dialog');
     dialog.className = 'zfo-dialog zfo-update-offer';
-    dialog.innerHTML = `<style>.zfo-update-offer { width: 420px; font: 13px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif; }</style>
-      <h2 data-title></h2>
-      <div data-lines></div>
-      <div class="zfo-dialog-buttons">
-        <button type="button" class="zfo-btn" data-news>Co je nového</button>
-        <button type="button" class="zfo-btn" data-later>Připomenout za týden</button>
-        <button type="button" class="zfo-btn primary" data-download>Stáhnout…</button></div>`;
-    dialog.querySelector('[data-title]').textContent = title;
-    for (const line of lines) {
-      const paragraph = document.createElement('p');
-      paragraph.textContent = line;
-      dialog.querySelector('[data-lines]').append(paragraph);
-    }
-    dialog.querySelector('[data-news]').addEventListener('click', () => window.zfoOpenUrl(offer.news_url));
-    dialog.querySelector('[data-later]').addEventListener('click', () => dialog.close());
-    dialog.querySelector('[data-download]').addEventListener('click', () => { window.zfoOpenUrl(offer.download_url); dialog.close(); });
-    dialog.addEventListener('close', () => dialog.remove());
+    replaceShown(dialog);
+    let timer = null;
+    const stopPolling = () => { clearTimeout(timer); timer = null; };
+    const show = state => {
+      const view = screen(offer, state);
+      dialog.innerHTML = `<style>.zfo-update-offer { width: 420px; font: 13px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif; }</style>
+        <h2 data-title></h2>
+        <div data-lines></div>
+        <div class="zfo-dialog-buttons">${view.buttons.map(item =>
+          `<button type="button" class="zfo-btn${item.primary ? ' primary' : ''}" data-id="${item.id}">${item.label}</button>`).join('')}</div>`;
+      dialog.querySelector('[data-title]').textContent = view.title;
+      for (const line of view.lines) {
+        const paragraph = document.createElement('p');
+        paragraph.textContent = line;
+        dialog.querySelector('[data-lines]').append(paragraph);
+      }
+      const on = (id, handler) => dialog.querySelector(`[data-id="${id}"]`)?.addEventListener('click', handler);
+      on('news', () => window.zfoOpenUrl(offer.news_url));
+      on('later', () => dialog.close());
+      on('close', () => dialog.close());
+      on('download', () => { window.zfoOpenUrl(offer.download_url); dialog.close(); });
+      on('install', start);
+      on('cancel', cancel);
+      on('restart', () => { dialog.close(); window.zfoNative?.postMessage({action: 'installUpdate', restart: true}); });
+    };
+    const follow = answer => {
+      if (answer.state === 'downloading') {
+        show({name: 'progress', percent: answer.percent});
+        timer = setTimeout(poll, POLL_MILLISECONDS);
+      } else if (answer.state === 'ready') show({name: 'ready'});
+      else if (answer.state === 'idle') dialog.close();
+      else show({name: answer.state === 'failed' && answer.error === 'verify' ? 'verify' : 'download'});
+    };
+    const poll = async () => {
+      if (timer === null) return;
+      let answer;
+      try { answer = await post({action: 'progress'}); } catch { answer = {state: 'failed'}; }
+      if (timer !== null) follow(answer);
+    };
+    const start = async () => {
+      show({name: 'progress'});
+      timer = 0;
+      let answer;
+      try { answer = await post({action: 'download'}); } catch { answer = {state: 'failed'}; }
+      if (timer !== null) follow(answer);
+    };
+    const cancel = async () => {
+      stopPolling();
+      dialog.close();
+      await post({action: 'cancel'}).catch(() => null);
+    };
+    dialog.addEventListener('close', () => { stopPolling(); dialog.remove(); });
+    show(startState);
+    if (startState.name === 'progress') timer = setTimeout(poll, POLL_MILLISECONDS);
     document.body.append(dialog);
     dialog.showModal();
   };
@@ -352,6 +429,7 @@ window.zfoUpdateOffer = (() => {
   const inform = message => {
     const dialog = document.createElement('dialog');
     dialog.className = 'zfo-dialog zfo-update-offer';
+    replaceShown(dialog);
     dialog.innerHTML = `<style>.zfo-update-offer { width: 420px; font: 13px/1.45 -apple-system, "Segoe UI", system-ui, sans-serif; }</style>
       <p data-message></p>
       <div class="zfo-dialog-buttons"><button type="button" class="zfo-btn primary" data-close>OK</button></div>`;
@@ -361,9 +439,25 @@ window.zfoUpdateOffer = (() => {
     document.body.append(dialog);
     dialog.showModal();
   };
+  const running = async () => {
+    try {
+      const answer = await post({action: 'progress'});
+      return answer.state === 'downloading' || answer.state === 'ready' ? answer : null;
+    } catch {
+      return null;
+    }
+  };
+  const RELEASE_VERSION = /^\d+\.\d+\.\d+$/;
   const report = async () => {
+    const underway = await running();
+    if (underway && typeof underway.version === 'string' && RELEASE_VERSION.test(underway.version)) {
+      const version = underway.version;
+      const offer = {version, download_url: `https://github.com/arosis/blanketa/releases/tag/v${version}`, failed: null, install: true};
+      open(offer, {name: underway.state === 'ready' ? 'ready' : 'progress', percent: underway.percent});
+      return;
+    }
     const answer = await check();
-    if (answer.status === 'newer') open(answer.offer);
+    if (answer.status === 'newer') open(answer.offer, {name: answer.ready ? 'ready' : 'offer'});
     else inform(answer.status === 'current' ? 'Máte nejnovější verzi.' : 'Novou verzi teď nešlo zjistit. Zkuste to později.');
   };
   const offerOnOpen = () => {
@@ -372,7 +466,10 @@ window.zfoUpdateOffer = (() => {
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', offerOnOpen);
   else offerOnOpen();
-  return Object.assign(open, {text, check, report});
+  const restartRefused = reason => inform(reason === 'unsaved'
+    ? 'Nejdřív uložte nebo zavřete rozpracované dokumenty.'
+    : 'Zavřete ostatní okna Blankety; aktualizace se nainstaluje po zavření posledního.');
+  return Object.assign(open, {text, screen, check, report, restartRefused});
 })();
 
 window.zfoSupportReminder = async (sessionToken, status) => {

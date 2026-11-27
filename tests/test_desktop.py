@@ -1,7 +1,9 @@
 """The desktop host desktop.py: file associations, file dialogs, saving attachments, printing and fonts on Linux."""
 import importlib.util
 import json
+import os
 import plistlib
+import sys
 import tempfile
 import threading
 import unittest
@@ -14,6 +16,7 @@ import app
 import desktop
 import isds_message
 import linux_print
+import update_install
 
 PYWEBVIEW_FILE_TYPE_PATTERN = r"^([\w ]+)\((\*(?:\.(?:\w+|\*))*(?:;\*(?:\.(?:\w+|\*))*)*)\)$"
 
@@ -236,6 +239,164 @@ class DesktopContainerFileSaving(DesktopAttachmentSaving):
         for extension in ("asice", "sce", "asics", "scs"):
             self.assertIn(f'"{extension}"', main)
         self.assertIn('&i=[0-9]+\\z"#', main)
+
+
+class UpdateInstall(unittest.TestCase):
+    UNSAVED_CHECK = "window.zfoHasUnsavedChanges?.() === true"
+
+    def setUp(self):
+        with mock.patch.dict(sys.modules, {"webview": mock.Mock()}):
+            self.app = desktop.DesktopApp()
+        self.documents = [self.form("/doklady/a.zfo"), self.form(None), self.form("/doklady/b.pdf")]
+        self.app.windows = list(self.documents)
+        self.app.settings_window = self.form(None, kind="settings")
+        self.app.servers = [form.server for form in [*self.documents, self.app.settings_window]]
+        build_menu = mock.patch.object(self.app, "build_menu")
+        build_menu.start()
+        self.addCleanup(build_menu.stop)
+        self.others = mock.patch.object(update_install, "others_running", return_value=False)
+        self.others_running = self.others.start()
+        self.addCleanup(self.others.stop)
+
+    def form(self, path, kind="document"):
+        form = mock.Mock(kind=kind, path=Path(path) if path else None, home="http://127.0.0.1:1/")
+        form.window.get_current_url.return_value = form.home
+        form.window.evaluate_js.return_value = False
+        return form
+
+    def restart_from(self, form):
+        desktop.Bridge(self.app, form).message({"action": "installUpdate", "restart": True})
+
+    def assert_refused(self, form, reason):
+        form.window.evaluate_js.assert_called_with(f"window.zfoUpdateOffer && zfoUpdateOffer.restartRefused('{reason}')")
+        for each in [*self.documents, self.app.settings_window]:
+            each.window.destroy.assert_not_called()
+        self.assertFalse(self.app.relaunch)
+
+    def test_restart_refused_with_unsaved_window(self):
+        self.documents[2].window.evaluate_js.return_value = True
+        self.restart_from(self.documents[0])
+        self.assert_refused(self.documents[0], "unsaved")
+        self.documents[2].window.show.assert_called_once_with()
+        for form in self.documents:
+            self.assertIn(mock.call(self.UNSAVED_CHECK), form.window.evaluate_js.call_args_list)
+
+    def test_failed_unsaved_check_counts_as_unsaved(self):
+        for answer in (None, Exception("JavaScript error")):
+            with self.subTest(answer=answer):
+                if isinstance(answer, Exception):
+                    self.documents[1].window.evaluate_js.side_effect = answer
+                else:
+                    self.documents[1].window.evaluate_js.return_value = answer
+                self.restart_from(self.documents[0])
+                self.assert_refused(self.documents[0], "unsaved")
+
+    def test_restart_refused_with_other_process(self):
+        self.others_running.return_value = True
+        self.restart_from(self.documents[1])
+        self.assert_refused(self.documents[1], "others")
+
+    def test_restart_closes_windows_and_relaunches_with_files(self):
+        self.restart_from(self.documents[1])
+        for each in [*self.documents, self.app.settings_window]:
+            each.window.destroy.assert_called_once_with()
+        self.assertTrue(self.app.relaunch)
+        self.assertEqual(self.app.relaunch_files, [str(Path("/doklady/a.zfo")), str(Path("/doklady/b.pdf"))])
+
+    def test_quit_starts_pending_install(self):
+        calls = mock.Mock()
+        with mock.patch.object(update_install, "register_running", calls.register), \
+                mock.patch.object(update_install, "unregister_running", calls.unregister), \
+                mock.patch.object(update_install, "start_pending_install", calls.install), \
+                mock.patch.object(self.app, "open_window"), \
+                mock.patch.object(desktop, "hold_running_mutexes", return_value=[]):
+            self.app.webview.start.side_effect = calls.start
+            for server in self.app.servers:
+                server.wait.side_effect = lambda timeout, server=server: calls.wait(server)
+            self.app.run([])
+            self.assertEqual([name for name, *_ in calls.mock_calls][:3], ["register", "start", "unregister"])
+            self.assertEqual([name for name, *_ in calls.mock_calls][3:], ["wait"] * 4 + ["install"])
+            calls.install.assert_called_once_with(os.getpid(), False, [])
+            calls.reset_mock()
+            self.app.webview.start.side_effect = lambda **_: self.restart_from(self.documents[0])
+            self.app.run([])
+            calls.install.assert_called_once_with(os.getpid(), True, [str(Path("/doklady/a.zfo")), str(Path("/doklady/b.pdf"))])
+
+    def test_restart_reopens_blanketa_when_nothing_installs(self):
+        files = [str(Path("/doklady/a.zfo")), str(Path("/doklady/b.pdf"))]
+        with mock.patch.object(update_install, "register_running"), \
+                mock.patch.object(update_install, "unregister_running"), \
+                mock.patch.object(update_install, "start_pending_install") as install, \
+                mock.patch.object(desktop.subprocess, "Popen") as started, \
+                mock.patch.object(self.app, "open_window"), \
+                mock.patch.object(desktop, "hold_running_mutexes", return_value=[]):
+            for installs, restart, expected in ((False, True, [desktop.relaunch_command(files)]), (True, True, []), (False, False, [])):
+                with self.subTest(installs=installs, restart=restart):
+                    install.return_value = installs
+                    started.reset_mock()
+                    self.app.relaunch = False
+                    self.app.webview.start.side_effect = (lambda **_: self.restart_from(self.documents[0])) if restart else None
+                    self.app.run([])
+                    self.assertEqual([call.args[0] for call in started.call_args_list], expected)
+
+    def test_relaunch_command_starts_this_blanketa(self):
+        with mock.patch.object(desktop, "FROZEN", True), mock.patch.object(desktop.sys, "executable", "/opt/Blanketa/Blanketa"):
+            self.assertEqual(desktop.relaunch_command(["/doklady/a.zfo"]), ["/opt/Blanketa/Blanketa", "/doklady/a.zfo"])
+        with mock.patch.object(desktop, "FROZEN", False), mock.patch.object(desktop.sys, "executable", "/venv/python"):
+            self.assertEqual(desktop.relaunch_command([]), ["/venv/python", str((ROOT / "desktop.py").resolve())])
+
+    def test_waiting_for_the_servers_is_bounded(self):
+        clock = iter(range(0, 100, 3))
+        servers = [mock.Mock() for _ in range(4)]
+        for server in servers:
+            server.wait.side_effect = desktop.subprocess.TimeoutExpired("zfo-server", 1)
+        with mock.patch.object(desktop.time, "monotonic", lambda: next(clock)):
+            desktop.wait_for_servers(servers)
+        timeouts = [server.wait.call_args.kwargs["timeout"] for server in servers if server.wait.called]
+        self.assertLessEqual(sum(timeouts), desktop.SECONDS_TO_WAIT_FOR_SERVERS)
+        self.assertTrue(all(timeout > 0 for timeout in timeouts))
+
+    def hold_mutexes(self, created, last_error=0, opened=None):
+        kernel32, advapi32 = mock.Mock(), mock.Mock()
+        kernel32.CreateMutexW.side_effect = created
+        kernel32.OpenMutexW.return_value = opened
+        advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW.side_effect = \
+            lambda sddl, revision, pointer, size: setattr(pointer._obj, "value", 0x1234) or True
+        kernel32.LocalFree.side_effect = lambda descriptor: self.assertEqual(kernel32.CreateMutexW.call_count, 2)
+        libraries = {"kernel32": kernel32, "advapi32": advapi32}
+        with mock.patch.object(desktop, "IS_WINDOWS", True), \
+                mock.patch.object(desktop.ctypes, "WinDLL", lambda name, **_: libraries[name], create=True), \
+                mock.patch.object(desktop.ctypes, "get_last_error", return_value=last_error, create=True):
+            return desktop.hold_running_mutexes(), kernel32, advapi32
+
+    def test_windows_holds_the_session_and_global_running_mutexes(self):
+        handles, kernel32, advapi32 = self.hold_mutexes(["session", "global"])
+        self.assertEqual(handles, ["session", "global"])
+        self.assertEqual([call.args[1:] for call in kernel32.CreateMutexW.call_args_list],
+                         [(False, "BlanketaRunning"), (False, r"Global\BlanketaRunning")])
+        self.assertEqual(advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW.call_args.args[:2], ("D:(A;;GA;;;WD)", 1))
+        for call in kernel32.CreateMutexW.call_args_list:
+            attributes = call.args[0]._obj
+            self.assertIsInstance(attributes, desktop.SecurityAttributes)
+            self.assertEqual(attributes.nLength, desktop.ctypes.sizeof(desktop.SecurityAttributes))
+            self.assertFalse(attributes.bInheritHandle)
+            self.assertEqual(attributes.lpSecurityDescriptor, 0x1234)
+        self.assertEqual(kernel32.LocalFree.call_args.args[0].value, 0x1234)
+        kernel32.OpenMutexW.assert_not_called()
+        with mock.patch.object(desktop, "IS_WINDOWS", False):
+            self.assertEqual(desktop.hold_running_mutexes(), [])
+
+    def test_mutex_held_by_another_user_is_opened_instead(self):
+        handles, kernel32, _ = self.hold_mutexes(["session", None], last_error=desktop.ERROR_ACCESS_DENIED, opened="opened")
+        self.assertEqual(handles, ["session", "opened"])
+        kernel32.OpenMutexW.assert_called_once_with(desktop.SYNCHRONIZE, False, r"Global\BlanketaRunning")
+
+    def test_global_mutex_that_cannot_be_held_is_skipped(self):
+        handles, kernel32, _ = self.hold_mutexes(["session", None], last_error=2)
+        self.assertEqual(handles, ["session"])
+        kernel32.OpenMutexW.assert_not_called()
+        handles, _, _ = self.hold_mutexes([None, None], last_error=desktop.ERROR_ACCESS_DENIED, opened=None)
+        self.assertEqual(handles, [])
 
 
 class LinuxPdfPrinting(unittest.TestCase):

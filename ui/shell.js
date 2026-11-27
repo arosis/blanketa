@@ -67,6 +67,7 @@
   let queue = Promise.resolve();
   let changed = false;
   let ready = false;
+  window.zfoHasUnsavedChanges = () => changed;
   const noteChange = () => {
     if (changed || !ready) return;
     changed = true;

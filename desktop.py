@@ -1,3 +1,5 @@
+import contextlib
+import ctypes
 import json
 import os
 import re
@@ -9,6 +11,7 @@ import threading
 import time
 import urllib.request
 import webbrowser
+from ctypes import wintypes
 from pathlib import Path
 
 import error_report
@@ -16,10 +19,18 @@ import error_report
 FROZEN = hasattr(sys, "_MEIPASS")
 IS_WINDOWS = sys.platform == "win32"
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+DETACHED = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
 SERVER_START_ATTEMPTS = 300
 MAX_RECENT_FILES = 10
 ATTACHMENT_URL = re.compile(r"/(?:attachment|container-file)\?s=[A-Za-z0-9_-]+&i=\d+", re.ASCII)
 ATTACHMENT_DOWNLOAD_SECONDS = 120
+SECONDS_TO_WAIT_FOR_SERVERS = 5
+RUNNING_MUTEXES = ("BlanketaRunning", "Global\\BlanketaRunning")
+EVERYONE_FULL_ACCESS = "D:(A;;GA;;;WD)"
+SDDL_REVISION_1 = 1
+SYNCHRONIZE = 0x00100000
+ERROR_ACCESS_DENIED = 5
+UNSAVED_CHECK = "window.zfoHasUnsavedChanges?.() === true"
 APP_ACTIONS = ("about", "check-updates", "report-error", "support")
 OPEN_DIALOG_FILE_TYPES = ("Podporované soubory (*.zfo;*.fo;*.pdf;*.asice;*.sce;*.asics;*.scs)", "Všechny soubory (*.*)")
 
@@ -94,6 +105,70 @@ def write_downloaded(url, target):
             partial.replace(target)
         finally:
             partial.unlink(missing_ok=True)
+
+
+class SecurityAttributes(ctypes.Structure):
+    _fields_ = (("nLength", wintypes.DWORD), ("lpSecurityDescriptor", wintypes.LPVOID), ("bInheritHandle", wintypes.BOOL))
+
+
+def hold_running_mutexes():
+    if not IS_WINDOWS:
+        return []
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    kernel32.CreateMutexW.restype = kernel32.OpenMutexW.restype = wintypes.HANDLE
+    descriptor = wintypes.LPVOID()
+    if not advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            EVERYONE_FULL_ACCESS, SDDL_REVISION_1, ctypes.byref(descriptor), None):
+        descriptor = wintypes.LPVOID()
+    attributes = SecurityAttributes(ctypes.sizeof(SecurityAttributes), descriptor, False)
+    try:
+        handles = [hold_mutex(kernel32, attributes, name) for name in RUNNING_MUTEXES]
+    finally:
+        if descriptor:
+            kernel32.LocalFree(descriptor)
+    return [handle for handle in handles if handle]
+
+
+def hold_mutex(kernel32, attributes, name):
+    handle = kernel32.CreateMutexW(ctypes.byref(attributes), False, name)
+    if not handle and ctypes.get_last_error() == ERROR_ACCESS_DENIED:
+        handle = kernel32.OpenMutexW(SYNCHRONIZE, False, name)
+    return handle
+
+
+def relaunch_command(files):
+    program = [sys.executable] if FROZEN else [sys.executable, str(Path(__file__).resolve())]
+    return [*program, *files]
+
+
+def relaunch_without_installing(files):
+    streams = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL}
+    if IS_WINDOWS:
+        subprocess.Popen(relaunch_command(files), creationflags=DETACHED, **streams)
+    else:
+        subprocess.Popen(relaunch_command(files), start_new_session=True, **streams)
+
+
+def has_unsaved_changes(window):
+    try:
+        return window.evaluate_js(UNSAVED_CHECK) is not False
+    except Exception:
+        return True
+
+
+def wait_for_servers(servers):
+    deadline = time.monotonic() + SECONDS_TO_WAIT_FOR_SERVERS
+    for server in servers:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            server.wait(timeout=remaining)
+
+
+def refuse_restart(window, reason):
+    window.evaluate_js(f"window.zfoUpdateOffer && zfoUpdateOffer.restartRefused('{reason}')")
 
 
 def free_local_port():
@@ -192,6 +267,8 @@ class Bridge:
             self._save_file_from_dialog(window, msg)
         elif action == "saveAttachment":
             self._save_attachments(window, msg)
+        elif action == "installUpdate":
+            self._app.install_update(window)
         elif action == "close":
             window.destroy()
 
@@ -262,6 +339,8 @@ class DesktopApp:
         self.webview = webview
         self.windows = []
         self.settings_window = None
+        self.relaunch, self.relaunch_files = False, []
+        self.servers = []
 
     def _recent_files_path(self):
         import certstore
@@ -280,6 +359,7 @@ class DesktopApp:
         path = path.resolve() if path else None
         empty_windows = [form for form in self.windows if form.kind == "document" and form.path is None] if path else []
         form = FormWindow(self, path)
+        self.servers.append(form.server)
         self.windows.append(form)
         form.window.events.closed += lambda: self.windows.remove(form)
         if path:
@@ -295,6 +375,7 @@ class DesktopApp:
             self.settings_window.window.show()
             return
         self.settings_window = FormWindow(self, kind="settings")
+        self.servers.append(self.settings_window.server)
         self.settings_window.window.events.closed += self._forget_settings_window
 
     def _forget_settings_window(self):
@@ -334,6 +415,22 @@ class DesktopApp:
             return
         form, unsent = self.open_window(), [script]
         form.window.events.loaded += lambda: unsent and form.window.evaluate_js(unsent.pop())
+
+    def install_update(self, requesting):
+        import update_install
+        if update_install.others_running():
+            refuse_restart(requesting, "others")
+            return
+        unsaved = [form for form in self.windows if form.kind == "document" and has_unsaved_changes(form.window)]
+        if unsaved:
+            unsaved[0].window.restore()
+            unsaved[0].window.show()
+            refuse_restart(requesting, "unsaved")
+            return
+        self.relaunch_files = [str(form.path) for form in self.windows if form.kind == "document" and form.path]
+        self.relaunch = True
+        for form in [*self.windows, *([self.settings_window] if self.settings_window else [])]:
+            form.window.destroy()
 
     def build_menu(self):
         from webview.menu import Menu, MenuAction, MenuSeparator
@@ -382,10 +479,20 @@ class DesktopApp:
 
     def run(self, paths):
         import certstore
+        import update_install
+        with contextlib.suppress(OSError):
+            update_install.register_running()
+        self.running_mutexes = hold_running_mutexes()
         for path in paths or [None]:
             self.open_window(path)
-        self.webview.start(gui="qt" if sys.platform.startswith("linux") else None, menu=self.build_menu(), private_mode=False,
-                           storage_path=str(certstore.config_dir() / "webview"))
+        try:
+            self.webview.start(gui="qt" if sys.platform.startswith("linux") else None, menu=self.build_menu(), private_mode=False,
+                               storage_path=str(certstore.config_dir() / "webview"))
+        finally:
+            update_install.unregister_running()
+        wait_for_servers(self.servers)
+        if not update_install.start_pending_install(os.getpid(), self.relaunch, self.relaunch_files) and self.relaunch:
+            relaunch_without_installing(self.relaunch_files)
 
 
 def main(argv):

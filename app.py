@@ -35,6 +35,7 @@ import ruian
 import support_reminder
 import time_stamps
 import update_check
+import update_install
 import zfo_sign
 import zfo_verify
 from zfoengine import api as engine
@@ -852,9 +853,16 @@ class Handler(BaseHTTPRequestHandler):
             request = json.loads(body or b"{}")
         except ValueError:
             request = None
-        if request != {"action": "check"}:
+        answers = {
+            "check": lambda: update_check.check_now(APP_VERSION),
+            "download": lambda: update_install.start_download(APP_VERSION),
+            "progress": lambda: update_install.progress(APP_VERSION),
+            "cancel": lambda: update_install.cancel(APP_VERSION),
+        }
+        action = next((name for name in answers if request == {"action": name}), None)
+        if action is None:
             return self._send_response(400, b"bad request", PLAIN_TEXT)
-        return self._send_json(update_check.check_now(APP_VERSION))
+        return self._send_json(answers[action]())
 
     def _answer_support_reminder(self, body):
         try:
@@ -960,8 +968,20 @@ def exit_together_with_host_app():
         exit_when_parent_changes()
 
 
+def install_update(args):
+    if not args or re.fullmatch(r"[1-9][0-9]*", args[0]) is None:
+        return
+    host_pid, relaunch = int(args[0]), args[1:2] == ["--relaunch"]
+    files = args[2 if relaunch else 1:]
+    if not update_install.start_pending_install(host_pid, relaunch, files) and relaunch:
+        update_install.reopen_mac_app(host_pid, files)
+
+
 def main(args):
     global SINGLE_FILE, SETTINGS_ONLY
+    if args[:1] == ["--install-update"]:
+        install_update(args[1:])
+        return
     if args[:1] in (["--file"], ["--empty"], ["--settings"]):
         SETTINGS_ONLY = args[0] == "--settings"
         if args[0] == "--file":
