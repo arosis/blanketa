@@ -62,36 +62,36 @@ Volbou „Už nenabízet“ se nabídka vypne natrvalo a zapnout ji jde znovu v
 Blanketa se nejvýš jednou za 24 hodin na pozadí zeptá služby GitHub (`api.github.com`), zda vyšla novější verze. Odešle
 jen samotný dotaz bez údajů o verzi, dokumentech nebo certifikátech, GitHub tedy vidí jen vaši IP adresu, čas dotazu
 a to, že se ptá Blanketa. Když vyšla novější verze, nabídne ji při dalším otevření okna, nikdy uprostřed práce:
-„Aktualizovat“ novou verzi stáhne a nainstaluje přímo z aplikace, „Připomenout za týden“ nabídku o sedm dní odloží.
-Kde aktualizaci z aplikace nejde použít, nabídne se místo ní „Stáhnout…“: otevře v prohlížeči balíček pro váš systém
-(na Linuxu stránku vydání s postupem instalace).
+„Aktualizovat“ novou verzi stáhne a nainstaluje přímo z aplikace, „Připomenout za týden“ nabídku o sedm dní odloží. Kde
+aktualizaci z aplikace nejde použít, nabídne se místo ní „Stáhnout…“: otevře v prohlížeči balíček pro váš systém (na
+Linuxu stránku vydání s postupem instalace).
 
-Automatické kontroly vypnete v [Nastavení](#nastavení) volbou „Automaticky kontrolovat nové verze“. Volba „Zkontrolovat
-aktualizace…“ (na Macu v menu Blanketa, jinde v menu Nápověda) zjistí novou verzi i při vypnutých kontrolách a řekne,
+Automatické kontroly vypnete v [Nastavení](#nastavení) volbou „Automaticky kontrolovat nové verze“. Volba „Zkontrolovat
+aktualizace…“ (na Macu v menu Blanketa, jinde v menu Nápověda) zjistí novou verzi i při vypnutých kontrolách a řekne,
 zda máte nejnovější.
 
-### Instalace z aplikace
+### Instalace z aplikace
 
-„Aktualizovat“ stáhne novou verzi a ověří ji podle vlastního podpisu projektu: vydání obsahuje seznam kontrolních
-součtů podepsaný klíčem projektu a Blanketa nainstaluje jen soubor, který s ním sedí (podrobnosti v
-[docs/update-signing.md](docs/update-signing.md)). Verze se pak nainstaluje, až zavřete poslední okno Blankety, nebo hned
-tlačítkem „Restartovat teď“. Hned to nejde, dokud je v některém dokumentu neuložená změna nebo dokud je otevřené další
-okno či proces Blankety; Blanketa to řekne a nainstaluje se po zavření posledního okna.
+„Aktualizovat“ stáhne novou verzi a ověří ji podle vlastního podpisu projektu: vydání obsahuje seznam kontrolních
+součtů podepsaný klíčem projektu a Blanketa nainstaluje jen soubor, který s ním sedí (podrobnosti
+v [docs/update-signing.md](docs/update-signing.md)). Verze se pak nainstaluje, až zavřete poslední okno Blankety, nebo
+hned tlačítkem „Restartovat teď“. Hned to nejde, dokud je v některém dokumentu neuložená změna nebo dokud je otevřené
+další okno či proces Blankety; Blanketa to řekne a nainstaluje se po zavření posledního okna.
 
 Kde to funguje:
 
-- macOS: aplikace ve složce Aplikace. Z obrazu disku ani ze složky Stažené soubory aktualizovat nejde, Blanketa vás
-  vyzve, ať ji přesunete do Aplikací a otevřete znovu.
-- Windows: instalovaná i přenosná verze.
+- macOS: aplikace ve složce Aplikace. Z obrazu disku ani ze složky Stažené soubory aktualizovat nejde, Blanketa vás
+  vyzve, ať ji přesunete do Aplikací a otevřete znovu.
+- Windows: instalovaná i přenosná verze.
 - Linux: archiv nainstalovaný přes `install.sh`. Balíček `.deb` se aktualizuje ručně jako dosud
   (`sudo apt install ./blanketa_<verze>_amd64.deb`).
 
-Když se instalace nepodaří, zůstane předchozí verze a Blanketa to při dalším spuštění oznámí. Na Macu se po aktualizaci
-může Blanketa znovu zeptat na přístup ke klíči v Klíčence, stejně jako po ruční instalaci, protože se změní podpis
-aplikace. Verze 0.4.0 a starší se samy neaktualizují; stáhněte si novou verzi jednou ručně.
+Když se instalace nepodaří, zůstane předchozí verze a Blanketa to při dalším spuštění oznámí. Na Macu se po aktualizaci
+může Blanketa znovu zeptat na přístup ke klíči v Klíčence, stejně jako po ruční instalaci, protože se změní podpis
+aplikace. Verze 0.4.0 a starší se samy neaktualizují; stáhněte si novou verzi jednou ručně.
 
-Co se odesílá: totéž co při kontrole nové verze a navíc stažení souborů z github.com a ze serverů, ze kterých GitHub
-vydává přílohy vydání. Nic o dokumentech ani certifikátech se neposílá.
+Co se odesílá: totéž co při kontrole nové verze a navíc stažení souborů z github.com a ze serverů, ze kterých GitHub
+vydává přílohy vydání. Nic o dokumentech ani certifikátech se neposílá.
 
 ## Stažení a instalace
 
