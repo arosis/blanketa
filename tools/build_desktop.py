@@ -38,9 +38,9 @@ def pyinstaller():
             "--collect-submodules", "fontTools", "--collect-data", "tzdata", "--collect-data", "certifi", "--collect-submodules", "zfoengine",
             "--hidden-import", "app", "--hidden-import", "lxml._elementpath", "--collect-all", "webview"]
     if IS_WINDOWS:
-        args += ["--windowed", *data("winsign.ps1", ".")]
+        args += ["--windowed", *data("winsign.ps1", "."), *data("packaging/update/swap.ps1", "update")]
     else:
-        args += ["--hidden-import", "qtpy", "--collect-submodules", "PyQt6.QtWebEngineWidgets",
+        args += [*data("packaging/update/swap.sh", "update"), "--hidden-import", "qtpy", "--collect-submodules", "PyQt6.QtWebEngineWidgets",
                  "--hidden-import", "PyQt6.QtPrintSupport", "--hidden-import", "linux_print", "--copy-metadata", "pypdfium2"]
     subprocess.run([*args, str(ROOT / "desktop.py")], check=True, cwd=ROOT)
     # GPL/LGPL: licence texts and the source of the modified library travel with the app.

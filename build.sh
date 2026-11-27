@@ -30,6 +30,8 @@ cp build/blanketa "$APP/Contents/MacOS/Blanketa"
 cp macsign/macsign "$APP/Contents/Resources/macsign"
 cp assets/blanketa.icns "$APP/Contents/Resources/blanketa.icns"
 cp -R build/dist/zfo-server "$APP/Contents/Resources/zfo-server"
+mkdir -p "$APP/Contents/Resources/update"
+cp packaging/update/swap.sh "$APP/Contents/Resources/update/swap.sh"
 # GPL/LGPL: licence texts and the source of the modified library travel with the app.
 L="$APP/Contents/Resources/Licence"
 mkdir -p "$L/zfoengine"
