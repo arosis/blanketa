@@ -160,6 +160,7 @@ def start_download(current):
         found = ready(current)
         if found is not None and _same_update(found, plan):
             return _ready_progress(found)
+        plan["kept"] = _files_of_another_copy(found, plan["target"])
         holder = _other_holder()
         if holder is not None:
             return _holder_progress(holder)
@@ -170,7 +171,7 @@ def start_download(current):
             return dict(_state)
         if not is_locked:
             return _holder_progress(_other_holder() or {})
-        _remove_leftovers(plan["target"]["app"])
+        _remove_leftovers(plan)
         _cancelled.clear()
         _state.update(IDLE, state="downloading", version=plan["version"])
         _worker = threading.Thread(target=_download_in_background, args=(plan,), daemon=True)
@@ -248,6 +249,12 @@ def _is_usable_ready_record(record, current):
     )
 
 
+def _files_of_another_copy(record, destination):
+    if record is None or (record["kind"], record["app"]) == (destination["kind"], str(destination["app"])):
+        return frozenset()
+    return frozenset({updates_dir() / READY_FILE, updates_dir() / record["version"], Path(record["staged"]).parent})
+
+
 def _same_update(record, plan):
     destination = plan["target"]
     return (record["version"], record["kind"], record["app"]) == (plan["version"], destination["kind"], str(destination["app"]))
@@ -277,7 +284,8 @@ def _plan(latest):
     urls = {part: update_check._release_asset(latest, name) for part, name in names.items()}
     if not all(urls.values()):
         return None
-    return {"version": version, "platform": platform, "target": destination, "file_name": names["file"], "urls": urls}
+    return {"version": version, "platform": platform, "target": destination, "file_name": names["file"], "urls": urls,
+            "kept": frozenset()}
 
 
 def _download_in_background(plan):
@@ -453,18 +461,27 @@ def refuse_links_out_of(folder):
 
 
 def _discard(plan):
-    _remove(updates_dir() / plan["version"])
-    _remove(_staging_folder(plan["target"], plan["version"]))
-    _remove(updates_dir() / READY_FILE)
+    kept = plan["kept"]
+    download = updates_dir() / plan["version"]
+    if download in kept:
+        for name in (plan["file_name"], plan["file_name"] + ".part"):
+            _remove(download / name)
+    else:
+        _remove(download)
+    for path in (_staging_folder(plan["target"], plan["version"]), updates_dir() / READY_FILE):
+        if path not in kept:
+            _remove(path)
 
 
-def _remove_leftovers(app):
-    for folder, pattern in ((updates_dir(), _RELEASE_VERSION), (Path(app).parent, _STAGING_FOLDER)):
+def _remove_leftovers(plan):
+    app_folder = Path(plan["target"]["app"]).parent
+    for folder, pattern in ((updates_dir(), _RELEASE_VERSION), (app_folder, _STAGING_FOLDER)):
         with contextlib.suppress(OSError):
             for path in folder.iterdir():
-                if pattern.fullmatch(path.name):
+                if pattern.fullmatch(path.name) and path not in plan["kept"]:
                     _remove(path)
-    _remove(updates_dir() / READY_FILE)
+    if updates_dir() / READY_FILE not in plan["kept"]:
+        _remove(updates_dir() / READY_FILE)
 
 
 def _remove(path):

@@ -363,6 +363,36 @@ class VerifiedDownload(Downloads):
         self.assertEqual(update_install.start_download("0.4.0")["state"], "ready")
         self.assertEqual(self.release.requests, [])
 
+    def another_copys_update(self):
+        updates = update_install.updates_dir()
+        (updates / "0.5.0").mkdir(parents=True)
+        (updates / "0.5.0/Blanketa-0.5.0-setup.exe").write_bytes(b"setup")
+        other = self.folder / "elsewhere"
+        record = write_ready(updates, other, staged=other / ".blanketa-update-0.5.0/Blanketa")
+        (updates / "0.3.0").mkdir()
+        (self.apps / ".blanketa-update-0.3.0").mkdir()
+        return record, [updates / "0.5.0/Blanketa-0.5.0-setup.exe", other / ".blanketa-update-0.5.0/Blanketa"]
+
+    def test_download_keeps_the_ready_update_of_another_copy(self):
+        record, kept = self.another_copys_update()
+        self.publish()
+        self.release.files[self.archive_url()] = b"other"
+        self.assertEqual(self.download()["error"], "verify")
+        self.assertEqual(update_install.ready("0.4.0"), record)
+        self.assertEqual([path for path in kept if not path.exists()], [])
+        self.assertEqual(sorted(path.name for path in (update_install.updates_dir() / "0.5.0").iterdir()),
+                         ["Blanketa-0.5.0-setup.exe"])
+        self.assertFalse((update_install.updates_dir() / "0.3.0").exists())
+        self.assertFalse((self.apps / ".blanketa-update-0.3.0").exists())
+        self.assertFalse((self.apps / ".blanketa-update-0.5.0").exists())
+
+    def test_own_download_replaces_the_record_of_another_copy(self):
+        _, kept = self.another_copys_update()
+        self.publish("0.6.0")
+        self.assertEqual(self.download()["state"], "ready")
+        self.assertEqual(update_install.ready_for_this_app("0.4.0")["version"], "0.6.0")
+        self.assertEqual([path for path in kept if not path.exists()], [])
+
     def test_newer_release_replaces_an_older_ready_one(self):
         self.publish("0.5.0")
         self.download()
