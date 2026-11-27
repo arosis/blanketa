@@ -342,6 +342,43 @@ class Installable(WithOwnSettingsFolder):
         self.assertFalse(failed.exists())
         self.assertIsNone(self.offer(INSTALLABLE_ASSETS)["failed"])
 
+    def write_failed(self):
+        failed = update_install.updates_dir() / "failed.json"
+        failed.parent.mkdir(parents=True, exist_ok=True)
+        failed.write_text(json.dumps({"version": "0.5.0"}))
+        return failed
+
+    def test_failed_install_is_reported_despite_postponement(self):
+        self.offer(INSTALLABLE_ASSETS)
+        failed = self.write_failed()
+        self.new_window()
+        offer = update_check.offer_for_page("0.4.0", NOW)
+        self.assertEqual(offer["failed"], {"version": "0.5.0"})
+        self.assertFalse(failed.exists())
+        self.new_window()
+        self.assertIsNone(update_check.offer_for_page("0.4.0", NOW))
+
+    def test_failed_install_is_reported_without_a_newer_release(self):
+        self.store(checked_at=NOW.isoformat())
+        self.write_failed()
+        offer = update_check.offer_for_page("0.4.0", NOW)
+        self.assertEqual(offer["failed"], {"version": "0.5.0"})
+        self.assertEqual(offer["download_url"], "https://github.com/arosis/blanketa/releases/tag/v0.5.0")
+        self.assertFalse(offer["install"])
+
+    def test_failed_install_is_reported_when_checks_are_off(self):
+        update_check.set_enabled(False)
+        failed = self.write_failed()
+        self.new_window()
+        self.assertEqual(update_check.offer_for_page("0.4.0", NOW)["failed"], {"version": "0.5.0"})
+        self.assertFalse(failed.exists())
+
+    def test_failed_note_waits_for_the_first_render_of_a_window(self):
+        failed = self.write_failed()
+        update_check._window_considered = True
+        self.assertIsNone(update_check.offer_for_page("0.4.0", NOW))
+        self.assertTrue(failed.exists())
+
     def test_malformed_failure_note_is_ignored_and_deleted(self):
         failed = update_install.updates_dir() / "failed.json"
         failed.parent.mkdir(parents=True, exist_ok=True)

@@ -55,10 +55,14 @@ class Mac(WithPatches):
     def test_dmg_and_translocated_app_give_the_move_reason(self):
         for folder in ("/Volumes/Blanketa", "/private/var/folders/x/AppTranslocation/ABC/d"):
             with self.subTest(folder=folder):
-                for patcher in running(self.app_executable(folder), mac=True):
-                    self.addCleanup(patcher.stop)
+                self.run_as(self.app_executable(folder), mac=True)
                 self.assertIsNone(update_install.target())
                 self.assertEqual(update_install.not_replaceable_reason(), "move-to-applications")
+
+    def test_shallow_path_is_not_replaceable(self):
+        self.run_as("/blanketa", mac=True)
+        self.assertIsNone(update_install.target())
+        self.assertEqual(update_install.not_replaceable_reason(), "move-to-applications")
 
     def test_unwritable_parent_gives_the_move_reason(self):
         self.run_as(self.app_executable("/Applications"), mac=True, writable=False)

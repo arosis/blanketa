@@ -17,7 +17,10 @@ def updates_dir():
 
 
 def _mac_app():
-    app = Path(sys.executable).parents[3]
+    parents = Path(sys.executable).parents
+    if len(parents) < 4:
+        return None, False
+    app = parents[3]
     path = str(app)
     replaceable = (
         app.suffix == ".app"

@@ -126,18 +126,22 @@ def _can_install(latest, target):
     return all(_release_asset(latest, name.format(version=version)) for name in names)
 
 
-def _failed_install():
-    path = update_install.updates_dir() / FAILED_FILE
+def _read_failed():
     try:
-        failed = json.loads(path.read_text(encoding="utf-8"))
+        failed = json.loads((update_install.updates_dir() / FAILED_FILE).read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        failed = None
-    try:
-        path.unlink()
-    except OSError:
-        pass
+        return None
     version = failed.get("version") if isinstance(failed, dict) else None
     return {"version": version} if version_tuple(version) is not None else None
+
+
+def _failed_install():
+    failed = _read_failed()
+    try:
+        (update_install.updates_dir() / FAILED_FILE).unlink()
+    except OSError:
+        pass
+    return failed
 
 
 def _offer(latest, current):
@@ -213,13 +217,16 @@ def offer_for_page(current, now=None):
     try:
         now = now or datetime.now()
         stored = _stored()
+        failed = _read_failed() if first_render else None
         if stored.get("disabled") is True:
-            return None
+            return _offer({"version": failed["version"], "assets": {}}, current) if failed else None
         if _stale(stored, now):
             refresh_in_background()
         latest = _latest(stored)
-        if not first_render or latest is None or not _is_newer(latest, current) or _postponed(stored, latest["version"], now):
+        if not first_render:
             return None
+        if latest is None or not _is_newer(latest, current) or _postponed(stored, latest["version"], now):
+            return _offer({"version": failed["version"], "assets": {}}, current) if failed else None
         _postpone(stored, latest["version"], now)
         return _offer(latest, current)
     except Exception:
