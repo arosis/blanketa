@@ -41,7 +41,11 @@ for file do
   if is_absolute "$file"; then set -- "$@" "$file"; fi
 done
 
-trap 'rm -f -- "$updates/install.lock"' EXIT
+remove_install_files() {
+  rm -f -- "$updates/install.lock"
+  if [ "$(dirname -- "$0")" = "$updates" ]; then rm -f -- "$0"; fi
+}
+trap remove_install_files EXIT
 
 old="$target.old-$version"
 if [ "$(uname)" = Darwin ]; then
