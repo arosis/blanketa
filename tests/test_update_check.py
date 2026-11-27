@@ -828,6 +828,17 @@ class UpdateFlow(unittest.TestCase):
         self.assertEqual(result["after"], "Stahuji Blanketu 0.5.0… 31\u00a0%")
         self.assertEqual((result["open"], result["pollers"]), (1, 1))
 
+    def test_joined_download_without_a_release_version_checks_instead(self):
+        for version in ("null", "'0.5.0<img src=x>'", "'0.5'", "'0.5.0\\n1'", "5", "['0.5.0']"):
+            with self.subTest(version=version):
+                result = self.run_flow("""
+                    answers.push({state: 'downloading', version: %s, percent: 30}, {status: 'current'});
+                    await zfoUpdateOffer.report();
+                    console.log(JSON.stringify({posted, message: lastDialog().texts['[data-message]'].textContent}));
+                """ % version)
+                self.assertEqual(result["posted"], [{"action": "progress"}, {"action": "check"}])
+                self.assertEqual(result["message"], "Máte nejnovější verzi.")
+
     def test_manual_check_finding_a_ready_update_opens_the_ready_dialog(self):
         result = self.run_flow("""
             answers.push({state: 'ready', version: '0.5.0', percent: 100});

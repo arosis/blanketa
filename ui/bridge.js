@@ -445,9 +445,10 @@ window.zfoUpdateOffer = (() => {
       return null;
     }
   };
+  const RELEASE_VERSION = /^\d+\.\d+\.\d+$/;
   const report = async () => {
     const underway = await running();
-    if (underway) {
+    if (underway && typeof underway.version === 'string' && RELEASE_VERSION.test(underway.version)) {
       const version = underway.version;
       const offer = {version, download_url: `https://github.com/arosis/blanketa/releases/tag/v${version}`, failed: null, install: true};
       open(offer, {name: underway.state === 'ready' ? 'ready' : 'progress', percent: underway.percent});
