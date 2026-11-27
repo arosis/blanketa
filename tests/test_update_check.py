@@ -23,6 +23,7 @@ import app
 import crash_report
 import isds_message
 import update_check
+import update_install
 
 NOW = datetime(2026, 11, 24, 10, 0)
 RELEASE_DOWNLOADS = "https://github.com/arosis/blanketa/releases/download/v0.5.0/"
@@ -269,6 +270,91 @@ class DownloadUrl(WithOwnSettingsFolder):
 
     def test_missing_asset_falls_back_to_release_page(self):
         self.assertEqual(self.offer({})["download_url"], "https://github.com/arosis/blanketa/releases/tag/v0.5.0")
+
+
+MANIFEST = "blanketa-0.5.0-update.json"
+INSTALLABLE_ASSETS = {**ASSETS, MANIFEST: RELEASE_DOWNLOADS + MANIFEST, MANIFEST + ".sig": RELEASE_DOWNLOADS + MANIFEST + ".sig"}
+MAC_TARGET = {"kind": "mac-app", "app": Path("/Applications/Blanketa.app"), "all_users": False}
+
+
+class Installable(WithOwnSettingsFolder):
+    def offer(self, assets, target=MAC_TARGET, reason=None):
+        self.new_window()
+        self.store(latest={"version": "0.5.0", "assets": assets}, checked_at=NOW.isoformat())
+        with mock.patch.object(update_install, "target", return_value=target), \
+                mock.patch.object(update_install, "not_replaceable_reason", return_value=reason):
+            return update_check.offer_for_page("0.4.0", NOW)
+
+    def test_installable_offer(self):
+        offer = self.offer(INSTALLABLE_ASSETS)
+        self.assertTrue(offer["install"])
+        self.assertIsNone(offer["reason"])
+        self.assertIsNone(offer["failed"])
+        self.assertEqual(offer["download_url"], RELEASE_DOWNLOADS + "Blanketa-0.5.0-macos.dmg")
+
+    def test_release_without_manifest_offers_download(self):
+        for assets in (ASSETS, {**ASSETS, MANIFEST: INSTALLABLE_ASSETS[MANIFEST]}, {**ASSETS, MANIFEST + ".sig": INSTALLABLE_ASSETS[MANIFEST + ".sig"]}):
+            with self.subTest(assets=sorted(assets)):
+                offer = self.offer(assets)
+                self.assertFalse(offer["install"])
+                self.assertEqual(offer["download_url"], RELEASE_DOWNLOADS + "Blanketa-0.5.0-macos.dmg")
+
+    def test_manifest_url_with_other_path_offers_download(self):
+        for name in (MANIFEST, MANIFEST + ".sig"):
+            for url in (
+                "https://example.com/" + name,
+                "https://github.com/arosis/blanketa/releases/download/v0.4.0/" + name,
+                RELEASE_DOWNLOADS + name + "?x=1",
+                RELEASE_DOWNLOADS + "../" + name,
+            ):
+                with self.subTest(name=name, url=url):
+                    self.assertFalse(self.offer({**INSTALLABLE_ASSETS, name: url})["install"])
+
+    def test_missing_or_foreign_installable_file_offers_download(self):
+        archive = "Blanketa-0.5.0-macos.zip"
+        without = {name: url for name, url in INSTALLABLE_ASSETS.items() if name != archive}
+        self.assertFalse(self.offer(without)["install"])
+        self.assertFalse(self.offer({**INSTALLABLE_ASSETS, archive: "https://example.com/" + archive})["install"])
+
+    def test_each_kind_needs_its_own_file(self):
+        kinds = {
+            "windows-setup": "Blanketa-0.5.0-setup.exe",
+            "windows-portable": "Blanketa-0.5.0-windows-x64.zip",
+            "linux-folder": "blanketa-0.5.0-linux-amd64.tar.gz",
+        }
+        for kind, name in kinds.items():
+            target = {"kind": kind, "app": Path("/x"), "all_users": False}
+            with self.subTest(kind=kind):
+                self.assertTrue(self.offer(INSTALLABLE_ASSETS, target)["install"])
+                without = {n: u for n, u in INSTALLABLE_ASSETS.items() if n != name}
+                self.assertFalse(self.offer(without, target)["install"])
+
+    def test_not_replaceable_copy_carries_the_reason(self):
+        offer = self.offer(INSTALLABLE_ASSETS, None, "move-to-applications")
+        self.assertFalse(offer["install"])
+        self.assertEqual(offer["reason"], "move-to-applications")
+
+    def test_failed_install_is_reported_once(self):
+        failed = update_install.updates_dir() / "failed.json"
+        failed.parent.mkdir(parents=True, exist_ok=True)
+        failed.write_text(json.dumps({"version": "0.5.0"}))
+        self.assertEqual(self.offer(INSTALLABLE_ASSETS)["failed"], {"version": "0.5.0"})
+        self.assertFalse(failed.exists())
+        self.assertIsNone(self.offer(INSTALLABLE_ASSETS)["failed"])
+
+    def test_malformed_failure_note_is_ignored_and_deleted(self):
+        failed = update_install.updates_dir() / "failed.json"
+        failed.parent.mkdir(parents=True, exist_ok=True)
+        for content in ("nesmysl", "[]", '{"version": 5}', '{"version": "x"}', "{}"):
+            with self.subTest(content=content):
+                failed.write_text(content)
+                self.assertIsNone(self.offer(INSTALLABLE_ASSETS)["failed"])
+                self.assertFalse(failed.exists())
+
+    def test_source_run_cannot_install(self):
+        self.new_window()
+        self.store(latest={"version": "0.5.0", "assets": INSTALLABLE_ASSETS}, checked_at=NOW.isoformat())
+        self.assertFalse(update_check.offer_for_page("0.4.0", NOW)["install"])
 
 
 class ManualCheck(WithOwnSettingsFolder):
