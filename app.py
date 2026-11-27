@@ -35,6 +35,7 @@ import ruian
 import support_reminder
 import time_stamps
 import update_check
+import update_install
 import zfo_sign
 import zfo_verify
 from zfoengine import api as engine
@@ -852,9 +853,16 @@ class Handler(BaseHTTPRequestHandler):
             request = json.loads(body or b"{}")
         except ValueError:
             request = None
-        if request != {"action": "check"}:
+        answers = {
+            "check": lambda: update_check.check_now(APP_VERSION),
+            "download": lambda: update_install.start_download(APP_VERSION),
+            "progress": update_install.progress,
+            "cancel": update_install.cancel,
+        }
+        action = next((name for name in answers if request == {"action": name}), None)
+        if action is None:
             return self._send_response(400, b"bad request", PLAIN_TEXT)
-        return self._send_json(update_check.check_now(APP_VERSION))
+        return self._send_json(answers[action]())
 
     def _answer_support_reminder(self, body):
         try:
