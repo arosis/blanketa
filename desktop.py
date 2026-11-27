@@ -21,6 +21,7 @@ SERVER_START_ATTEMPTS = 300
 MAX_RECENT_FILES = 10
 ATTACHMENT_URL = re.compile(r"/(?:attachment|container-file)\?s=[A-Za-z0-9_-]+&i=\d+", re.ASCII)
 ATTACHMENT_DOWNLOAD_SECONDS = 120
+SECONDS_TO_WAIT_FOR_SERVERS = 5
 RUNNING_MUTEX = "BlanketaRunning"
 UNSAVED_CHECK = "window.zfoHasUnsavedChanges?.() === true"
 APP_ACTIONS = ("about", "check-updates", "report-error", "support")
@@ -109,8 +110,18 @@ def hold_running_mutex():
 def has_unsaved_changes(window):
     try:
         return window.evaluate_js(UNSAVED_CHECK) is not False
-    except Exception:  # a page that cannot answer may hold unsaved work
+    except Exception:
         return True
+
+
+def wait_for_servers(servers):
+    deadline = time.monotonic() + SECONDS_TO_WAIT_FOR_SERVERS
+    for server in servers:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            server.wait(timeout=remaining)
 
 
 def refuse_restart(window, reason):
@@ -286,6 +297,7 @@ class DesktopApp:
         self.windows = []
         self.settings_window = None
         self.relaunch, self.relaunch_files = False, []
+        self.servers = []
 
     def _recent_files_path(self):
         import certstore
@@ -304,6 +316,7 @@ class DesktopApp:
         path = path.resolve() if path else None
         empty_windows = [form for form in self.windows if form.kind == "document" and form.path is None] if path else []
         form = FormWindow(self, path)
+        self.servers.append(form.server)
         self.windows.append(form)
         form.window.events.closed += lambda: self.windows.remove(form)
         if path:
@@ -319,6 +332,7 @@ class DesktopApp:
             self.settings_window.window.show()
             return
         self.settings_window = FormWindow(self, kind="settings")
+        self.servers.append(self.settings_window.server)
         self.settings_window.window.events.closed += self._forget_settings_window
 
     def _forget_settings_window(self):
@@ -433,6 +447,7 @@ class DesktopApp:
                                storage_path=str(certstore.config_dir() / "webview"))
         finally:
             update_install.unregister_running()
+        wait_for_servers(self.servers)
         update_install.start_pending_install(os.getpid(), self.relaunch, self.relaunch_files)
 
 

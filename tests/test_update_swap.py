@@ -62,6 +62,7 @@ class Installation(unittest.TestCase):
         (self.updates / VERSION).mkdir(parents=True)
         (self.updates / VERSION / "download").write_text("archive", encoding="utf-8")
         (self.updates / "ready.json").write_text(json.dumps({"version": VERSION}), encoding="utf-8")
+        (self.updates / "install.lock").write_text(json.dumps({"pid": 1}), encoding="utf-8")
         self.helper = self.updates / self.script.name
         shutil.copy(self.script, self.helper)
         self.record = self.root / "relaunched.txt"
@@ -89,6 +90,13 @@ class Installation(unittest.TestCase):
 
 @unittest.skipIf(sys.platform == "win32", "swap.sh runs on macOS and Linux")
 class SwapScript(Installation):
+    def test_install_lock_is_removed_after_success_and_failure(self):
+        self.assertEqual(self.swap(), 0)
+        self.assertFalse((self.updates / "install.lock").exists())
+        (self.updates / "install.lock").write_text("{}", encoding="utf-8")
+        self.assertNotEqual(self.swap(staged=self.root / "chybi"), 0)
+        self.assertFalse((self.updates / "install.lock").exists())
+
     def start(self, pid, relaunch=0, files=(), staged=None):
         arguments = [str(pid), str(staged or self.staged), str(self.target), str(self.updates), VERSION, str(relaunch),
                      *files]
@@ -249,6 +257,13 @@ class WindowsScript(Installation):
 
 @unittest.skipUnless(IS_WINDOWS_WITH_POWERSHELL, "swap.ps1 runs on Windows")
 class PortableSwapOnWindows(WindowsScript):
+    def test_install_lock_is_removed_after_success_and_failure(self):
+        self.assertEqual(self.swap(), 0)
+        self.assertFalse((self.updates / "install.lock").exists())
+        (self.updates / "install.lock").write_text("{}", encoding="utf-8")
+        self.assertNotEqual(self.swap(staged=self.root / "chybi"), 0)
+        self.assertFalse((self.updates / "install.lock").exists())
+
     def test_swap_replaces_after_the_process_exits(self):
         running = waiting_process()
         script = self.start(running.pid)

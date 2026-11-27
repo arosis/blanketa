@@ -34,6 +34,7 @@ OTHER_STAGING_FOLDER = ".blanketa-update-{version}"
 
 READY_FILE = "ready.json"
 LOCK_FILE = "download.lock"
+INSTALL_LOCK_FILE = "install.lock"
 RUNNING_FOLDER = "running"
 HELPER_SCRIPTS = {"mac-app": "swap.sh", "linux-folder": "swap.sh", "windows-setup": "swap.ps1", "windows-portable": "swap.ps1"}
 DETACHED_PROCESS = 0x00000008
@@ -266,9 +267,9 @@ def _download_in_background(plan):
     try:
         outcome = _outcome(plan)
     finally:
-        _release_lock()
         with _guard:
             _state.update(outcome)
+        _release_lock()
 
 
 def _outcome(plan):
@@ -502,14 +503,26 @@ def start_pending_install(host_pid, relaunch, files):
         record = ready(running_version())
     except OSError:
         return False
-    if record is None or not _matches_this_app(record) or _running_besides({os.getpid(), host_pid}):
+    if record is None or not _matches_this_app(record):
+        return False
+    lock = updates_dir() / INSTALL_LOCK_FILE
+    try:
+        if not _claim(INSTALL_LOCK_FILE, json.dumps({"pid": host_pid})):
+            return False
+    except OSError:
+        return False
+    if _running_besides({os.getpid(), host_pid}):
+        _remove(lock)
         return False
     try:
         script = updates_dir() / HELPER_SCRIPTS[record["kind"]]
         shutil.copyfile(helper_script(record["kind"]), script)
-        _start_detached(_install_command(record, script, host_pid, relaunch, files))
+        swap = _start_detached(_install_command(record, script, host_pid, relaunch, files))
     except OSError:
+        _remove(lock)
         return False
+    with contextlib.suppress(OSError):
+        certstore.replace_file(lock, json.dumps({"pid": swap.pid}))
     return True
 
 
@@ -523,6 +536,9 @@ def _matches_this_app(record):
             return False
     else:
         allowed = Path(record["app"]).parent
+        expected = _staging_folder(destination, record["version"]) / APP_FOLDERS[record["kind"]]
+        if Path(record["staged"]) != expected:
+            return False
     staged = Path(os.path.realpath(record["staged"]))
     return Path(os.path.realpath(allowed)) in staged.parents
 
@@ -548,9 +564,8 @@ def _install_command(record, script, host_pid, relaunch, files):
 def _start_detached(command):
     streams = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "cwd": updates_dir()}
     if certstore.IS_WINDOWS:
-        subprocess.Popen(command, creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP, **streams)
-    else:
-        subprocess.Popen(command, start_new_session=True, **streams)
+        return subprocess.Popen(command, creationflags=DETACHED_PROCESS | CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP, **streams)
+    return subprocess.Popen(command, start_new_session=True, **streams)
 
 
 def _lock_text(version, percent):
@@ -558,24 +573,28 @@ def _lock_text(version, percent):
 
 
 def _take_lock(version):
-    lock = updates_dir() / LOCK_FILE
+    return _claim(LOCK_FILE, _lock_text(version, None))
+
+
+def _claim(name, text):
+    lock = updates_dir() / name
     lock.parent.mkdir(parents=True, exist_ok=True)
     for _ in range(2):
         try:
             descriptor = os.open(lock, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         except FileExistsError:
-            if _other_holder() is not None:
+            if _other_holder(name) is not None:
                 return False
             _remove(lock)
             continue
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-            stream.write(_lock_text(version, None))
+            stream.write(text)
         return True
     return False
 
 
-def _read_holder():
-    lock = updates_dir() / LOCK_FILE
+def _read_holder(name=LOCK_FILE):
+    lock = updates_dir() / name
     try:
         content = lock.read_bytes()
         age = time.time() - lock.stat().st_mtime
@@ -595,8 +614,8 @@ def _read_holder():
     return (holder if is_valid else None), age
 
 
-def _other_holder():
-    holder, age = _read_holder()
+def _other_holder(name=LOCK_FILE):
+    holder, age = _read_holder(name)
     if holder is None:
         is_being_written = age is not None and age < SECONDS_TO_WRITE_A_LOCK
         return dict(LOCK_BEING_WRITTEN) if is_being_written else None

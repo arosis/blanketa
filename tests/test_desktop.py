@@ -250,6 +250,7 @@ class UpdateInstall(unittest.TestCase):
         self.documents = [self.form("/doklady/a.zfo"), self.form(None), self.form("/doklady/b.pdf")]
         self.app.windows = list(self.documents)
         self.app.settings_window = self.form(None, kind="settings")
+        self.app.servers = [form.server for form in [*self.documents, self.app.settings_window]]
         self.others = mock.patch.object(update_install, "others_running", return_value=False)
         self.others_running = self.others.start()
         self.addCleanup(self.others.stop)
@@ -306,13 +307,27 @@ class UpdateInstall(unittest.TestCase):
                 mock.patch.object(update_install, "start_pending_install", calls.install), \
                 mock.patch.object(self.app, "open_window"):
             self.app.webview.start.side_effect = calls.start
+            for server in self.app.servers:
+                server.wait.side_effect = lambda timeout, server=server: calls.wait(server)
             self.app.run([])
-            self.assertEqual([name for name, *_ in calls.mock_calls], ["register", "start", "unregister", "install"])
+            self.assertEqual([name for name, *_ in calls.mock_calls][:3], ["register", "start", "unregister"])
+            self.assertEqual([name for name, *_ in calls.mock_calls][3:], ["wait"] * 4 + ["install"])
             calls.install.assert_called_once_with(os.getpid(), False, [])
             calls.reset_mock()
             self.app.webview.start.side_effect = lambda **_: self.restart_from(self.documents[0])
             self.app.run([])
             calls.install.assert_called_once_with(os.getpid(), True, [str(Path("/doklady/a.zfo")), str(Path("/doklady/b.pdf"))])
+
+    def test_waiting_for_the_servers_is_bounded(self):
+        clock = iter(range(0, 100, 3))
+        servers = [mock.Mock() for _ in range(4)]
+        for server in servers:
+            server.wait.side_effect = desktop.subprocess.TimeoutExpired("zfo-server", 1)
+        with mock.patch.object(desktop.time, "monotonic", lambda: next(clock)):
+            desktop.wait_for_servers(servers)
+        timeouts = [server.wait.call_args.kwargs["timeout"] for server in servers if server.wait.called]
+        self.assertLessEqual(sum(timeouts), desktop.SECONDS_TO_WAIT_FOR_SERVERS)
+        self.assertTrue(all(timeout > 0 for timeout in timeouts))
 
     def test_windows_holds_the_running_mutex(self):
         kernel32 = mock.Mock()

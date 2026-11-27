@@ -806,6 +806,12 @@ class Route(Downloads):
 
 
 class UnexpectedFailure(Downloads):
+    def test_failing_lock_release_still_ends_the_download(self):
+        self.publish()
+        with mock.patch.object(update_install, "_release_lock", side_effect=OSError), \
+                mock.patch.object(threading, "excepthook"):
+            self.assertEqual(self.download()["state"], "ready")
+
     def test_unexpected_failure_releases_the_lock(self):
         self.publish()
         with mock.patch.object(update_install, "_outcome", side_effect=RuntimeError), \
@@ -834,6 +840,7 @@ class PendingInstall(Downloads):
         ):
             self.launched = patcher.start()
             self.addCleanup(patcher.stop)
+        self.launched.return_value.pid = self.dead_pid
 
     def ready_for(self, kind, sha256=None, staged=None):
         self.kind = kind
@@ -872,6 +879,29 @@ class PendingInstall(Downloads):
         (self.updates / "running" / str(os.getppid())).unlink()
         self.assertTrue(self.start())
 
+    def test_only_one_exiting_process_starts_the_install(self):
+        self.ready_for("linux-folder")
+        self.launched.return_value.pid = os.getppid()
+        self.assertTrue(self.start())
+        self.assertEqual(json.loads((self.updates / "install.lock").read_text()), {"pid": os.getppid()})
+        self.assertFalse(update_install.start_pending_install(os.getpid(), False, []))
+        self.launched.assert_called_once()
+
+    def test_stale_install_lock_is_taken_over(self):
+        self.ready_for("linux-folder")
+        (self.updates / "install.lock").write_text(json.dumps({"pid": self.dead_pid}))
+        self.assertTrue(self.start())
+
+    def test_install_lock_is_released_when_nothing_starts(self):
+        self.ready_for("linux-folder")
+        self.running_entry(os.getppid())
+        self.assertFalse(self.start())
+        self.assertFalse((self.updates / "install.lock").exists())
+        (self.updates / "running" / str(os.getppid())).unlink()
+        self.launched.side_effect = OSError
+        self.assertFalse(self.start())
+        self.assertFalse((self.updates / "install.lock").exists())
+
     def test_dead_process_entries_are_ignored(self):
         self.ready_for("linux-folder")
         self.running_entry(self.dead_pid)
@@ -892,6 +922,11 @@ class PendingInstall(Downloads):
             ("linux-folder", elsewhere / "Blanketa"),
             ("linux-folder", self.apps / ".blanketa-update-0.5.0/../../elsewhere/Blanketa"),
             ("linux-folder", self.apps),
+            ("linux-folder", self.apps / ".blanketa-update-0.5.0/Jina"),
+            ("linux-folder", self.apps / "jina/Blanketa"),
+            ("linux-folder", self.apps / ".blanketa-update-0.4.0/Blanketa"),
+            ("linux-folder", self.apps / ".blanketa-update-0.5.0/Blanketa/Blanketa"),
+            ("mac-app", self.apps / ".blanketa-update-0.5.0/Blanketa.app"),
             ("windows-setup", elsewhere / "Blanketa-0.5.0-setup.exe"),
             ("windows-setup", self.apps / "Blanketa-0.5.0-setup.exe"),
         ):
@@ -930,6 +965,7 @@ class PendingInstall(Downloads):
 
     def test_windows_script_arguments(self):
         with mock.patch.object(update_install.certstore, "IS_WINDOWS", True), \
+                mock.patch.object(update_install, "process_alive", return_value=False), \
                 mock.patch.dict(os.environ, {"SystemRoot": "/windows"}):
             record = self.ready_for("windows-setup")
             self.assertTrue(self.start(relaunch=True, files=["/doklady/a.zfo"]))

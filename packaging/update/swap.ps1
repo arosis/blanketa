@@ -50,6 +50,10 @@ function Start-Blanketa {
     }
 }
 
+function Remove-InstallLock {
+    Remove-Item -LiteralPath (Join-Path $UpdatesDir 'install.lock') -Force -ErrorAction SilentlyContinue
+}
+
 function Write-Failure {
     try {
         [System.IO.File]::WriteAllText((Join-Path $UpdatesDir 'failed.json'), "{`"version`": `"$Version`"}`n", $Utf8WithoutBom)
@@ -60,6 +64,7 @@ function Write-Failure {
 function Exit-Failed {
     Write-Failure
     Start-Blanketa
+    Remove-InstallLock
     exit 1
 }
 
@@ -67,6 +72,7 @@ function Exit-Succeeded {
     Remove-Item -LiteralPath (Join-Path $UpdatesDir $Version) -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath (Join-Path $UpdatesDir 'ready.json') -Force -ErrorAction SilentlyContinue
     Start-Blanketa
+    Remove-InstallLock
     exit 0
 }
 
@@ -75,6 +81,7 @@ function Wait-ForExit {
     while (Get-Process -Id $WaitPid -ErrorAction SilentlyContinue) {
         if ((Get-Date) -gt $Deadline) {
             Write-Failure
+            Remove-InstallLock
             exit 1
         }
         Start-Sleep -Milliseconds $MillisecondsPerPoll

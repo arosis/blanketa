@@ -41,6 +41,8 @@ for file do
   if is_absolute "$file"; then set -- "$@" "$file"; fi
 done
 
+trap 'rm -f -- "$updates/install.lock"' EXIT
+
 old="$target.old-$version"
 if [ "$(uname)" = Darwin ]; then
   program="Contents/MacOS/Blanketa"
