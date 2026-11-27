@@ -211,12 +211,25 @@ def ready(current):
         record = None
     if not _is_usable_ready_record(record, current):
         _remove(path)
+        discard_version(record.get("version") if isinstance(record, dict) else None)
         return None
     return record
 
 
+def discard_version(version):
+    if not isinstance(version, str) or _RELEASE_VERSION.fullmatch(version) is None:
+        return
+    _remove(updates_dir() / version)
+    destination = target()
+    if destination is None:
+        return
+    staging = _staging_folder(destination, version)
+    if _STAGING_FOLDER.fullmatch(staging.name):
+        _remove(staging)
+
+
 def _is_usable_ready_record(record, current):
-    if not isinstance(record, dict) or record.get("kind") not in KIND_FILES:
+    if not isinstance(record, dict) or not isinstance(record.get("kind"), str) or record["kind"] not in KIND_FILES:
         return False
     fields = READY_FIELDS | {"sha256"} if record["kind"] == "windows-setup" else READY_FIELDS
     version, running = update_check.version_tuple(record.get("version")), update_check.version_tuple(current)

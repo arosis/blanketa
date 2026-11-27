@@ -274,11 +274,15 @@ class DownloadUrl(WithOwnSettingsFolder):
 
 MANIFEST = "blanketa-0.5.0-update.json"
 INSTALLABLE_ASSETS = {**ASSETS, MANIFEST: RELEASE_DOWNLOADS + MANIFEST, MANIFEST + ".sig": RELEASE_DOWNLOADS + MANIFEST + ".sig"}
-MAC_TARGET = {"kind": "mac-app", "app": Path("/Applications/Blanketa.app"), "all_users": False}
-
-
 class Installable(WithOwnSettingsFolder):
-    def offer(self, assets, target=MAC_TARGET, reason=None):
+    def setUp(self):
+        super().setUp()
+        self.applications = self.folder / "Applications"
+        self.applications.mkdir()
+        self.mac_target = {"kind": "mac-app", "app": self.applications / "Blanketa.app", "all_users": False}
+
+    def offer(self, assets, target="mac", reason=None):
+        target = self.mac_target if target == "mac" else target
         self.new_window()
         self.store(latest={"version": "0.5.0", "assets": assets}, checked_at=NOW.isoformat())
         with mock.patch.object(update_install, "target", return_value=target), \
@@ -355,6 +359,18 @@ class Installable(WithOwnSettingsFolder):
         failed.parent.mkdir(parents=True, exist_ok=True)
         failed.write_text(json.dumps({"version": "0.5.0"}))
         return failed
+
+    def test_reported_failure_removes_its_staging_and_download_only(self):
+        updates = update_install.updates_dir()
+        removed = [updates / "0.5.0", self.applications / ".Blanketa-update-0.5.0"]
+        kept = [updates / "0.6.0", self.applications / ".Blanketa-update-0.6.0", self.applications / "Blanketa.app",
+                self.applications / "Other.app", updates / "running"]
+        for folder in removed + kept:
+            (folder / "inside").mkdir(parents=True)
+        self.write_failed()
+        self.assertEqual(self.offer(INSTALLABLE_ASSETS)["failed"], {"version": "0.5.0"})
+        self.assertEqual([folder for folder in removed if folder.exists()], [])
+        self.assertEqual([folder for folder in kept if not (folder / "inside").is_dir()], [])
 
     def test_failed_install_is_reported_despite_postponement(self):
         self.offer(INSTALLABLE_ASSETS)

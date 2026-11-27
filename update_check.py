@@ -141,6 +141,8 @@ def _failed_install():
         (update_install.updates_dir() / FAILED_FILE).unlink()
     except OSError:
         pass
+    if failed is not None:
+        update_install.discard_version(failed["version"])
     return failed
 
 

@@ -584,6 +584,41 @@ class ReadyRecord(Downloads):
         self.assertIsNone(update_install.ready("0.4.0"))
         self.assertFalse((updates / "ready.json").exists())
 
+    def test_record_with_a_kind_that_is_not_text_is_dropped(self):
+        updates = update_install.updates_dir()
+        updates.mkdir(parents=True)
+        for kind in (["linux-folder"], {"linux-folder": 1}, 7, None):
+            with self.subTest(kind=kind):
+                record = write_ready(updates, self.apps)
+                (updates / "ready.json").write_text(json.dumps({**record, "kind": kind}))
+                self.assertIsNone(update_install.ready("0.4.0"))
+                self.assertFalse((updates / "ready.json").exists())
+
+    def test_dropped_record_removes_its_staging_and_download_only(self):
+        updates = update_install.updates_dir()
+        removed = [updates / "0.5.0", self.apps / ".blanketa-update-0.5.0"]
+        kept = [updates / "0.6.0", self.apps / ".blanketa-update-0.6.0", self.apps / "blanketa", self.apps / "other",
+                updates / "running"]
+        for folder in removed + kept:
+            (folder / "inside").mkdir(parents=True)
+        write_ready(updates, self.apps)
+        self.assertIsNone(update_install.ready("0.5.0"))
+        self.assertEqual([folder for folder in removed if folder.exists()], [])
+        self.assertEqual([folder for folder in kept if not (folder / "inside").is_dir()], [])
+
+    def test_dropped_record_with_a_strange_version_removes_nothing_else(self):
+        updates = update_install.updates_dir()
+        kept = [updates / "inside", self.apps / "blanketa", self.folder / "config"]
+        for folder in kept:
+            folder.mkdir(parents=True, exist_ok=True)
+        for version in ("..", "../../apps", "0.5", "", "0.5.0/../..", ["0.5.0"]):
+            with self.subTest(version=version):
+                record = write_ready(updates, self.apps)
+                (updates / "ready.json").write_text(json.dumps({**record, "version": version}))
+                self.assertIsNone(update_install.ready("0.4.0"))
+                self.assertEqual([folder for folder in kept if not folder.is_dir()], [])
+                self.assertTrue((self.apps / ".blanketa-update-0.5.0/Blanketa").is_dir())
+
     def test_setup_record_needs_its_digest(self):
         updates = update_install.updates_dir()
         updates.mkdir(parents=True)
