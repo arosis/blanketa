@@ -62,12 +62,36 @@ Volbou „Už nenabízet“ se nabídka vypne natrvalo a zapnout ji jde znovu v
 Blanketa se nejvýš jednou za 24 hodin na pozadí zeptá služby GitHub (`api.github.com`), zda vyšla novější verze. Odešle
 jen samotný dotaz bez údajů o verzi, dokumentech nebo certifikátech, GitHub tedy vidí jen vaši IP adresu, čas dotazu
 a to, že se ptá Blanketa. Když vyšla novější verze, nabídne ji při dalším otevření okna, nikdy uprostřed práce:
-„Stáhnout…“ otevře v prohlížeči balíček pro váš systém (na Linuxu stránku vydání s postupem instalace), „Připomenout za
-týden“ nabídku o sedm dní odloží.
+„Aktualizovat“ novou verzi stáhne a nainstaluje přímo z aplikace, „Připomenout za týden“ nabídku o sedm dní odloží.
+Kde aktualizaci z aplikace nejde použít, nabídne se místo ní „Stáhnout…“: otevře v prohlížeči balíček pro váš systém
+(na Linuxu stránku vydání s postupem instalace).
 
-Automatické kontroly vypnete v [Nastavení](#nastavení) volbou „Automaticky kontrolovat nové verze“. Volba „Zkontrolovat
-aktualizace…“ (na Macu v menu Blanketa, jinde v menu Nápověda) zjistí novou verzi i při vypnutých kontrolách a řekne,
-zda máte nejnovější. Instalace zůstává ruční, Blanketa se sama nepřepíše.
+Automatické kontroly vypnete v [Nastavení](#nastavení) volbou „Automaticky kontrolovat nové verze“. Volba „Zkontrolovat
+aktualizace…“ (na Macu v menu Blanketa, jinde v menu Nápověda) zjistí novou verzi i při vypnutých kontrolách a řekne,
+zda máte nejnovější.
+
+### Instalace z aplikace
+
+„Aktualizovat“ stáhne novou verzi a ověří ji podle vlastního podpisu projektu: vydání obsahuje seznam kontrolních
+součtů podepsaný klíčem projektu a Blanketa nainstaluje jen soubor, který s ním sedí (podrobnosti v
+[docs/update-signing.md](docs/update-signing.md)). Verze se pak nainstaluje, až zavřete poslední okno Blankety, nebo hned
+tlačítkem „Restartovat teď“. Hned to nejde, dokud je v některém dokumentu neuložená změna nebo dokud je otevřené další
+okno či proces Blankety; Blanketa to řekne a nainstaluje se po zavření posledního okna.
+
+Kde to funguje:
+
+- macOS: aplikace ve složce Aplikace. Z obrazu disku ani ze složky Stažené soubory aktualizovat nejde, Blanketa vás
+  vyzve, ať ji přesunete do Aplikací a otevřete znovu.
+- Windows: instalovaná i přenosná verze.
+- Linux: archiv nainstalovaný přes `install.sh`. Balíček `.deb` se aktualizuje ručně jako dosud
+  (`sudo apt install ./blanketa_<verze>_amd64.deb`).
+
+Když se instalace nepodaří, zůstane předchozí verze a Blanketa to při dalším spuštění oznámí. Na Macu se po aktualizaci
+může Blanketa znovu zeptat na přístup ke klíči v Klíčence, stejně jako po ruční instalaci, protože se změní podpis
+aplikace. Verze 0.4.0 a starší se samy neaktualizují; stáhněte si novou verzi jednou ručně.
+
+Co se odesílá: totéž co při kontrole nové verze a navíc stažení souborů z github.com a ze serverů, ze kterých GitHub
+vydává přílohy vydání. Nic o dokumentech ani certifikátech se neposílá.
 
 ## Stažení a instalace
 
@@ -90,7 +114,7 @@ Blanketa není podepsaná certifikátem vydavatele: na Macu není notarizovaná 
 2. Otevřete nabídku Apple → Nastavení systému → Soukromí a zabezpečení a sjeďte dolů k části Zabezpečení.
 3. U zprávy o zablokované Blanketě klikněte na „Přesto otevřít“. Systém se zeptá ještě jednou a vyžádá heslo nebo Touch ID; potvrďte volbou „Otevřít“. Tlačítko „Přesto otevřít“ je v nastavení asi hodinu od pokusu o otevření; když zmizí, otevřete Blanketu znovu.
 
-Stačí to udělat jednou, příště se Blanketa otevře rovnou. Po instalaci nové verze Blankety je potřeba postup zopakovat. Na macOS 14 a starším stačí kliknout na Blanketu pravým tlačítkem, zvolit Otevřít a potvrdit.
+Stačí to udělat jednou, příště se Blanketa otevře rovnou. Po ruční instalaci nové verze Blankety je potřeba postup zopakovat. Na macOS 14 a starším stačí kliknout na Blanketu pravým tlačítkem, zvolit Otevřít a potvrdit.
 
 ### První spuštění na Windows
 
