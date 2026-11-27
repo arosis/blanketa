@@ -856,8 +856,8 @@ class Handler(BaseHTTPRequestHandler):
         answers = {
             "check": lambda: update_check.check_now(APP_VERSION),
             "download": lambda: update_install.start_download(APP_VERSION),
-            "progress": update_install.progress,
-            "cancel": update_install.cancel,
+            "progress": lambda: update_install.progress(APP_VERSION),
+            "cancel": lambda: update_install.cancel(APP_VERSION),
         }
         action = next((name for name in answers if request == {"action": name}), None)
         if action is None:

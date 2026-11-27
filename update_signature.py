@@ -32,11 +32,11 @@ def manifest(version: str, folder: Path) -> bytes:
         path = Path(folder) / template.format(version=version)
         if not path.is_file():
             raise ValueError(f"Release file missing: {path.name}")
-        files[path.name] = {"platform": platform, "sha256": _digest(path)}
+        files[path.name] = {"platform": platform, "sha256": file_digest(path)}
     return json.dumps({"version": version, "files": files}, sort_keys=True, separators=(",", ":")).encode()
 
 
-def _digest(path: Path) -> str:
+def file_digest(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
         for block in iter(lambda: stream.read(1 << 20), b""):

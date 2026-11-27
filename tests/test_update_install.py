@@ -1,4 +1,6 @@
 import base64
+import email.message
+import hashlib
 import http.client
 import io
 import json
@@ -13,6 +15,7 @@ import threading
 import time
 import unittest
 import urllib.error
+import urllib.request
 import zipfile
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -178,7 +181,8 @@ def tar_bytes(entries):
         for name, content in entries.items():
             info = tarfile.TarInfo(name)
             if isinstance(content, tuple):
-                info.type, info.linkname = tarfile.SYMTYPE, content[1]
+                info.type = tarfile.LNKTYPE if content[0] == "hardlink" else tarfile.SYMTYPE
+                info.linkname = content[1]
                 archive.addfile(info)
             else:
                 info.size = len(content)
@@ -202,12 +206,15 @@ class Answer(io.BytesIO):
         super().__init__(body)
         self.headers = {} if declared_length is None else {"Content-Length": str(declared_length)}
         self.gate = gate
+        self.bytes_read = 0
 
     def read(self, size=-1):
         if self.gate is not None and self.tell() > 0:
             self.gate["reached"].set()
             self.gate["release"].wait(10)
-        return super().read(size)
+        chunk = super().read(size)
+        self.bytes_read += len(chunk)
+        return chunk
 
 
 class FakeRelease:
@@ -216,6 +223,7 @@ class FakeRelease:
         self.lengths = {}
         self.gates = {}
         self.requests = []
+        self.answers = {}
 
     def open(self, request, timeout=None):
         url = request.full_url
@@ -223,7 +231,8 @@ class FakeRelease:
         if url not in self.files:
             raise urllib.error.URLError("Not Found")
         body = self.files[url]
-        return Answer(body, self.lengths.get(url, len(body)), self.gates.get(url))
+        self.answers[url] = Answer(body, self.lengths.get(url, len(body)), self.gates.get(url))
+        return self.answers[url]
 
 
 class Downloads(unittest.TestCase):
@@ -243,8 +252,9 @@ class Downloads(unittest.TestCase):
         for patcher in (
             mock.patch.object(certstore, "config_dir", return_value=self.config),
             mock.patch.object(update_signature, "RELEASE_PUBLIC_KEYS", (public_key,)),
-            mock.patch.object(update_install.public_services, "opener", return_value=self.release),
+            mock.patch.object(update_install, "_update_opener", return_value=self.release),
             mock.patch.object(update_install, "target", side_effect=lambda: self.target()),
+            mock.patch.dict(update_install._state, update_install.IDLE),
         ):
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -278,9 +288,9 @@ class Downloads(unittest.TestCase):
 
     def wait(self):
         deadline = time.monotonic() + 10
-        while update_install.progress()["state"] == "downloading" and time.monotonic() < deadline:
+        while update_install.progress("0.4.0")["state"] == "downloading" and time.monotonic() < deadline:
             time.sleep(0.01)
-        return update_install.progress()
+        return update_install.progress("0.4.0")
 
     def download(self, current="0.4.0"):
         update_install.start_download(current)
@@ -294,7 +304,7 @@ class Downloads(unittest.TestCase):
 
     def assert_refused(self, error):
         self.assertEqual(self.download(), {"state": "failed", "version": "0.5.0", "percent": None, "error": error})
-        self.assertIsNone(update_install.ready())
+        self.assertIsNone(update_install.ready("0.4.0"))
         self.assertEqual(self.leftovers(), [])
 
 
@@ -312,17 +322,22 @@ class VerifiedDownload(Downloads):
                 self.kind = kind
                 self.publish()
                 self.assertEqual(self.download()["state"], "ready")
-                ready = update_install.ready()
+                ready = update_install.ready("0.4.0")
                 expected_staged = (update_install.updates_dir() / "0.5.0/Blanketa-0.5.0-setup.exe" if staged is None
                                    else self.apps / staged)
-                self.assertEqual(ready, {"version": "0.5.0", "kind": kind, "app": str(self.target()["app"]),
-                                         "staged": str(expected_staged), "all_users": False})
+                expected = {"version": "0.5.0", "kind": kind, "app": str(self.target()["app"]),
+                            "staged": str(expected_staged), "all_users": False}
+                if staged is None:
+                    expected["sha256"] = hashlib.sha256(b"setup").hexdigest()
+                self.assertEqual(ready, expected)
                 self.assertTrue(expected_staged.exists())
                 if kind in STAGED_APP_FILES:
                     self.assertTrue((expected_staged.parent / STAGED_APP_FILES[kind]).is_file())
                 self.assertEqual(list(update_install.updates_dir().rglob("*.part")), [])
-                self.assertEqual(update_install.progress(),
+                self.assertEqual(update_install.progress("0.4.0"),
                                  {"state": "ready", "version": "0.5.0", "percent": 100, "error": None})
+                (update_install.updates_dir() / "ready.json").unlink()
+                self.assertEqual(update_install.progress("0.4.0"), update_install.IDLE)
 
     def test_requests_only_the_release_files_for_this_kind(self):
         prefix = self.publish()
@@ -345,7 +360,7 @@ class VerifiedDownload(Downloads):
         self.assertEqual(self.wait()["version"], "0.6.0")
         self.assertFalse((update_install.updates_dir() / "0.5.0").exists())
         self.assertFalse((self.apps / ".blanketa-update-0.5.0").exists())
-        self.assertEqual(update_install.ready()["version"], "0.6.0")
+        self.assertEqual(update_install.ready("0.4.0")["version"], "0.6.0")
 
 
 class Refused(Downloads):
@@ -379,7 +394,7 @@ class Refused(Downloads):
         self.publish("0.5.0")
         for current in ("0.5.0", "0.6.0"):
             with self.subTest(current=current):
-                self.assertEqual(self.download(current)["state"], "failed")
+                self.assertEqual(self.download(current), update_install.IDLE)
         self.assertEqual(self.release.requests, [])
 
     def test_file_listed_under_another_platform_is_refused(self):
@@ -422,6 +437,32 @@ class Refused(Downloads):
         self.release.lengths[url] = len(self.release.files[url]) + 100
         self.assert_refused("download")
 
+    def test_impossible_declared_length_is_refused_before_reading(self):
+        for length in (-1, update_install.MAX_DOWNLOAD_BYTES + 1):
+            with self.subTest(length=length):
+                self.publish()
+                self.release.lengths[self.archive_url()] = length
+                self.assert_refused("download")
+                self.assertEqual(self.release.answers[self.archive_url()].bytes_read, 0)
+
+    def test_bytes_changed_on_disk_after_download_are_refused(self):
+        self.publish()
+        report_percent = update_install._report_percent
+
+        def tamper(received, length):
+            for partial in update_install.updates_dir().rglob("*.part"):
+                with partial.open("ab") as stream:
+                    stream.write(b"x" * 100_000)
+            report_percent(received, length)
+
+        with mock.patch.object(update_install, "_report_percent", tamper):
+            self.assert_refused("verify")
+
+    def test_unexpected_failure_never_leaves_the_state_downloading(self):
+        self.publish()
+        with mock.patch.object(update_install, "_outcome", side_effect=RuntimeError):
+            self.assertEqual(self.download(), {"state": "failed", "version": "0.5.0", "percent": None, "error": "download"})
+
     def test_missing_file_or_network_failure_fails_cleanly(self):
         self.publish()
         del self.release.files[self.archive_url()]
@@ -459,6 +500,7 @@ class EscapingArchive(Downloads):
             "absolute": {**app_file, "/tmp/x": b"x"},
             "symlink out": {**app_file, "Blanketa/link": ("link", "../../outside")},
             "absolute symlink": {**app_file, "Blanketa/link": ("link", "/etc")},
+            "hardlink out": {**app_file, "Blanketa/link": ("hardlink", "../../outside")},
         }
         zip_file = {"Blanketa/Blanketa.exe": b"exe"}
         zip_cases = {
@@ -466,6 +508,8 @@ class EscapingArchive(Downloads):
             "backslash parent": {**zip_file, "..\\x": b"x"},
             "absolute": {**zip_file, "/tmp/x": b"x"},
             "drive": {**zip_file, "C:/x": b"x"},
+            "drive relative": {**zip_file, "C:x": b"x"},
+            "network share": {**zip_file, "\\\\server\\share\\x": b"x"},
             "symlink out": {**zip_file, "Blanketa/link": ("link", "../../outside")},
         }
         for kind, platform, cases in (("linux-folder", "linux", tar_cases), ("windows-portable", "windows-portable", zip_cases)):
@@ -512,6 +556,86 @@ class EscapingArchive(Downloads):
             update_install.refuse_links_out_of(staged)
 
 
+def write_ready(updates, apps, version="0.5.0", staged=None):
+    staged = staged or apps / ".blanketa-update-0.5.0/Blanketa"
+    staged.mkdir(parents=True, exist_ok=True)
+    record = {"version": version, "kind": "linux-folder", "app": str(apps / "blanketa"), "staged": str(staged), "all_users": False}
+    (updates / "ready.json").write_text(json.dumps(record))
+    return record
+
+
+class ReadyRecord(Downloads):
+    def test_ready_update_is_read_back(self):
+        updates = update_install.updates_dir()
+        updates.mkdir(parents=True)
+        record = write_ready(updates, self.apps)
+        self.assertEqual(update_install.ready("0.4.0"), record)
+
+    def test_stale_ready_record_is_ignored_and_deleted(self):
+        updates = update_install.updates_dir()
+        updates.mkdir(parents=True)
+        for current in ("0.5.0", "0.6.0", "x"):
+            with self.subTest(current=current):
+                write_ready(updates, self.apps)
+                self.assertIsNone(update_install.ready(current))
+                self.assertFalse((updates / "ready.json").exists())
+        write_ready(updates, self.apps)
+        shutil.rmtree(self.apps / ".blanketa-update-0.5.0")
+        self.assertIsNone(update_install.ready("0.4.0"))
+        self.assertFalse((updates / "ready.json").exists())
+
+    def test_setup_record_needs_its_digest(self):
+        updates = update_install.updates_dir()
+        updates.mkdir(parents=True)
+        setup = updates / "Blanketa-0.5.0-setup.exe"
+        setup.write_bytes(b"setup")
+        record = {"version": "0.5.0", "kind": "windows-setup", "app": "/pf/Blanketa", "staged": str(setup), "all_users": True}
+        (updates / "ready.json").write_text(json.dumps(record))
+        self.assertIsNone(update_install.ready("0.4.0"))
+        record["sha256"] = hashlib.sha256(b"setup").hexdigest()
+        (updates / "ready.json").write_text(json.dumps(record))
+        self.assertEqual(update_install.ready("0.4.0"), record)
+
+
+class AssetRedirects(unittest.TestCase):
+    RELEASE_URL = "https://github.com/arosis/blanketa/releases/download/v0.5.0/blanketa-0.5.0-linux-amd64.tar.gz"
+
+    def redirect(self, request, location):
+        handler = next(h for h in update_install._update_opener().handlers if isinstance(h, urllib.request.HTTPRedirectHandler))
+        followed = []
+        handler.parent = mock.Mock(open=lambda new, timeout=None: followed.append(new) or new)
+        headers = email.message.Message()
+        headers["Location"] = location
+        request.timeout = None
+        handler.http_error_302(request, io.BytesIO(), 302, "Found", headers)
+        return followed
+
+    def test_redirect_to_the_release_asset_hosts_is_followed(self):
+        for host in ("release-assets.githubusercontent.com", "objects.githubusercontent.com"):
+            with self.subTest(host=host):
+                followed = self.redirect(urllib.request.Request(self.RELEASE_URL), f"https://{host}/github/1?sig=x")
+                self.assertEqual([request.full_url for request in followed], [f"https://{host}/github/1?sig=x"])
+
+    def test_other_redirects_are_refused(self):
+        for location in ("http://objects.githubusercontent.com/x", "https://example.com/x",
+                         "https://objects.githubusercontent.com.example.com/x", "https://user@objects.githubusercontent.com/x",
+                         "https://objects.githubusercontent.com:8443/x", "/arosis/other/x"):
+            with self.subTest(location=location):
+                with self.assertRaises(urllib.error.HTTPError):
+                    self.redirect(urllib.request.Request(self.RELEASE_URL), location)
+
+    def test_fourth_hop_is_refused(self):
+        request = urllib.request.Request(self.RELEASE_URL)
+        for hop in range(update_install.MAX_REDIRECTS):
+            request = self.redirect(request, f"https://objects.githubusercontent.com/{hop}")[0]
+        with self.assertRaises(urllib.error.HTTPError):
+            self.redirect(request, "https://objects.githubusercontent.com/last")
+
+    def test_other_services_still_refuse_redirects(self):
+        handlers = update_install.public_services.opener().handlers
+        self.assertFalse(any(isinstance(h, update_install._ReleaseAssetRedirects) for h in handlers))
+
+
 class OneDownloadAtATime(Downloads):
     def hold(self, url):
         gate = {"reached": threading.Event(), "release": threading.Event()}
@@ -538,9 +662,9 @@ class OneDownloadAtATime(Downloads):
         self.addCleanup((updates / "download.lock").unlink)
         self.assertEqual(update_install.start_download("0.4.0"),
                          {"state": "downloading", "version": "0.5.0", "percent": 40, "error": None})
-        self.assertEqual(update_install.progress()["percent"], 40)
+        self.assertEqual(update_install.progress("0.4.0")["percent"], 40)
         self.assertEqual(self.release.requests, [])
-        self.assertEqual(update_install.cancel()["state"], "downloading")
+        self.assertEqual(update_install.cancel("0.4.0")["state"], "downloading")
         self.assertTrue((updates / "download.lock").exists())
 
     def test_stale_lock_of_dead_process_is_taken_over(self):
@@ -569,6 +693,27 @@ class OneDownloadAtATime(Downloads):
                 os.utime(updates / "download.lock", (0, 0))
                 self.assertEqual(self.download()["state"], "ready")
 
+    def test_unreadable_lock_is_respected_and_kept(self):
+        self.publish()
+        lock = update_install.updates_dir() / "download.lock"
+        lock.mkdir(parents=True)
+        self.addCleanup(lock.rmdir)
+        self.assertEqual(update_install.start_download("0.4.0")["state"], "downloading")
+        self.assertTrue(lock.is_dir())
+        self.assertEqual(self.release.requests, [])
+
+    def test_failed_download_does_not_hide_another_process_or_a_ready_update(self):
+        self.publish()
+        self.release.files[self.archive_url()] = b"other"
+        self.assertEqual(self.download()["error"], "verify")
+        updates = update_install.updates_dir()
+        (updates / "download.lock").write_text(json.dumps({"pid": os.getppid(), "version": "0.5.0", "percent": 7}))
+        self.assertEqual(update_install.progress("0.4.0")["state"], "downloading")
+        (updates / "download.lock").unlink()
+        self.assertEqual(update_install.progress("0.4.0")["state"], "failed")
+        write_ready(updates, self.apps)
+        self.assertEqual(update_install.progress("0.4.0")["state"], "ready")
+
     def test_lock_being_written_by_another_process_is_respected(self):
         self.publish()
         updates = update_install.updates_dir()
@@ -585,9 +730,9 @@ class OneDownloadAtATime(Downloads):
         self.assertTrue(gate["reached"].wait(10))
         self.assertTrue(list(update_install.updates_dir().rglob("*.part")))
         threading.Timer(0.1, gate["release"].set).start()
-        self.assertEqual(update_install.cancel(), {"state": "idle", "version": None, "percent": None, "error": None})
+        self.assertEqual(update_install.cancel("0.4.0"), {"state": "idle", "version": None, "percent": None, "error": None})
         self.assertEqual(self.leftovers(), [])
-        self.assertIsNone(update_install.ready())
+        self.assertIsNone(update_install.ready("0.4.0"))
 
     def test_progress_counts_the_percent_of_the_file(self):
         self.publish()
@@ -595,7 +740,7 @@ class OneDownloadAtATime(Downloads):
         with mock.patch.object(update_install, "BYTES_PER_READ", 16):
             update_install.start_download("0.4.0")
             self.assertTrue(gate["reached"].wait(10))
-            percent = update_install.progress()["percent"]
+            percent = update_install.progress("0.4.0")["percent"]
             gate["release"].set()
             self.wait()
         self.assertGreater(percent, 0)
@@ -608,13 +753,13 @@ class OneDownloadAtATime(Downloads):
         gate = self.hold(url)
         update_install.start_download("0.4.0")
         self.assertTrue(gate["reached"].wait(10))
-        self.assertIsNone(update_install.progress()["percent"])
+        self.assertIsNone(update_install.progress("0.4.0")["percent"])
         gate["release"].set()
         self.assertEqual(self.wait()["state"], "ready")
 
     def test_nothing_downloaded_is_idle(self):
-        self.assertEqual(update_install.progress(), {"state": "idle", "version": None, "percent": None, "error": None})
-        self.assertEqual(update_install.cancel()["state"], "idle")
+        self.assertEqual(update_install.progress("0.4.0"), {"state": "idle", "version": None, "percent": None, "error": None})
+        self.assertEqual(update_install.cancel("0.4.0")["state"], "idle")
 
 
 class Route(Downloads):
@@ -642,7 +787,7 @@ class Route(Downloads):
         self.assertEqual(json.loads(self.post(b'{"action": "progress"}')[1])["state"], "ready")
         with mock.patch.object(update_install, "cancel", return_value={"state": "idle"}) as cancelled:
             self.assertEqual(json.loads(self.post(b'{"action": "cancel"}')[1]), {"state": "idle"})
-        cancelled.assert_called_once_with()
+        cancelled.assert_called_once_with(app.APP_VERSION)
 
     def test_route_refuses_unknown_actions(self):
         for body in (b'{"action": "install"}', b'{"action": "download", "url": "https://example.com/x"}',

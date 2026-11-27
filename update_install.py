@@ -1,5 +1,4 @@
 import contextlib
-import hashlib
 import json
 import os
 import posixpath
@@ -11,9 +10,11 @@ import sys
 import tarfile
 import threading
 import time
+import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from urllib.parse import urlsplit
 
 import certstore
 import public_services
@@ -38,12 +39,16 @@ SECONDS_TO_WRITE_A_LOCK = 10
 SECONDS_TO_WAIT_FOR_CANCEL = SECONDS_PER_READ + 5
 BYTES_PER_READ = 1 << 16
 MAX_DOWNLOAD_BYTES = 1 << 30
+MAX_REDIRECTS = 3
+RELEASE_ASSET_HOSTS = ("release-assets.githubusercontent.com", "objects.githubusercontent.com")
+READY_FIELDS = {"version", "kind", "app", "staged", "all_users"}
 
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 ERROR_ACCESS_DENIED = 5
 STILL_ACTIVE = 259
 
 IDLE = {"state": "idle", "version": None, "percent": None, "error": None}
+LOCK_BEING_WRITTEN = {"pid": None, "version": None, "percent": None}
 
 _RELEASE_VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 _STAGING_FOLDER = re.compile(r"\.[Bb]lanketa-update-[0-9]+\.[0-9]+\.[0-9]+")
@@ -59,6 +64,20 @@ class _Refused(ValueError):
 
 class _Cancelled(Exception):
     pass
+
+
+class _ReleaseAssetRedirects(urllib.request.HTTPRedirectHandler):
+    max_redirections = MAX_REDIRECTS
+
+    def redirect_request(self, request, fp, code, msg, headers, new_url):
+        if not _is_release_asset_host(new_url):
+            raise urllib.error.HTTPError(request.full_url, code, "Redirect leaves the release asset hosts", headers, fp)
+        return super().redirect_request(request, fp, code, msg, headers, new_url)
+
+
+def _is_release_asset_host(url):
+    parts = urlsplit(url)
+    return parts.scheme == "https" and parts.netloc in RELEASE_ASSET_HOSTS
 
 
 def updates_dir():
@@ -123,11 +142,15 @@ def start_download(current):
     with _guard:
         if _worker is not None and _worker.is_alive():
             return dict(_state)
-        plan = _plan(current)
+        latest = update_check._latest(update_check._stored())
+        if latest is None or not update_check._is_newer(latest, current):
+            _state.update(IDLE)
+            return dict(_state)
+        plan = _plan(latest)
         if plan is None:
             _state.update(IDLE, state="failed", error="download")
             return dict(_state)
-        found = ready()
+        found = ready(current)
         if found is not None and _same_update(found, plan):
             return _ready_progress(found)
         holder = _other_holder()
@@ -148,41 +171,56 @@ def start_download(current):
         return dict(_state)
 
 
-def progress():
+def progress(current):
     with _guard:
         local = dict(_state)
-    if local["state"] in ("downloading", "failed"):
+    if local["state"] == "downloading":
         return local
     holder = _other_holder()
     if holder is not None:
         return _holder_progress(holder)
-    found = ready()
-    return _ready_progress(found) if found is not None else dict(IDLE)
+    found = ready(current)
+    if found is not None:
+        return _ready_progress(found)
+    return local if local["state"] == "failed" else dict(IDLE)
 
 
-def cancel():
+def cancel(current):
     with _guard:
         worker = _worker
     if worker is not None and worker.is_alive():
         _cancelled.set()
         worker.join(SECONDS_TO_WAIT_FOR_CANCEL)
-    return progress()
+    return progress(current)
 
 
-def ready():
+def ready(current):
+    path = updates_dir() / READY_FILE
     try:
-        record = json.loads((updates_dir() / READY_FILE).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        record = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
         return None
-    is_valid = (
-        isinstance(record, dict)
-        and set(record) == {"version", "kind", "app", "staged", "all_users"}
-        and isinstance(record["version"], str) and _RELEASE_VERSION.fullmatch(record["version"])
-        and record["kind"] in KIND_FILES
-        and isinstance(record["app"], str) and isinstance(record["staged"], str)
+    except (OSError, ValueError):
+        record = None
+    if not _is_usable_ready_record(record, current):
+        _remove(path)
+        return None
+    return record
+
+
+def _is_usable_ready_record(record, current):
+    if not isinstance(record, dict) or record.get("kind") not in KIND_FILES:
+        return False
+    fields = READY_FIELDS | {"sha256"} if record["kind"] == "windows-setup" else READY_FIELDS
+    version, running = update_check.version_tuple(record.get("version")), update_check.version_tuple(current)
+    return (
+        set(record) == fields
+        and isinstance(record["version"], str) and _RELEASE_VERSION.fullmatch(record["version"]) is not None
+        and running is not None and version > running
+        and isinstance(record["app"], str) and isinstance(record["staged"], str) and Path(record["staged"]).exists()
         and isinstance(record["all_users"], bool)
+        and isinstance(record.get("sha256", ""), str)
     )
-    return record if is_valid else None
 
 
 def _same_update(record, plan):
@@ -198,10 +236,9 @@ def _holder_progress(holder):
     return {"state": "downloading", "version": holder.get("version"), "percent": holder.get("percent"), "error": None}
 
 
-def _plan(current):
-    latest = update_check._latest(update_check._stored())
+def _plan(latest):
     destination = target()
-    if latest is None or destination is None or not update_check._is_newer(latest, current):
+    if destination is None:
         return None
     version = latest["version"]
     if not _RELEASE_VERSION.fullmatch(version):
@@ -219,10 +256,13 @@ def _plan(current):
 
 
 def _download_in_background(plan):
-    outcome = _outcome(plan)
-    _release_lock()
-    with _guard:
-        _state.update(outcome)
+    outcome = {**IDLE, "state": "failed", "version": plan["version"], "error": "download"}
+    try:
+        outcome = _outcome(plan)
+        _release_lock()
+    finally:
+        with _guard:
+            _state.update(outcome)
 
 
 def _outcome(plan):
@@ -260,13 +300,20 @@ def _download_verify_and_stage(plan):
     staged = _stage(destination["kind"], downloaded, _staging_folder(destination, plan["version"]))
     if _cancelled.is_set():
         raise _Cancelled
-    return {"version": plan["version"], "kind": destination["kind"], "app": str(destination["app"]),
-            "staged": str(staged), "all_users": destination["all_users"]}
+    record = {"version": plan["version"], "kind": destination["kind"], "app": str(destination["app"]),
+              "staged": str(staged), "all_users": destination["all_users"]}
+    if destination["kind"] == "windows-setup":
+        record["sha256"] = entry["sha256"]
+    return record
+
+
+def _update_opener():
+    return urllib.request.build_opener(_ReleaseAssetRedirects(), urllib.request.HTTPSHandler(context=public_services.tls_context()))
 
 
 def _open(url):
     request = urllib.request.Request(url, headers={"User-Agent": "Blanketa"})
-    return public_services.opener().open(request, timeout=SECONDS_PER_READ)
+    return _update_opener().open(request, timeout=SECONDS_PER_READ)
 
 
 def _download_small(url):
@@ -286,24 +333,24 @@ def _declared_length(answer):
 
 def _download_verified(url, path, sha256):
     partial = path.with_name(path.name + ".part")
-    digest = hashlib.sha256()
     received = 0
     with _open(url) as answer, partial.open("wb") as stream:
         length = _declared_length(answer)
+        if length is not None and not 0 <= length <= MAX_DOWNLOAD_BYTES:
+            raise OSError("Download has an impossible length")
         while chunk := answer.read(BYTES_PER_READ):
             if _cancelled.is_set():
                 raise _Cancelled
             received += len(chunk)
             if received > MAX_DOWNLOAD_BYTES:
                 raise OSError("Download is too large")
-            digest.update(chunk)
             stream.write(chunk)
             _report_percent(received, length)
     if _cancelled.is_set():
         raise _Cancelled
     if length is not None and received != length:
         raise OSError("Download ended early")
-    if digest.hexdigest() != sha256:
+    if update_signature.file_digest(partial) != sha256:
         raise _Refused("Downloaded file has another digest")
     os.replace(partial, path)
     return path
@@ -427,12 +474,14 @@ def _take_lock(version):
 def _read_holder():
     lock = updates_dir() / LOCK_FILE
     try:
-        text = lock.read_text(encoding="utf-8")
+        content = lock.read_bytes()
         age = time.time() - lock.stat().st_mtime
-    except OSError:
+    except (FileNotFoundError, NotADirectoryError):
         return None, None
+    except OSError:
+        return dict(LOCK_BEING_WRITTEN), 0
     try:
-        holder = json.loads(text)
+        holder = json.loads(content)
     except ValueError:
         holder = None
     is_valid = (
@@ -447,7 +496,9 @@ def _other_holder():
     holder, age = _read_holder()
     if holder is None:
         is_being_written = age is not None and age < SECONDS_TO_WRITE_A_LOCK
-        return {"pid": None, "version": None, "percent": None} if is_being_written else None
+        return dict(LOCK_BEING_WRITTEN) if is_being_written else None
+    if holder["pid"] is None:
+        return holder
     if holder["pid"] == os.getpid() or not process_alive(holder["pid"]):
         return None
     return holder
