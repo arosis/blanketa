@@ -16,6 +16,7 @@ SWAP_SH = ROOT / "packaging/update/swap.sh"
 SWAP_PS1 = ROOT / "packaging/update/swap.ps1"
 INNO_SETUP = ROOT / "packaging/windows/blanketa.iss"
 POWERSHELL = shutil.which("powershell") or shutil.which("pwsh")
+IS_WINDOWS_WITH_POWERSHELL = sys.platform == "win32" and POWERSHELL is not None
 IS_MAC = sys.platform == "darwin"
 VERSION = "2.0.0"
 SECONDS_FOR_A_SWAP = 30
@@ -176,13 +177,56 @@ class SwapScript(Installation):
         self.assertEqual(len(self.relaunches()), 1)
         self.assertEqual(self.installed(), "old")
 
-    def test_malformed_version_changes_nothing(self):
-        script = subprocess.Popen(["/bin/sh", str(self.helper), str(ended_process_id()), str(self.staged),
-                                   str(self.target), str(self.updates), '1"}', "0"], cwd=self.updates,
+    def run_with(self, *arguments):
+        script = subprocess.Popen(["/bin/sh", str(self.helper), *arguments], cwd=self.updates, env=self.environment,
                                   stderr=subprocess.DEVNULL)
-        self.assertNotEqual(script.wait(timeout=SECONDS_FOR_A_SWAP), 0)
+        return script.wait(timeout=SECONDS_FOR_A_SWAP)
+
+    def assert_untouched(self):
         self.assertEqual(self.installed(), "old")
+        self.assertEqual((self.staged / self.program).read_text(encoding="utf-8"), "new")
+        self.assertTrue((self.updates / "ready.json").exists())
+        self.assertTrue((self.updates / VERSION).exists())
         self.assertFalse((self.updates / "failed.json").exists())
+
+    def test_malformed_version_changes_nothing(self):
+        for version in ('1"}', "..", ".", "1..2", "1.2", "", "1.2.3.4", "1.2.3\n4"):
+            with self.subTest(version=version):
+                code = self.run_with(str(ended_process_id()), str(self.staged), str(self.target), str(self.updates),
+                                     version, "0")
+                self.assertEqual(code, 2)
+                self.assert_untouched()
+
+    def test_relative_paths_change_nothing(self):
+        relative = os.path.relpath(self.target, self.updates)
+        arguments = [str(self.staged), str(self.target), str(self.updates)]
+        for position in range(len(arguments)):
+            with self.subTest(position=position):
+                changed = list(arguments)
+                changed[position] = relative if position == 1 else os.path.relpath(changed[position], self.updates)
+                self.assertEqual(self.run_with(str(ended_process_id()), *changed, VERSION, "0"), 2)
+                self.assert_untouched()
+
+    def test_malformed_process_id_changes_nothing(self):
+        for pid in ("0", "-1", "", "12a"):
+            with self.subTest(pid=pid):
+                code = self.run_with(pid, str(self.staged), str(self.target), str(self.updates), VERSION, "0")
+                self.assertEqual(code, 2)
+                self.assert_untouched()
+
+    def test_relaunch_drops_files_that_are_not_absolute(self):
+        kept = str(self.root / "b.pdf")
+        self.assertEqual(self.swap(relaunch=1, files=["-x", "a.zfo", kept]), 0)
+        expected = ["open", "-a", str(self.target), kept] if IS_MAC else [str(self.target / "Blanketa"), kept]
+        self.assertEqual(self.relaunches(), [expected])
+
+    def test_missing_app_is_restored_from_a_complete_leftover(self):
+        shutil.rmtree(self.target)
+        make_app(self.old_copy(), self.program, "older")
+        self.assertEqual(self.swap(), 1)
+        self.assertEqual(self.installed(), "older")
+        self.assertFalse(self.old_copy().exists())
+        self.assertEqual(self.failed_version(), VERSION)
 
 
 class WindowsScript(Installation):
@@ -203,7 +247,7 @@ class WindowsScript(Installation):
         return script.wait(timeout=SECONDS_FOR_A_SWAP)
 
 
-@unittest.skipUnless(POWERSHELL, "swap.ps1 needs PowerShell")
+@unittest.skipUnless(IS_WINDOWS_WITH_POWERSHELL, "swap.ps1 runs on Windows")
 class PortableSwapOnWindows(WindowsScript):
     def test_swap_replaces_after_the_process_exits(self):
         running = waiting_process()
@@ -252,8 +296,27 @@ class PortableSwapOnWindows(WindowsScript):
         self.assertEqual(self.swap(), 0)
         self.assertEqual(self.relaunches(), [])
 
+    def test_relative_target_changes_nothing(self):
+        self.assertEqual(self.swap(target=os.path.relpath(self.target, self.updates)), 2)
+        self.assertEqual(self.installed(), "old")
+        self.assertTrue((self.updates / "ready.json").exists())
+        self.assertFalse((self.updates / "failed.json").exists())
 
-@unittest.skipUnless(POWERSHELL, "swap.ps1 needs PowerShell")
+    def test_relaunch_drops_files_that_are_not_absolute(self):
+        kept = str(self.root / "b.pdf")
+        self.assertEqual(self.swap("-Relaunch", "a.zfo", kept), 0)
+        self.assertEqual(self.relaunches(), [[str(self.target / "Blanketa.exe"), kept]])
+
+    def test_missing_app_is_restored_from_a_complete_leftover(self):
+        shutil.rmtree(self.target)
+        make_app(self.old_copy(), self.program, "older")
+        self.assertEqual(self.swap(), 1)
+        self.assertEqual(self.installed(), "older")
+        self.assertFalse(self.old_copy().exists())
+        self.assertEqual(self.failed_version(), VERSION)
+
+
+@unittest.skipUnless(IS_WINDOWS_WITH_POWERSHELL, "swap.ps1 runs on Windows")
 class SetupOnWindows(WindowsScript):
     def fake_setup(self, exit_code):
         setup = self.updates / VERSION / "Blanketa-2.0.0-setup.cmd"

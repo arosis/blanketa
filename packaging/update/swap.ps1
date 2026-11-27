@@ -20,6 +20,17 @@ $Program = 'Blanketa.exe'
 $Old = "$Target.old-$Version"
 $Utf8WithoutBom = New-Object System.Text.UTF8Encoding $false
 
+function Test-AbsolutePath([string]$Path) {
+    if ([string]::IsNullOrEmpty($Path) -or $Path.StartsWith('-')) { return $false }
+    try { [System.IO.Path]::IsPathRooted($Path) } catch { $false }
+}
+
+if ($WaitPid -le 0) { exit 2 }
+foreach ($Path in @($Staged, $Target, $UpdatesDir)) {
+    if (-not (Test-AbsolutePath $Path)) { exit 2 }
+}
+$Files = @($Files | Where-Object { Test-AbsolutePath $_ })
+
 function ConvertTo-QuotedArgument([string]$Argument) {
     '"' + ($Argument -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1') + '"'
 }
@@ -40,7 +51,9 @@ function Start-Blanketa {
 }
 
 function Write-Failure {
-    [System.IO.File]::WriteAllText((Join-Path $UpdatesDir 'failed.json'), "{`"version`": `"$Version`"}`n", $Utf8WithoutBom)
+    try {
+        [System.IO.File]::WriteAllText((Join-Path $UpdatesDir 'failed.json'), "{`"version`": `"$Version`"}`n", $Utf8WithoutBom)
+    } catch { }
     Remove-Item -LiteralPath (Join-Path $UpdatesDir 'ready.json') -Force -ErrorAction SilentlyContinue
 }
 
@@ -82,11 +95,15 @@ function Restore-OldApp {
 }
 
 function Install-Portable {
-    if (-not (Test-App $Staged)) { Exit-Failed }
     if (Test-Path -LiteralPath $Old) {
+        if (-not (Test-Path -LiteralPath $Target) -and (Test-App $Old)) {
+            try { [System.IO.Directory]::Move($Old, $Target) } catch { }
+            Exit-Failed
+        }
         if (-not (Test-App $Target)) { Exit-Failed }
         try { Remove-Item -LiteralPath $Old -Recurse -Force } catch { Exit-Failed }
     }
+    if (-not (Test-App $Staged)) { Exit-Failed }
     try { [System.IO.Directory]::Move($Target, $Old) } catch { Exit-Failed }
     try {
         [System.IO.Directory]::Move($Staged, $Target)
@@ -100,11 +117,17 @@ function Install-Portable {
     Exit-Succeeded
 }
 
+function Get-Sha256([System.IO.Stream]$Stream) {
+    $Hasher = [System.Security.Cryptography.SHA256]::Create()
+    try { -join ($Hasher.ComputeHash($Stream) | ForEach-Object { $_.ToString('x2') }) } finally { $Hasher.Dispose() }
+}
+
 function Install-Setup {
     try {
-        $Digest = (Get-FileHash -LiteralPath $Staged -Algorithm SHA256).Hash
+        $Held = New-Object System.IO.FileStream($Staged, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::Read)
     } catch { Exit-Failed }
-    if ($Digest -ne $Sha256) { Exit-Failed }
+    try { $Digest = Get-Sha256 $Held } catch { $Held.Dispose(); Exit-Failed }
+    if ($Digest -ne $Sha256) { $Held.Dispose(); Exit-Failed }
     $Scope = if ($AllUsers) { '/ALLUSERS' } else { '/CURRENTUSER' }
     $Log = Join-Path $UpdatesDir "setup-$Version.log"
     $Start = New-Object System.Diagnostics.ProcessStartInfo
@@ -112,7 +135,7 @@ function Install-Setup {
     $Start.Arguments = "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART $Scope /LOG=$(ConvertTo-QuotedArgument $Log)"
     $Start.UseShellExecute = $false
     try {
-        $Setup = [System.Diagnostics.Process]::Start($Start)
+        try { $Setup = [System.Diagnostics.Process]::Start($Start) } finally { $Held.Dispose() }
         $Setup.WaitForExit()
         $ExitCode = $Setup.ExitCode
     } catch { Exit-Failed }
