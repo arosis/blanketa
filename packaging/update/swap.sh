@@ -52,6 +52,7 @@ fi
 
 relaunch_app() {
   [ "$relaunch" = 1 ] || return 0
+  trap - TERM INT
   if [ "$(uname)" = Darwin ]; then
     if [ "$#" -gt 0 ]; then set -- open -a "$target" "$@"; else set -- open "$target"; fi
   else
@@ -94,6 +95,7 @@ while kill -0 "$pid" 2> /dev/null; do
   polls_left=$((polls_left - 1))
   sleep "$SECONDS_PER_POLL"
 done
+trap '' TERM INT
 
 if [ -e "$old" ]; then
   if [ ! -e "$target" ] && [ -f "$old/$program" ]; then

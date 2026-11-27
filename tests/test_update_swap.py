@@ -237,6 +237,18 @@ class SwapScript(Installation):
         self.assertEqual(self.failed_version(), VERSION)
 
 
+    def test_shutdown_signals_during_the_swap_do_not_leave_the_app_missing(self):
+        shims = self.root / "shims"
+        shims.mkdir()
+        (shims / "mv").write_text(f'#!/bin/sh\nkill -TERM "$PPID"\nkill -INT "$PPID"\nexec {shutil.which("mv")} "$@"\n',
+                                  encoding="utf-8")
+        (shims / "mv").chmod(stat.S_IRWXU)
+        self.environment["PATH"] = f"{shims}{os.pathsep}{self.environment['PATH']}"
+        self.assertEqual(self.swap(), 0)
+        self.assertEqual(self.installed(), "new")
+        self.assertFalse(self.old_copy().exists())
+
+
 class WindowsScript(Installation):
     app_name = "Blanketa"
     program = "Blanketa.exe"
